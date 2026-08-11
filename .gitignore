@@ -7,3 +7,7 @@ obj/
 
 # Local, machine-specific Claude settings (keep the rest of .claude tracked)
 .claude/settings.local.json
+
+# Only README.md is tracked in the repo; other markdown (PLAN.md, notes) stays local
+*.md
+!README.md
