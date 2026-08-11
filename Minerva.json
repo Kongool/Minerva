@@ -1,0 +1,12 @@
+{
+  "Name": "Minerva",
+  "Author": "Aaron",
+  "Punchline": "Don't fail at raid mechanics anymore.",
+  "Description": "Real-time tactical guidance for FFXIV duties: an arena radar showing player and boss positions and imminent AOEs, per-mechanic hints, optional AI automation, and replay-driven, AI-assisted module generation.",
+  "RepoUrl": "",
+  "ApplicableVersion": "any",
+  "Tags": [ "combat", "boss", "dodge", "mechanics", "pve", "raids", "trials", "radar" ],
+  "CategoryTags": [ "utility" ],
+  "LoadRequiredState": 0,
+  "LoadPriority": 0
+}

@@ -1,0 +1,25 @@
+using System;
+using Dalamud.Configuration;
+
+namespace Minerva;
+
+[Serializable]
+public sealed class Configuration : IPluginConfiguration
+{
+    public int Version { get; set; } = 1;
+
+    /// <summary>Master switch for the arena radar overlay (drawn from Phase 3 onward).</summary>
+    public bool RadarEnabled { get; set; } = true;
+
+    /// <summary>Show the auto-dodge target/arrow on the radar (guidance; you still move yourself).</summary>
+    public bool AutoDodgeGuidance { get; set; } = true;
+
+    /// <summary>Actually steer the character to the dodge target. Off by default; needs a movement controller.</summary>
+    public bool AutoDodgeEnabled { get; set; }
+
+    /// <summary>Leave other players (and pets) out of recordings — much smaller, cleaner logs, especially in
+    /// open-field content. Your own character and party are kept. On by default.</summary>
+    public bool RecordExcludeOtherPlayers { get; set; } = true;
+
+    public void Save() => Service.PluginInterface.SavePluginConfig(this);
+}

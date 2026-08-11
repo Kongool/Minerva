@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Minerva.Core is the engine spine: geometry, the WorldState data model, and the
+    replayable Operation pattern. It has NO dependency on Dalamud or FFXIVClientStructs
+    by design, so it can be driven from live game state OR from a synthetic/recorded op
+    stream, and unit-tested with no game running (see Minerva.Tests). This mirrors BMR's
+    guiding principle that WorldState "does not know anything about dalamud".
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Minerva</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.Numerics" />
+    <Using Include="System.Collections" />
+  </ItemGroup>
+
+</Project>

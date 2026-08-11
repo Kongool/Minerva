@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Headless self-test for Minerva.Core: drives a synthetic op stream and asserts the
+       resulting WorldState. Proves the data spine works with no game / no Dalamud. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Minerva.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Minerva.Core\Minerva.Core.csproj" />
+  </ItemGroup>
+
+</Project>

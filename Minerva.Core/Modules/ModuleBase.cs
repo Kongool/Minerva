@@ -1,0 +1,227 @@
+namespace Minerva;
+
+/// <summary>
+/// Base class for an encounter module: owns the arena geometry, the set of active
+/// <see cref="ModuleComponent"/>s, and the associated state machine; subscribes to world events
+/// once and fans them out to components. A concrete boss subclasses this, defines OID/AID enums and
+/// component one-liners, and pairs with a <c>&lt;Name&gt;States</c> <see cref="StateMachineBuilder"/>.
+/// </summary>
+public abstract class ModuleBase : IDisposable
+{
+    public readonly WorldState World;
+    public readonly Actor PrimaryActor;
+    public WPos Center;
+    public ArenaBounds Bounds;
+
+    /// <summary>Set by the renderer each frame before drawing; components draw through it.</summary>
+    public Arena Arena = null!;
+
+    private readonly List<ModuleComponent> components = [];
+    private readonly EventSubscriptions subscriptions;
+    private readonly HashSet<(byte index, uint state)> seenMapEffects = [];
+    private StateMachineBuilder? states;
+    private int currentPhase = -1;
+
+    protected ModuleBase(WorldState world, Actor primary, WPos center, ArenaBounds bounds)
+    {
+        this.World = world;
+        this.PrimaryActor = primary;
+        this.Center = center;
+        this.Bounds = bounds;
+
+        this.subscriptions = new EventSubscriptions(
+            world.Actors.Added.Subscribe(this.OnActorCreated),
+            world.Actors.Removed.Subscribe(this.OnActorDestroyed),
+            world.Actors.IsDeadChanged.Subscribe(a => { if (a.IsDead) this.Dispatch(c => c.OnActorDeath(a)); }),
+            world.Actors.CastStarted.Subscribe(a => { if (a.CastInfo != null) this.Dispatch(c => c.OnCastStarted(a, a.CastInfo)); }),
+            world.Actors.CastFinished.Subscribe((a, cast) => this.Dispatch(c => c.OnCastFinished(a, cast))),
+            world.Actors.CastEvent.Subscribe((a, e) => this.Dispatch(c => c.OnEventCast(a, e))),
+            world.Actors.StatusGain.Subscribe((a, i) => this.Dispatch(c => c.OnStatusGain(a, i))),
+            world.Actors.StatusLose.Subscribe((a, i) => this.Dispatch(c => c.OnStatusLose(a, i))),
+            world.Actors.Tethered.Subscribe(a => this.Dispatch(c => c.OnTethered(a))),
+            world.Actors.Untethered.Subscribe(a => this.Dispatch(c => c.OnUntethered(a))),
+            world.Actors.IconAppeared.Subscribe((a, e) => this.Dispatch(c => c.OnEventIcon(a, e.IconID, e.TargetID))),
+            world.MapEffect.Subscribe(this.OnMapEffectOp));
+    }
+
+    /// <summary>
+    /// Instantiate the paired <c>&lt;Name&gt;States</c> builder (which declares the phases) and enter
+    /// phase 0, activating its components. Later phases are entered by <see cref="Update"/> as their
+    /// transitions fire.
+    /// </summary>
+    public void BuildStates()
+    {
+        var statesTypeName = this.GetType().FullName + "States";
+        var statesType = this.GetType().Assembly.GetType(statesTypeName);
+        if (statesType != null)
+            this.states = (StateMachineBuilder)Activator.CreateInstance(statesType, this)!;
+        this.EnterPhase(0);
+    }
+
+    /// <summary>Zero-based index of the phase currently running, or -1 before the machine starts.</summary>
+    public int CurrentPhase => this.currentPhase;
+
+    // --- phase machine ---
+    private void EnterPhase(int index)
+    {
+        if (this.states == null || index < 0 || index >= this.states.Phases.Count)
+            return;
+        this.currentPhase = index;
+        foreach (var t in this.states.Phases[index].EnterComponents)
+            this.ActivateComponent(t);
+    }
+
+    private void ExitPhase()
+    {
+        if (this.states == null || this.currentPhase < 0 || this.currentPhase >= this.states.Phases.Count)
+            return;
+        foreach (var t in this.states.Phases[this.currentPhase].EnterComponents)
+            this.DeactivateComponent(t);
+    }
+
+    // advance through as many phases as fire this frame (a guard prevents a bad predicate from looping forever)
+    private void AdvancePhase()
+    {
+        if (this.states == null)
+            return;
+        for (var guard = 0; this.currentPhase >= 0 && this.currentPhase < this.states.Phases.Count - 1 && guard < 16; ++guard)
+        {
+            var transition = this.states.Phases[this.currentPhase].Transition;
+            if (transition == null || !transition())
+                break;
+            this.ExitPhase();
+            this.EnterPhase(this.currentPhase + 1);
+        }
+    }
+
+    /// <summary>True if any actor of <paramref name="oid"/> exists in the world and is targetable.</summary>
+    public bool AnyTargetable(uint oid)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.OID == oid && a.IsTargetable && !a.IsDeadOrDestroyed)
+                return true;
+        return false;
+    }
+
+    /// <summary>True once map-effect <paramref name="index"/> has been observed in state <paramref name="state"/>.</summary>
+    public bool SawMapEffect(byte index, uint state) => this.seenMapEffects.Contains((index, state));
+
+    // --- component management ---
+    public T ActivateComponent<T>() where T : ModuleComponent => (T)this.ActivateComponent(typeof(T));
+
+    public ModuleComponent ActivateComponent(Type componentType)
+    {
+        var existing = this.FindComponent(componentType);
+        if (existing != null)
+            return existing;
+        var comp = (ModuleComponent)Activator.CreateInstance(componentType, this)!;
+        this.components.Add(comp);
+        return comp;
+    }
+
+    public void DeactivateComponent<T>() where T : ModuleComponent => this.DeactivateComponent(typeof(T));
+
+    public void DeactivateComponent(Type componentType)
+    {
+        var c = this.FindComponent(componentType);
+        if (c != null)
+            this.components.Remove(c);
+    }
+
+    private ModuleComponent? FindComponent(Type componentType)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            if (componentType.IsInstanceOfType(this.components[i]))
+                return this.components[i];
+        return null;
+    }
+
+    public T? FindComponent<T>() where T : ModuleComponent
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            if (this.components[i] is T t)
+                return t;
+        return null;
+    }
+
+    public IReadOnlyList<ModuleComponent> Components => this.components;
+
+    // --- per-frame ---
+    public void Update()
+    {
+        this.AdvancePhase();
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].Update();
+    }
+
+    public void DrawArena(int pcSlot, Actor pc)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].DrawArenaBackground(pcSlot, pc);
+        this.Arena.DrawBoundary();
+        this.DrawEnemies(pcSlot, pc);
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].DrawArenaForeground(pcSlot, pc);
+    }
+
+    /// <summary>Draw the boss + tracked objects. Override to customise; default draws the primary actor.</summary>
+    protected virtual void DrawEnemies(int pcSlot, Actor pc)
+    {
+        if (!this.PrimaryActor.IsDeadOrDestroyed)
+            this.Arena.ActorMarker(this.PrimaryActor.Position, this.PrimaryActor.Rotation, this.PrimaryActor.HitboxRadius, Colors.Enemy);
+    }
+
+    public void AddGlobalHints(ModuleComponent.GlobalHints hints)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].AddGlobalHints(hints);
+    }
+
+    public void AddHints(int slot, Actor actor, ModuleComponent.TextHints hints)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].AddHints(slot, actor, hints);
+    }
+
+    /// <summary>Populate the auto-dodge hints from every component, for the given player.</summary>
+    public void BuildAIHints(int slot, Actor actor, AIHints hints)
+    {
+        hints.Clear();
+        hints.PlayerPosition = actor.Position;
+        hints.Center = this.Center;
+        hints.Bounds = this.Bounds;
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].AddAIHints(slot, actor, hints);
+    }
+
+    // --- helpers used by components/modules ---
+    public DateTime CastFinishAt(ActorCastInfo cast, float extraDelay = 0f) => this.World.FutureTime(cast.RemainingTime + extraDelay);
+
+    public IEnumerable<Actor> Enemies(uint oid)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.OID == oid && !a.IsDestroyed)
+                yield return a;
+    }
+
+    private void Dispatch(Action<ModuleComponent> action)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            action(this.components[i]);
+    }
+
+    private void OnActorCreated(Actor a) => this.Dispatch(c => c.OnActorCreated(a));
+    private void OnActorDestroyed(Actor a) => this.Dispatch(c => c.OnActorDestroyed(a));
+
+    private void OnMapEffectOp(WorldState.OpMapEffect op)
+    {
+        this.seenMapEffects.Add((op.Index, op.State));
+        this.Dispatch(c => c.OnMapEffect(op.Index, op.State));
+    }
+
+    public void Dispose()
+    {
+        this.subscriptions.Dispose();
+        GC.SuppressFinalize(this);
+    }
+}

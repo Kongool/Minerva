@@ -1,0 +1,29 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+
+  <PropertyGroup>
+    <!-- Dalamud.NET.Sdk sets TargetFramework, references (Dalamud, ImGui,
+         Lumina, Lumina.Excel, FFXIVClientStructs), output path, and the
+         generated plugin manifest for you. Matches the Mercury setup. -->
+    <Version>0.0.1.0</Version>
+    <Authors>Aaron</Authors>
+    <Company></Company>
+    <Description>Real-time boss mechanic guidance, arena radar, automation, and AI-assisted module generation for FFXIV.</Description>
+    <DalamudPunchline>Don't fail at raid mechanics anymore.</DalamudPunchline>
+    <DalamudTags>combat;boss;dodge;mechanics;pve;raids;trials;radar</DalamudTags>
+    <PackageProjectUrl></PackageProjectUrl>
+
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- The plugin project lives at the repo root, so its recursive globs would otherwise
+         swallow the sibling projects' sources. Keep those out of this project. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Minerva.Core\**;Minerva.Tests\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The game-free engine spine (WorldState, Actor, Operation pattern, geometry). -->
+    <ProjectReference Include="Minerva.Core\Minerva.Core.csproj" />
+  </ItemGroup>
+
+</Project>
