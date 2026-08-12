@@ -612,6 +612,15 @@ t.Section("Component library");
     lineStack.AddHints(0, onLine, lsOn);
     t.True("line stack clears a player standing in the line", lsOn.Count == 0);
 
+    // ArenaChange: the bounds swap when a trigger actor spawns
+    var shrinking = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    var arenaChange = new Minerva.Components.ArenaChange(shrinking, new ArenaBoundsCircle(10f), triggerOID: 0xDEAD);
+    t.True("arena unchanged before the trigger", shrinking.Bounds.Radius > 15f);
+    arenaChange.OnActorCreated(new Actor(0xF1, 0xDEAD, 0, "Wall", 0, ActorType.EventObj, new Vector4(0, 0, 0, 0)));
+    t.True("arena change applied on trigger spawn", arenaChange.Applied);
+    t.Near("arena bounds swapped to the new shape", shrinking.Bounds.Radius, 10f);
+    shrinking.Dispose();
+
     // imminent-danger coloring: an AOE about to resolve is drawn brighter than a far-future one
     var now0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     var soon = new AOEInstance(new AOEShapeCircle(5f), new WPos(0, 0), default, now0.AddSeconds(1));

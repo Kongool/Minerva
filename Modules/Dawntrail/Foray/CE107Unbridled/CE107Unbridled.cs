@@ -41,6 +41,31 @@ sealed class Rages(ModuleBase module) : Components.RaidwideCasts(module,
     [(uint)AID.BoilOverVisual, (uint)AID.BoilOver, (uint)AID.ChanneledRageVisual, (uint)AID.ChanneledRage, (uint)AID.HeightenedRageVisual, (uint)AID.HeightenedRage],
     "Raidwide (mitigate)");
 
+// the arena shrinks from its full extent to a 25y circle when the Deathwall spawns
+sealed class Shrink(ModuleBase module) : Components.ArenaChange(module, new ArenaBoundsCircle(25f), triggerOID: (uint)OID.Deathwall);
+
+/// <summary>Boil Over also erupts the arena rim: a 25-30y donut at centre, telegraphed by its cast.</summary>
+sealed class BoilOverRim(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeDonut donut = new(25f, 30f);
+    private readonly System.Collections.Generic.List<AOEInstance> aoes = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.aoes);
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        // only meaningful while the arena is still big; once shrunk to 25y the ring is off-field anyway
+        if (cast.Action.ID == (uint)AID.BoilOverVisual && this.Module.Bounds.Radius > 25f)
+            this.aoes.Add(new AOEInstance(donut, this.Module.Center, default, this.Module.CastFinishAt(cast, 1f), actorID: caster.InstanceID));
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID == (uint)AID.BoilOverVisual)
+            this.aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
+    }
+}
+
 sealed class WhiteHotRage(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.WhiteHotRage, new AOEShapeCircle(6f));
 sealed class ScathingSweep(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScathingSweep, new AOEShapeRect(60f, 30f));
 sealed class HeatedOutburst(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.HeatedOutburst, new AOEShapeCircle(13f));
@@ -87,6 +112,8 @@ sealed class CE107UnbridledStates : StateMachineBuilder
     {
         this.TrivialPhase()
             .ActivateOnEnter<Rages>()
+            .ActivateOnEnter<Shrink>()
+            .ActivateOnEnter<BoilOverRim>()
             .ActivateOnEnter<WhiteHotRage>()
             .ActivateOnEnter<ScathingSweep>()
             .ActivateOnEnter<HeatedOutburst>()
@@ -96,4 +123,4 @@ sealed class CE107UnbridledStates : StateMachineBuilder
 
 [ModuleInfo(CFCID = 1018u, NameID = 35u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE107)")]
 public sealed class CE107Unbridled(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, new WPos(620f, 800f), new ArenaBoundsCircle(25f));
+    : ModuleBase(ws, primary, new WPos(620f, 800f), new ArenaBoundsCircle(29.5f)); // shrinks to 25y via Shrink
