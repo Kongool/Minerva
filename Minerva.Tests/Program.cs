@@ -634,6 +634,12 @@ t.Section("Component library");
     t.Eq("imminent AOE uses the bright colour", Minerva.Components.GenericAOEs.ColorFor(soon, now0), Colors.AOEImminent);
     t.Eq("far-future AOE uses the normal colour", Minerva.Components.GenericAOEs.ColorFor(later, now0), Colors.AOE);
 
+    // ShapeHint -> real AOEShape (drives the no-compile draft preview)
+    var coneShape = new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Cone, Radius: 60f, HalfAngleDeg: 15f).ToShape();
+    t.True("cone hint builds an AOEShapeCone", coneShape is AOEShapeCone { Radius: 60f });
+    t.True("donut hint builds an AOEShapeDonut", new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Donut, Radius: 40f, InnerRadius: 6f).ToShape() is AOEShapeDonut);
+    t.True("unknown hint builds no shape", Minerva.Generation.ShapeHint.Unknown.ToShape() == null);
+
     module.Dispose();
 }
 

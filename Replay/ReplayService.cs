@@ -161,6 +161,43 @@ public sealed class ReplayService : IDisposable
         return ReplayValidator.Validate(timeline, this.Registry).Render(new LuminaNameResolver());
     }
 
+    /// <summary>
+    /// Configure the loaded player to PREVIEW the generated draft — draw each cast's classified shape
+    /// (from game-data resolution) without compiling anything. An approximation of the fixed-shape AOEs.
+    /// </summary>
+    public string BuildPreview()
+    {
+        if (this.Player == null || this.PlaybackPath == null)
+            return "No replay loaded to preview.";
+        this.LastFactSheet = this.Analyze(this.PlaybackPath); // refresh LastInput for the loaded log
+        var input = this.LastInput;
+        if (input == null)
+            return "Could not analyze the recording.";
+
+        var resolver = new LuminaShapeResolver();
+        var shapes = new Dictionary<uint, AOEShape>();
+        foreach (var act in input.Actions)
+        {
+            var hint = resolver.Resolve(act.AID);
+            var shape = hint.ToShape();
+            if (shape == null)
+                continue;
+            // a big self circle is a raidwide the module only hints — don't fill the arena with it
+            if (hint.Kind == ShapeKind.Circle && act.Target == TargetKind.Self && hint.Radius >= 35f)
+                continue;
+            shapes[act.AID] = shape;
+        }
+
+        var c = input.Arena.Center;
+        var half = input.Arena.HalfExtent;
+        ArenaBounds bounds = half <= 0.1f
+            ? new ArenaBoundsSquare(20f)
+            : input.Arena.LooksSquare ? new ArenaBoundsSquare(MathF.Ceiling(half)) : new ArenaBoundsCircle(MathF.Ceiling(half));
+
+        this.Player.SetPreview(shapes, new WPos(c.X, c.Z), bounds);
+        return $"Preview built: {shapes.Count} draft AOE shapes. Play to watch the would-be module.";
+    }
+
     /// <summary>Re-run analysis + generation on the loaded playback log (e.g. after an extractor change).</summary>
     public string RegenerateFromPlayback()
     {

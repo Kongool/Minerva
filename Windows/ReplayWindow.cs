@@ -15,6 +15,7 @@ public sealed class ReplayWindow : Window, IDisposable
     private readonly ReplayService replay;
     private string? generationReport;
     private string? validationReport;
+    private string? previewReport;
 
     public ReplayWindow(ReplayService replay)
         : base("Minerva Replay###MinervaReplay")
@@ -43,6 +44,11 @@ public sealed class ReplayWindow : Window, IDisposable
         if (ImGui.BeginTabItem("Playback"))
         {
             this.DrawPlayback();
+            ImGui.EndTabItem();
+        }
+        if (ImGui.BeginTabItem("Preview draft"))
+        {
+            this.DrawPreview();
             ImGui.EndTabItem();
         }
         if (ImGui.BeginTabItem("Validate"))
@@ -141,6 +147,35 @@ public sealed class ReplayWindow : Window, IDisposable
         if (!string.IsNullOrEmpty(this.generationReport))
             ImGui.TextColored(new Vector4(0.5f, 1f, 0.6f, 1f), this.generationReport);
 
+        DrawArenaCanvas(player);
+    }
+
+    // Preview draft: draw the would-be module's AOEs (each cast's classified shape) without compiling
+    // anything — so you can eyeball a generated draft in-game before adding it to the project.
+    private void DrawPreview()
+    {
+        this.DrawRecordingsPicker();
+
+        var player = this.replay.Player;
+        if (player == null)
+        {
+            ImGui.TextWrapped("No replay loaded. Load or record a fight, then Build preview to draw its " +
+                "generated draft's AOEs over the playback — no compiling needed.");
+            return;
+        }
+
+        if (ImGui.Button("Build preview from draft"))
+            this.previewReport = this.replay.BuildPreview();
+        ImGui.SameLine();
+        if (player.PreviewActive && ImGui.Button("Clear preview"))
+            player.ClearPreview();
+        if (!string.IsNullOrEmpty(this.previewReport))
+            ImGui.TextColored(new Vector4(0.5f, 1f, 0.6f, 1f), this.previewReport);
+        ImGui.TextDisabled("Approximates the draft's fixed-shape AOEs from game data — no compile. Tether/spread/" +
+            "phase logic is simplified; compile the module for the exact behaviour.");
+
+        ImGui.Separator();
+        DrawTransport(player);
         DrawArenaCanvas(player);
     }
 

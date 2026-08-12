@@ -27,6 +27,17 @@ public readonly record struct ShapeHint(
 {
     public static readonly ShapeHint Unknown = new(ShapeKind.Unknown, NeedsReview: true);
 
+    /// <summary>Build the actual <see cref="AOEShape"/> this hint describes, or null if unknown/single-target.</summary>
+    public AOEShape? ToShape() => this.Kind switch
+    {
+        ShapeKind.Circle => new AOEShapeCircle(this.Radius),
+        ShapeKind.Cone => new AOEShapeCone(this.Radius, this.HalfAngleDeg.Degrees()),
+        ShapeKind.Rect => new AOEShapeRect(this.Radius, this.HalfWidth),
+        ShapeKind.Donut => new AOEShapeDonut(this.InnerRadius, this.Radius),
+        ShapeKind.Cross => new AOEShapeCross(this.Radius, this.HalfWidth),
+        _ => null,
+    };
+
     /// <summary>Emit the C# expression constructing the matching <c>AOEShape*</c>, or null if unknown.</summary>
     public string? ToShapeExpression()
     {

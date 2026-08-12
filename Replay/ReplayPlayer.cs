@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Minerva.Radar;
 
@@ -22,6 +23,12 @@ public sealed class ReplayPlayer : IDisposable
     private ModuleBase? module;
     private int opIndex;
     private long cursor;
+
+    // draft-preview state: a per-AID shape map to draw instead of a compiled module (see SetPreview)
+    private Dictionary<uint, AOEShape>? previewShapes;
+    private WPos previewCenter;
+    private ArenaBounds? previewBounds;
+    public bool PreviewActive => this.previewShapes != null;
 
     public bool Playing { get; private set; }
     public float Speed = 1f;
@@ -122,9 +129,25 @@ public sealed class ReplayPlayer : IDisposable
                 }
     }
 
+    /// <summary>Show a generated draft's AOEs without compiling it: map each cast to its classified shape.</summary>
+    public void SetPreview(Dictionary<uint, AOEShape> shapes, WPos center, ArenaBounds bounds)
+    {
+        this.previewShapes = shapes;
+        this.previewCenter = center;
+        this.previewBounds = bounds;
+    }
+
+    public void ClearPreview() => this.previewShapes = null;
+
     /// <summary>Render the current playback frame into a square canvas.</summary>
     public void DrawArena(Vector2 canvasTopLeft, Vector2 canvasSize)
     {
+        if (this.previewShapes != null)
+        {
+            this.DrawPreview(canvasTopLeft, canvasSize);
+            return;
+        }
+
         var pc = this.FindPlayer();
         if (this.module != null)
         {
@@ -179,6 +202,37 @@ public sealed class ReplayPlayer : IDisposable
             this.arena.AddCircle(aim, 3f, Colors.Danger, 2f);
             if (aim != a.Position)
                 this.arena.AddLine(a.Position, aim, Colors.Danger, 1.5f);
+        }
+    }
+
+    // preview: draw each active cast's classified shape (what the generated SimpleAOEs/etc. would draw)
+    private void DrawPreview(Vector2 topLeft, Vector2 size)
+    {
+        this.arena.Center = this.previewCenter;
+        this.arena.Bounds = this.previewBounds!;
+        this.arena.Begin(topLeft, size);
+        this.arena.DrawBoundary();
+
+        foreach (var a in this.world.Actors)
+        {
+            var cast = a.CastInfo;
+            if (cast == null || a.IsDeadOrDestroyed)
+                continue;
+            if (this.previewShapes!.TryGetValue(cast.Action.ID, out var shape))
+            {
+                var origin = cast.LocXZ != default ? cast.LocXZ : a.Position;
+                this.arena.ZoneShape(shape, origin, cast.Rotation, Colors.AOE);
+            }
+        }
+
+        foreach (var a in this.world.Actors)
+        {
+            if (a.IsDeadOrDestroyed)
+                continue;
+            if (a.Type == ActorType.Enemy)
+                this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.Enemy);
+            else if (a.Type == ActorType.Player)
+                this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
         }
     }
 
