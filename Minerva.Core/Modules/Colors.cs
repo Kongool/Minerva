@@ -14,7 +14,7 @@ public static class Colors
     public static readonly uint Safe = RGBA(0, 200, 0, 70);       // translucent green
     public static readonly uint Border = RGBA(255, 255, 255, 255);
     public static readonly uint Shadow = RGBA(0, 0, 0, 200);
-    public static readonly uint PC = RGBA(0, 230, 0, 255);        // local player
+    public static readonly uint PC = RGBA(255, 140, 0, 255);     // local player (orange)
     public static readonly uint Player = RGBA(120, 120, 255, 255);// other party members
     public static readonly uint Enemy = RGBA(255, 0, 255, 255);   // primary/boss actor
     public static readonly uint Object = RGBA(255, 210, 0, 255);  // helpers/objects
