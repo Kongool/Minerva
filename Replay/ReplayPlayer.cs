@@ -17,6 +17,7 @@ public sealed class ReplayPlayer : IDisposable
     private readonly ModuleRegistry registry;
     private readonly ImGuiArena arena = new();
 
+    private readonly AIHints aiHints = new();
     private WorldState world;
     private ModuleBase? module;
     private int opIndex;
@@ -136,6 +137,9 @@ public sealed class ReplayPlayer : IDisposable
             foreach (var a in this.world.Actors)
                 if (a.Type == ActorType.Player && !a.IsDeadOrDestroyed)
                     this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
+
+            if (pc != null)
+                this.DrawSafeSpot(pc); // green "stand here" guidance from the module's active AOEs
             return;
         }
 
@@ -176,6 +180,20 @@ public sealed class ReplayPlayer : IDisposable
             if (aim != a.Position)
                 this.arena.AddLine(a.Position, aim, Colors.Danger, 1.5f);
         }
+    }
+
+    // run the auto-dodge solver on the module's active AOEs and mark the nearest safe cell in green
+    private void DrawSafeSpot(Actor pc)
+    {
+        if (this.module == null)
+            return;
+        this.module.BuildAIHints(0, pc, this.aiHints);
+        var solve = ArenaPathfinder.Solve(this.aiHints, this.world.CurrentTime);
+        if (!solve.NeedToMove || !solve.Found)
+            return;
+        this.arena.AddLine(pc.Position, solve.Target, Colors.Safe, 3f);
+        this.arena.AddCircleFilled(solve.Target, 0.8f, Colors.Safe);
+        this.arena.AddCircle(solve.Target, 0.8f, Colors.PC, 2f);
     }
 
     private Actor? FindPlayer()

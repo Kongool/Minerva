@@ -7,14 +7,14 @@ using Minerva.Replay;
 namespace Minerva.Windows;
 
 /// <summary>
-/// Recording controls + the latest fact sheet. Record a fight here, and on stop the analyzer's
-/// BMR-style OID/AID/status/arena summary appears for copying into a new module (or feeding the
-/// Phase-5 generator).
+/// Recording, playback, and module-validation UI. Record a fight (fact sheet + generation on stop),
+/// watch it back with the matching module active, and validate how well that module covers the fight.
 /// </summary>
 public sealed class ReplayWindow : Window, IDisposable
 {
     private readonly ReplayService replay;
     private string? generationReport;
+    private string? validationReport;
 
     public ReplayWindow(ReplayService replay)
         : base("Minerva Replay###MinervaReplay")
@@ -43,6 +43,11 @@ public sealed class ReplayWindow : Window, IDisposable
         if (ImGui.BeginTabItem("Playback"))
         {
             this.DrawPlayback();
+            ImGui.EndTabItem();
+        }
+        if (ImGui.BeginTabItem("Validate"))
+        {
+            this.DrawValidate();
             ImGui.EndTabItem();
         }
         ImGui.EndTabBar();
@@ -119,31 +124,7 @@ public sealed class ReplayWindow : Window, IDisposable
 
     private void DrawPlayback()
     {
-        if (ImGui.Button("Open folder"))
-            this.replay.OpenFolder();
-        if (this.replay.PlaybackPath != null)
-        {
-            ImGui.SameLine();
-            if (ImGui.Button("Reveal this recording"))
-                this.replay.RevealFile(this.replay.PlaybackPath);
-        }
-
-        // recordings picker — pick any saved recording, so an accidental record toggle can't lose an older one
-        var recordings = this.replay.ListRecordings();
-        if (recordings.Count > 0)
-        {
-            ImGui.TextDisabled("Recording:");
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(-1f);
-            var current = this.replay.PlaybackPath ?? "";
-            if (ImGui.BeginCombo("##recordings", System.IO.Path.GetFileName(current)))
-            {
-                foreach (var path in recordings)
-                    if (ImGui.Selectable(System.IO.Path.GetFileName(path), path == current))
-                        this.replay.LoadPlayback(path);
-                ImGui.EndCombo();
-            }
-        }
+        this.DrawRecordingsPicker();
 
         var player = this.replay.Player;
         if (player == null)
@@ -153,7 +134,75 @@ public sealed class ReplayWindow : Window, IDisposable
             return;
         }
 
-        // transport
+        DrawTransport(player);
+        ImGui.TextDisabled($"{player.ModuleName}   ·   {player.OpCount} ops");
+        if (ImGui.Button("Re-analyze & regenerate module"))
+            this.generationReport = this.replay.RegenerateFromPlayback();
+        if (!string.IsNullOrEmpty(this.generationReport))
+            ImGui.TextColored(new Vector4(0.5f, 1f, 0.6f, 1f), this.generationReport);
+
+        DrawArenaCanvas(player);
+    }
+
+    // Validate: watch the compiled module play the recording (AOEs + green safe-spot) alongside a
+    // coverage report of which enemy casts it draws / hints / ignores.
+    private void DrawValidate()
+    {
+        this.DrawRecordingsPicker();
+
+        var player = this.replay.Player;
+        if (player == null)
+        {
+            ImGui.TextWrapped("No replay loaded. Load or record a fight, then Run validation to see how well " +
+                "its module (compiled into the plugin) covers the mechanics — and watch it play below.");
+            return;
+        }
+
+        if (ImGui.Button("Run validation"))
+            this.validationReport = this.replay.ValidateModule();
+        ImGui.SameLine();
+        ImGui.TextDisabled($"module: {player.ModuleName}");
+
+        if (!string.IsNullOrEmpty(this.validationReport))
+            DrawValidationReport(this.validationReport);
+
+        ImGui.Separator();
+        DrawTransport(player);
+        DrawArenaCanvas(player);
+    }
+
+    // --- shared helpers ---
+
+    private void DrawRecordingsPicker()
+    {
+        if (ImGui.Button("Open folder"))
+            this.replay.OpenFolder();
+        if (this.replay.PlaybackPath != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Reveal this recording"))
+                this.replay.RevealFile(this.replay.PlaybackPath);
+        }
+
+        var recordings = this.replay.ListRecordings();
+        if (recordings.Count == 0)
+            return;
+
+        ImGui.TextDisabled("Recording:");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(-1f);
+        var current = this.replay.PlaybackPath ?? "";
+        if (ImGui.BeginCombo("##recordings", System.IO.Path.GetFileName(current)))
+        {
+            foreach (var path in recordings)
+                if (ImGui.Selectable(System.IO.Path.GetFileName(path), path == current))
+                    this.replay.LoadPlayback(path);
+            ImGui.EndCombo();
+        }
+    }
+
+    private static void DrawTransport(ReplayPlayer player)
+    {
         var playLabel = player.Playing ? "Pause" : player.AtEnd ? "Replay" : "Play";
         if (ImGui.Button(playLabel))
             player.TogglePlay();
@@ -164,22 +213,14 @@ public sealed class ReplayWindow : Window, IDisposable
         ImGui.SetNextItemWidth(140f);
         ImGui.SliderFloat("Speed", ref player.Speed, 0.1f, 4f, "%.1fx");
 
-        // timeline scrubber
         var progress = player.Progress;
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.SliderFloat("##timeline", ref progress, 0f, 1f, $"{player.PositionSeconds:0.0} / {player.DurationSeconds:0.0}s"))
             player.Seek(progress);
+    }
 
-        ImGui.TextDisabled($"{player.ModuleName}   ·   {player.OpCount} ops");
-        if (ImGui.Button("Re-analyze & regenerate module"))
-            this.generationReport = this.replay.RegenerateFromPlayback();
-        ImGui.SameLine();
-        if (ImGui.Button("Validate module vs recording"))
-            this.generationReport = this.replay.ValidateModule();
-        if (!string.IsNullOrEmpty(this.generationReport))
-            ImGui.TextColored(new Vector4(0.5f, 1f, 0.6f, 1f), this.generationReport);
-
-        // arena canvas — a square filling the remaining space
+    private static void DrawArenaCanvas(ReplayPlayer player)
+    {
         var topLeft = ImGui.GetCursorScreenPos();
         var avail = ImGui.GetContentRegionAvail();
         var side = MathF.Min(avail.X, avail.Y);
@@ -188,6 +229,20 @@ public sealed class ReplayWindow : Window, IDisposable
         var size = new Vector2(side, side);
         ImGui.InvisibleButton("##replaycanvas", size);
         player.DrawArena(topLeft, size);
+    }
+
+    private static void DrawValidationReport(string report)
+    {
+        foreach (var raw in report.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.Length == 0)
+                continue;
+            var color = line.Contains("UNCOVERED") ? new Vector4(1f, 0.8f, 0.2f, 1f)      // amber: needs attention
+                : line.TrimStart().StartsWith("drawn") ? new Vector4(0.5f, 1f, 0.6f, 1f)   // green: covered
+                : new Vector4(0.85f, 0.85f, 0.85f, 1f);
+            ImGui.TextColored(color, line);
+        }
     }
 
     public void Dispose()
