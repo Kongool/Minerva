@@ -175,17 +175,32 @@ public sealed class ReplayService : IDisposable
             return "Could not analyze the recording.";
 
         var resolver = new LuminaShapeResolver();
-        var shapes = new Dictionary<uint, AOEShape>();
+        var shapes = new Dictionary<uint, PreviewCast>();
         foreach (var act in input.Actions)
         {
             var hint = resolver.Resolve(act.AID);
+
+            // spread / stack / bait land on the marked player (a circle that follows them)
+            if (act.Target == TargetKind.Player)
+            {
+                if (act.PlayerMechanic is PlayerMechanic.Spread or PlayerMechanic.Stack or PlayerMechanic.Bait)
+                {
+                    var r = hint.Kind == ShapeKind.Circle && hint.Radius > 0f ? hint.Radius : 6f;
+                    shapes[act.AID] = new PreviewCast(new AOEShapeCircle(r), PreviewKind.OnTarget);
+                }
+                continue; // tankbusters have no zone
+            }
+
             var shape = hint.ToShape();
             if (shape == null)
                 continue;
             // a big self circle is a raidwide the module only hints — don't fill the arena with it
             if (hint.Kind == ShapeKind.Circle && act.Target == TargetKind.Self && hint.Radius >= 35f)
                 continue;
-            shapes[act.AID] = shape;
+
+            // a tether-preceded cast erupts on the tethered target, not the caster
+            var kind = act.PrecedingTether != 0 ? PreviewKind.Tether : PreviewKind.Simple;
+            shapes[act.AID] = new PreviewCast(shape, kind, act.PrecedingTether);
         }
 
         var c = input.Arena.Center;

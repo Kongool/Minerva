@@ -5,6 +5,17 @@ using Minerva.Radar;
 
 namespace Minerva.Replay;
 
+/// <summary>How a previewed cast places its shape — mirrors the generator's component choice.</summary>
+public enum PreviewKind
+{
+    Simple,   // fixed shape at the cast location/caster (SimpleAOEs)
+    OnTarget, // circle on the marked player (spread/stack/bait)
+    Tether,   // shape on the tethered target (TetherAOEs), else on the caster
+}
+
+/// <summary>A previewed cast: the shape to draw and how to place it.</summary>
+public readonly record struct PreviewCast(AOEShape Shape, PreviewKind Kind, uint TetherID = 0);
+
 /// <summary>
 /// Drives interactive playback of a recorded fight. It steps a <see cref="ReplayTimeline"/> through a
 /// private <see cref="WorldState"/> on a real-time cursor (play/pause/speed/seek), activating the
@@ -24,8 +35,8 @@ public sealed class ReplayPlayer : IDisposable
     private int opIndex;
     private long cursor;
 
-    // draft-preview state: a per-AID shape map to draw instead of a compiled module (see SetPreview)
-    private Dictionary<uint, AOEShape>? previewShapes;
+    // draft-preview state: a per-AID classified-cast map to draw instead of a compiled module (see SetPreview)
+    private Dictionary<uint, PreviewCast>? previewShapes;
     private WPos previewCenter;
     private ArenaBounds? previewBounds;
     public bool PreviewActive => this.previewShapes != null;
@@ -130,7 +141,7 @@ public sealed class ReplayPlayer : IDisposable
     }
 
     /// <summary>Show a generated draft's AOEs without compiling it: map each cast to its classified shape.</summary>
-    public void SetPreview(Dictionary<uint, AOEShape> shapes, WPos center, ArenaBounds bounds)
+    public void SetPreview(Dictionary<uint, PreviewCast> shapes, WPos center, ArenaBounds bounds)
     {
         this.previewShapes = shapes;
         this.previewCenter = center;
@@ -218,10 +229,22 @@ public sealed class ReplayPlayer : IDisposable
             var cast = a.CastInfo;
             if (cast == null || a.IsDeadOrDestroyed)
                 continue;
-            if (this.previewShapes!.TryGetValue(cast.Action.ID, out var shape))
+            if (!this.previewShapes!.TryGetValue(cast.Action.ID, out var pc))
+                continue;
+            switch (pc.Kind)
             {
-                var origin = cast.LocXZ != default ? cast.LocXZ : a.Position;
-                this.arena.ZoneShape(shape, origin, cast.Rotation, Colors.AOE);
+                case PreviewKind.Simple:
+                    var origin = cast.LocXZ != default ? cast.LocXZ : a.Position;
+                    this.arena.ZoneShape(pc.Shape, origin, cast.Rotation, Colors.AOE);
+                    break;
+                case PreviewKind.OnTarget:
+                    var target = this.world.Actors.Find(cast.TargetID); // spread/stack follows the marked player
+                    if (target != null)
+                        this.arena.ZoneShape(pc.Shape, target.Position, default, Colors.AOE);
+                    break;
+                case PreviewKind.Tether:
+                    this.DrawTetherPreview(a, pc.Shape, pc.TetherID);
+                    break;
             }
         }
 
@@ -234,6 +257,25 @@ public sealed class ReplayPlayer : IDisposable
             else if (a.Type == ActorType.Player)
                 this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
         }
+    }
+
+    // a tether-driven AOE lands on the tethered target(s); if the tether already resolved, it erupts on the caster
+    private void DrawTetherPreview(Actor caster, AOEShape shape, uint tetherID)
+    {
+        var drew = false;
+        foreach (var src in this.world.Actors)
+        {
+            if (src.Tether.ID != tetherID)
+                continue;
+            var tgt = this.world.Actors.Find(src.Tether.Target);
+            if (tgt != null)
+            {
+                this.arena.ZoneShape(shape, tgt.Position, tgt.Rotation, Colors.AOE);
+                drew = true;
+            }
+        }
+        if (!drew)
+            this.arena.ZoneShape(shape, caster.Position, caster.Rotation, Colors.AOE);
     }
 
     // run the auto-dodge solver on the module's active AOEs and mark the nearest safe cell in green

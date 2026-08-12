@@ -171,8 +171,8 @@ public sealed class ReplayWindow : Window, IDisposable
             player.ClearPreview();
         if (!string.IsNullOrEmpty(this.previewReport))
             ImGui.TextColored(new Vector4(0.5f, 1f, 0.6f, 1f), this.previewReport);
-        ImGui.TextDisabled("Approximates the draft's fixed-shape AOEs from game data — no compile. Tether/spread/" +
-            "phase logic is simplified; compile the module for the exact behaviour.");
+        ImGui.TextDisabled("Approximates the draft from game data — no compile: fixed shapes, spread/stack on the " +
+            "marked player, and tether AOEs on the tethered target. Phase logic + custom components need the compiled module.");
 
         ImGui.Separator();
         DrawTransport(player);
