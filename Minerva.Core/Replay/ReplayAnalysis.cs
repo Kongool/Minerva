@@ -23,6 +23,7 @@ public sealed class ReplayAnalysis
     private const float KnockbackMinDistance = 3f; // players must be shoved at least this far to count
     private const float ConcentricOriginEps = 1f;  // same-origin tolerance for a concentric bullseye
     private const double ConcentricMaxGap = 2.5d;  // max seconds between rings of one bullseye
+    private const double ArenaMarkerMinTime = 5d;    // an environment object appearing after this may mark an arena change
     private const double MapEffectPhaseMinTime = 5d; // ignore map effects during fight setup (decorations)
     private const double PhaseCoincidenceWindow = 3d; // a map effect this close to a targetable/HP boundary is the same phase
 
@@ -428,7 +429,9 @@ public sealed class ReplayAnalysis
             var lifetime = info.LastSeen - info.FirstSeen;
             var voidzone = oid != bossOID && info.Casts == 0 && info.HitboxRadius is >= 1f and <= 15f
                 && lifetime >= VoidzoneMinLifetime && info.Type is ActorType.Enemy or ActorType.EventObj;
-            objs.Add(new ObjectFact(oid, info.Name, info.HitboxRadius, info.Count, info.Casts, lifetime, voidzone));
+            // an environment object appearing mid-fight often marks an arena change (wall/deathwall/floor)
+            var arenaMarker = oid != bossOID && info.Type == ActorType.EventObj && info.FirstSeen >= ArenaMarkerMinTime;
+            objs.Add(new ObjectFact(oid, info.Name, info.HitboxRadius, info.Count, info.Casts, lifetime, voidzone, arenaMarker));
         }
 
         var acts = new List<ActionFact>();

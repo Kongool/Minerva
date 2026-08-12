@@ -128,6 +128,18 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
             todos.Add($"{vz}: voidzone radius is an estimate from hitbox");
         }
 
+        // arena-change scaffold: an environment object appeared mid-fight — a replay can't tell us the new
+        // bounds, so emit a commented ArenaChange for the author to fill in, never a fabricated one
+        foreach (var o in input.Objects)
+        {
+            if (!o.IsArenaMarker)
+                continue;
+            components.AppendLine($"// arena may change when '{o.Name}' (OID 0x{o.OID:X}) appears — set the new bounds and uncomment + ActivateOnEnter:");
+            components.AppendLine($"// sealed class Arena{oidMember[o.OID]}(ModuleBase module) : Components.ArenaChange(module, new ArenaBoundsCircle(20f), triggerOID: (uint)OID.{oidMember[o.OID]});");
+            review++;
+            todos.Add($"possible arena change on '{o.Name}' (OID.{oidMember[o.OID]}) — add Components.ArenaChange with the real bounds if the field shrinks/breaks");
+        }
+
         var code = new StringBuilder();
         code.AppendLine(this.Header(input, drawn, special + voidzones, review, todos));
         code.AppendLine("using System;");

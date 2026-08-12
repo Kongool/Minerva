@@ -410,6 +410,10 @@ t.Section("Extractor: correlation, names & phases");
     // a nearby player casting their own ability -> must be ignored (open-field noise)
     Cast(p1, 88888u, boss);                          Adv(1f);
 
+    // an environment object spawning mid-fight -> arena-change scaffold in the draft
+    ws.Execute(new ActorState.OpCreate(0x400000060, 0x1EBD5C, 8, "Deathwall", 0, ActorType.EventObj, new Vector4(35, 0, -95, 0), 0.5f, default, false, false, 0));
+    Adv(1f);
+
     var input = analysis.BuildGenerationInput();
     t.Eq("boss identified from phase timeline", input.BossOID, 0x4190u);
     t.Eq("two phases detected", input.Phases.Count, 2);
@@ -446,6 +450,8 @@ t.Section("Extractor: correlation, names & phases");
     t.True("other players' casts are ignored", !code.Contains("88888"));
     // tether-preceded non-player cast -> a tether-driven AOE component
     t.True("tether-preceded cast -> TetherAOEs", code.Contains("Components.TetherAOEs(module, 55u, (uint)AID.ChainLightning"));
+    // mid-fight environment object -> arena-change scaffold (commented, author fills the bounds)
+    t.True("environment object -> ArenaChange scaffold", code.Contains("Components.ArenaChange") && code.Contains("arena may change"));
     // phases emitted as a real state machine with a transition condition
     t.True("state machine emits named phases", code.Contains("this.Phase(\"P1\")") && code.Contains("this.Phase(\"P2\")"));
     t.True("phase transition keys off the next boss becoming targetable", code.Contains(".TransitionOnTargetable((uint)OID.PrimePunutiy)"));
@@ -760,21 +766,28 @@ t.Section("Replay validation");
     var ops = new List<(long, WorldState.Operation)>();
     void Add(WorldState.Operation op) => ops.Add((t0.Ticks, op));
 
+    const ulong helper = 0x400000802;
     Add(new WorldState.OpFrameStart(new FrameState(t0, 0UL, 0u, 0f, 0f, 1f), TimeSpan.Zero));
     Add(new WorldState.OpZoneChange(1234, 999)); // registered test module is CFC 999
     Add(new ActorState.OpCreate(boss, 0xABCD, 0, "Boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 5f, default, true, false, 0));
+    Add(new ActorState.OpCreate(helper, 0x233C, 1, "", 0, ActorType.Helper, new Vector4(0, 0, 0, 0), 0.5f, default, true, false, 0));
     Add(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(100u), TargetID = boss, TotalTime = 5f })); // TestCircleAOE watches 100 -> drawn
     Add(new ActorState.OpCastInfo(boss, null));
-    Add(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(101u), TargetID = boss, TotalTime = 5f })); // nothing handles 101 -> uncovered
+    Add(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(101u), TargetID = boss, TotalTime = 5f })); // boss self-cast, unhandled -> visual
     Add(new ActorState.OpCastInfo(boss, null));
+    Add(new ActorState.OpCastInfo(helper, new ActorCastInfo { Action = ActionID.MakeSpell(102u), TargetID = helper, TotalTime = 3f })); // helper-cast, unhandled -> likely missed mechanic
+    Add(new ActorState.OpCastInfo(helper, null));
+    Add(new ActorState.OpCreate(0x1EBD5C, 0x1EBD5C, 2, "Wall", 0, ActorType.EventObj, new Vector4(0, 0, 0, 0), 0.5f, default, true, false, 0)); // arena marker
 
     var timeline = new ReplayTimeline { QPF = 10_000_000, GameVersion = "test", Ops = ops };
     var result = ReplayValidator.Validate(timeline, reg);
 
     t.Eq("validation activated the module", result.ModuleName, "RegisteredTestModule");
-    t.Eq("validation counted the enemy actions", result.EnemyActions, 2);
+    t.Eq("validation counted the enemy actions", result.EnemyActions, 3);
     t.True("a cast a component draws -> drawn", result.Drawn.Contains(100u));
-    t.True("a cast nothing handles -> uncovered", result.Uncovered.Contains(101u));
+    t.True("boss self-cast, unhandled -> uncovered visual", result.UncoveredVisuals.Contains(101u));
+    t.True("helper cast, unhandled -> uncovered mechanic (likely missed)", result.UncoveredMechanics.Contains(102u));
+    t.True("environment object spawned -> arena-change warning", result.ArenaNote != null && result.ArenaNote.Contains("⚠"));
     Console.WriteLine("\n--- validation ---\n" + result.Render());
 }
 

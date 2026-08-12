@@ -1,9 +1,9 @@
 namespace Minerva.Generation;
 
-/// <summary>An object id observed in the fight, with lifetime + voidzone candidacy.</summary>
+/// <summary>An object id observed in the fight, with lifetime + voidzone / arena-marker candidacy.</summary>
 public readonly record struct ObjectFact(
     uint OID, string Name, float HitboxRadius, int Count, int Casts,
-    double LifetimeSeconds, bool VoidzoneCandidate);
+    double LifetimeSeconds, bool VoidzoneCandidate, bool IsArenaMarker = false);
 
 /// <summary>How a cast is aimed — decides which component fits.</summary>
 public enum TargetKind

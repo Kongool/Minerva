@@ -238,7 +238,7 @@ public sealed class ReplayWindow : Window, IDisposable
             var line = raw.TrimEnd('\r');
             if (line.Length == 0)
                 continue;
-            var color = line.Contains("UNCOVERED") ? new Vector4(1f, 0.8f, 0.2f, 1f)      // amber: needs attention
+            var color = line.Contains("UNCOVERED") || line.Contains("⚠") ? new Vector4(1f, 0.8f, 0.2f, 1f) // amber: needs attention
                 : line.TrimStart().StartsWith("drawn") ? new Vector4(0.5f, 1f, 0.6f, 1f)   // green: covered
                 : new Vector4(0.85f, 0.85f, 0.85f, 1f);
             ImGui.TextColored(color, line);
