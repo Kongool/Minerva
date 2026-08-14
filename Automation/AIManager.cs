@@ -23,6 +23,9 @@ public sealed class AIManager
     public AIHints Hints => this.hints;
     public bool HasSolution { get; private set; }
 
+    /// <summary>The installed movement controller (real or null-object), for status/diagnostics.</summary>
+    public IMovementController Movement => this.movement;
+
     public AIManager(WorldState world, ModuleManager modules, Configuration config, IMovementController? movement = null)
     {
         this.world = world;

@@ -16,13 +16,21 @@ public sealed class ImGuiArena : Arena
 {
     private ImDrawListPtr draw;
     private Vector2 screenCenter;
+    private Vector2 canvasSize;
     private float scale = 1f;
+
+    /// <summary>
+    /// Screen-space rotation (radians) applied about the arena centre. 0 = north-up (default). Set to
+    /// <c>player.Rotation.Rad + π</c> to make the local player's facing point up ("rotate with character").
+    /// </summary>
+    public float Rotation;
 
     /// <summary>Set the transform for this frame from a canvas rectangle.</summary>
     public void Begin(Vector2 canvasTopLeft, Vector2 canvasSize, float margin = 14f)
     {
         this.draw = ImGui.GetWindowDrawList();
         this.screenCenter = canvasTopLeft + canvasSize * 0.5f;
+        this.canvasSize = canvasSize;
         var half = MathF.Min(canvasSize.X, canvasSize.Y) * 0.5f - margin;
         this.scale = this.Bounds.Radius > 0f ? half / this.Bounds.Radius : 1f;
     }
@@ -30,14 +38,28 @@ public sealed class ImGuiArena : Arena
     private Vector2 W2S(WPos p)
     {
         var o = p - this.Center;
-        return this.screenCenter + new Vector2(o.X, o.Z) * this.scale; // +Z (south) => +Y (down)
+        var x = o.X;
+        var z = o.Z;
+        if (this.Rotation != 0f)
+        {
+            var (sin, cos) = MathF.SinCos(this.Rotation);
+            (x, z) = (x * cos - z * sin, x * sin + z * cos);
+        }
+        return this.screenCenter + new Vector2(x, z) * this.scale; // +Z (south) => +Y (down)
     }
 
     /// <summary>Inverse transform: screen pixel back to a world position (for click-to-place, debug).</summary>
     public WPos ScreenToWorld(Vector2 screen)
     {
         var o = (screen - this.screenCenter) / this.scale;
-        return new WPos(this.Center.X + o.X, this.Center.Z + o.Y);
+        var x = o.X;
+        var z = o.Y;
+        if (this.Rotation != 0f)
+        {
+            var (sin, cos) = MathF.SinCos(this.Rotation);
+            (x, z) = (x * cos + z * sin, -x * sin + z * cos); // transpose = inverse rotation
+        }
+        return new WPos(this.Center.X + x, this.Center.Z + z);
     }
 
     public override void ZoneShape(AOEShape shape, WPos origin, Angle rotation, uint color)
@@ -99,6 +121,36 @@ public sealed class ImGuiArena : Arena
         var inner = this.Bounds.InnerContour(this.Center);
         if (inner != null)
             this.Polyline(inner, Colors.Border, 2f, closed: true); // donut hole
+    }
+
+    /// <summary>
+    /// Paint over everything drawn outside the arena boundary with <paramref name="background"/>, so
+    /// AOE fills that extend past the arena are cut off at the edge (we have no polygon-clipping, so
+    /// this masks rather than clips). Works for any arena that is star-shaped from its centre — every
+    /// shape we use (circle, square, rect, donut, convex polygon): each boundary edge is extruded
+    /// radially outward far enough to cover the canvas, tiling the whole exterior with no corner gaps.
+    /// For a donut it also fills the inner hole. Call after module content, then redraw the boundary.
+    /// </summary>
+    public void ClipOutsideArena(uint background)
+    {
+        const float k = 4f; // radial blow-up factor; boundary sits at ~half-canvas so 4x always clears the corners
+        var contour = this.Bounds.Contour(this.Center);
+        if (contour.Count >= 3)
+        {
+            for (var i = 0; i < contour.Count; ++i)
+            {
+                var a = this.W2S(contour[i]);
+                var b = this.W2S(contour[(i + 1) % contour.Count]);
+                var oa = this.screenCenter + (a - this.screenCenter) * k;
+                var ob = this.screenCenter + (b - this.screenCenter) * k;
+                this.draw.AddTriangleFilled(a, b, ob, background);
+                this.draw.AddTriangleFilled(a, ob, oa, background);
+            }
+        }
+
+        var inner = this.Bounds.InnerContour(this.Center);
+        if (inner != null)
+            this.FillConvex(inner, background); // mask the donut hole too
     }
 
     // --- helpers ---

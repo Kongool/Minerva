@@ -94,6 +94,19 @@ public sealed class RadarWindow : Window, IDisposable
                 ImGui.TextColored(risk ? new Vector4(1f, 0.3f, 0.3f, 1f) : new Vector4(0.8f, 0.8f, 0.8f, 1f), text);
         }
 
+        // auto-move diagnostics: makes it obvious why steering may not be happening
+        if (this.config.AutoDodgeEnabled && this.ai.Movement is MovementController mc)
+        {
+            if (!mc.HookInstalled)
+                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Auto-move: movement hook NOT installed (signature outdated) — check /xllog");
+            else if (mc.Steering)
+                ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Auto-move: steering to safe spot");
+            else if (this.ai.HasSolution && this.ai.Current.NeedToMove && !this.ai.Current.Found)
+                ImGui.TextColored(new Vector4(1f, 0.6f, 0.2f, 1f), "Auto-move: in danger but no safe spot found");
+            else
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Auto-move: idle (no imminent danger to dodge)");
+        }
+
         // arena canvas
         var canvasTopLeft = ImGui.GetCursorScreenPos();
         var canvasSize = ImGui.GetContentRegionAvail();
@@ -105,12 +118,22 @@ public sealed class RadarWindow : Window, IDisposable
 
         this.arena.Center = module.Center;
         this.arena.Bounds = module.Bounds;
+        // heading-up: rotate so the player's facing points up (φ = rotation + π); 0 = north-up
+        this.arena.Rotation = this.config.RotateRadar && pc != null ? pc.Rotation.Rad + MathF.PI : 0f;
         this.arena.Begin(canvasTopLeft, canvasSize);
 
         module.Arena = this.arena;
 
         // draw the local player on top of module content via the foreground pass; module draws the rest
         module.DrawArena(pcSlot, pc ?? module.PrimaryActor);
+
+        // confine danger zones to the field: mask everything past the boundary, then restroke the border
+        if (this.config.ClipToArena)
+        {
+            this.arena.ClipOutsideArena(ImGui.GetColorU32(ImGuiCol.WindowBg) | 0xFF000000u);
+            this.arena.DrawBoundary();
+        }
+
         if (pc != null)
         {
             this.arena.ActorMarker(pc.Position, pc.Rotation, pc.HitboxRadius, Colors.PC);

@@ -67,6 +67,12 @@ public sealed class MainWindow : Window, IDisposable
         var autoHide = cfg.AutoHideRadar;
         if (ImGui.Checkbox("Auto-close radar when the fight ends", ref autoHide)) { cfg.AutoHideRadar = autoHide; changed = true; }
 
+        var clip = cfg.ClipToArena;
+        if (ImGui.Checkbox("Confine AOEs to the arena", ref clip)) { cfg.ClipToArena = clip; changed = true; }
+
+        var rotate = cfg.RotateRadar;
+        if (ImGui.Checkbox("Rotate radar with my character (heading-up)", ref rotate)) { cfg.RotateRadar = rotate; changed = true; }
+
         ImGui.Spacing();
         ImGui.TextUnformatted("Auto-dodge");
         var guidance = cfg.AutoDodgeGuidance;

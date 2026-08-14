@@ -35,6 +35,13 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
     private WPos? target;   // current dodge destination, or null when we shouldn't steer
     private bool legacyMode; // "legacy" control scheme: movement is relative to the camera, not the character
 
+    /// <summary>Whether the walk-input hook resolved and installed. If false, steering can never work
+    /// (signature likely outdated) and auto-move is silently inert — surfaced on the radar for diagnosis.</summary>
+    public bool HookInstalled => this.walkHook != null;
+
+    /// <summary>True on frames where we actually overrode movement input (i.e. steering toward a target).</summary>
+    public bool Steering { get; private set; }
+
     public MovementController()
     {
         try
@@ -68,6 +75,8 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
 
         try
         {
+            this.Steering = false;
+
             // only act on the real input-sampling pass (bAdditiveUnk == 0)
             if (bAdditiveUnk != 0 || this.target is not { } dest)
                 return;
@@ -86,6 +95,7 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
             {
                 *sumLeft = move.X;
                 *sumForward = move.Z;
+                this.Steering = true;
             }
         }
         catch (Exception ex)
