@@ -11,6 +11,13 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Master switch for the arena radar overlay (drawn from Phase 3 onward).</summary>
     public bool RadarEnabled { get; set; } = true;
 
+    /// <summary>Auto-open the radar window when a known boss module activates (BMR-style pull behaviour).</summary>
+    public bool AutoShowRadar { get; set; } = true;
+
+    /// <summary>Auto-close the radar window when the active module tears down (boss dead / left the duty).
+    /// Off by default so the window stays up for post-pull review, matching BMR.</summary>
+    public bool AutoHideRadar { get; set; }
+
     /// <summary>Show the auto-dodge target/arrow on the radar (guidance; you still move yourself).</summary>
     public bool AutoDodgeGuidance { get; set; } = true;
 

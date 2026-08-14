@@ -27,8 +27,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly WorldStateGameSync sync;
     private readonly ModuleManager modules;
+    private readonly MovementController movement;
     private readonly AIManager ai;
     private readonly ReplayService replay;
+    private ModuleBase? lastModule; // tracks the active-module transition for auto-show/hide of the radar
     private readonly WindowSystem windowSystem = new("Minerva");
     private readonly MainWindow mainWindow;
     private readonly WorldStateDebugWindow debugWindow;
@@ -45,7 +47,8 @@ public sealed class Plugin : IDalamudPlugin
         this.World = new WorldState((ulong)Stopwatch.Frequency, "unknown");
         this.sync = new WorldStateGameSync(this.World);
         this.modules = new ModuleManager(this.World);
-        this.ai = new AIManager(this.World, this.modules, this.Config);
+        this.movement = new MovementController();
+        this.ai = new AIManager(this.World, this.modules, this.Config, this.movement);
         this.replay = new ReplayService(this.World, this.Config);
 
         this.mainWindow = new MainWindow(this);
@@ -84,11 +87,37 @@ public sealed class Plugin : IDalamudPlugin
             this.modules.Update();
             this.ai.Update();
             this.replay.UpdatePlayback(framework.UpdateDelta);
+            this.SyncRadarVisibility();
         }
         catch (Exception ex)
         {
             Service.Log.Error(ex, "Minerva sync tick failed.");
         }
+    }
+
+    /// <summary>
+    /// BMR-style pull behaviour: pop the radar open when a boss module activates, and (optionally)
+    /// close it again when the module tears down. Driven off the active-module transition so it fires
+    /// exactly once per pull, and only reacts to the null↔active edges — never fighting a manual toggle
+    /// while a module stays active.
+    /// </summary>
+    private void SyncRadarVisibility()
+    {
+        var current = this.modules.ActiveModule;
+        if (ReferenceEquals(current, this.lastModule))
+            return;
+
+        if (current != null)
+        {
+            if (this.Config.AutoShowRadar)
+                this.radarWindow.IsOpen = true;
+        }
+        else if (this.Config.AutoHideRadar)
+        {
+            this.radarWindow.IsOpen = false;
+        }
+
+        this.lastModule = current;
     }
 
     private void OnCommand(string command, string args)
@@ -136,6 +165,7 @@ public sealed class Plugin : IDalamudPlugin
         this.replayWindow.Dispose();
         this.sandboxWindow.Dispose();
         this.replay.Dispose();
+        this.movement.Dispose();
         this.modules.Dispose();
         this.sync.Dispose();
         Service.CommandManager.RemoveHandler(CommandName);

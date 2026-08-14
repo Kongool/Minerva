@@ -1,6 +1,9 @@
+using System;
 using System.Numerics;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
 
 namespace Minerva.GameSync;
 
@@ -52,6 +55,41 @@ internal static unsafe class GameData
         if (ci == null)
             return false;
         location = ci->TargetLocation;
+        return true;
+    }
+
+    /// <summary>
+    /// Local player's world position and facing (radians, game convention: 0 = south). Object-table
+    /// slot 0 (index-sorted) is the local player. False before the player object exists (e.g. loading).
+    /// Read fresh here rather than from WorldState because the movement hook can fire off-frame.
+    /// </summary>
+    public static bool TryLocalPlayerPose(out Vector3 position, out float rotation)
+    {
+        position = default;
+        rotation = 0f;
+        var mgr = GameObjectManager.Instance();
+        var player = mgr != null ? mgr->Objects.IndexSorted[0].Value : null;
+        if (player == null)
+            return false;
+        position = player->Position;
+        rotation = player->Rotation;
+        return true;
+    }
+
+    /// <summary>
+    /// Active camera's azimuth in radians, derived from its view matrix (needed to steer under the
+    /// "legacy" movement scheme, where forward is relative to the camera rather than the character).
+    /// False when no camera is resolvable.
+    /// </summary>
+    public static bool TryCameraAzimuth(out float azimuth)
+    {
+        azimuth = 0f;
+        var cam = CameraManager.Instance()->GetActiveCamera();
+        var render = cam != null ? cam->SceneCamera.RenderCamera : null;
+        if (render == null)
+            return false;
+        var view = render->ViewMatrix;
+        azimuth = MathF.Atan2(view.M13, view.M33);
         return true;
     }
 }

@@ -59,6 +59,14 @@ public sealed class MainWindow : Window, IDisposable
         var radar = cfg.RadarEnabled;
         if (ImGui.Checkbox("Radar overlay", ref radar)) { cfg.RadarEnabled = radar; changed = true; }
 
+        var autoShow = cfg.AutoShowRadar;
+        if (ImGui.Checkbox("Auto-open radar on pull", ref autoShow)) { cfg.AutoShowRadar = autoShow; changed = true; }
+        ImGui.SameLine();
+        ImGui.TextDisabled("(pops the radar when a known boss module activates)");
+
+        var autoHide = cfg.AutoHideRadar;
+        if (ImGui.Checkbox("Auto-close radar when the fight ends", ref autoHide)) { cfg.AutoHideRadar = autoHide; changed = true; }
+
         ImGui.Spacing();
         ImGui.TextUnformatted("Auto-dodge");
         var guidance = cfg.AutoDodgeGuidance;
@@ -67,7 +75,7 @@ public sealed class MainWindow : Window, IDisposable
         var autoMove = cfg.AutoDodgeEnabled;
         if (ImGui.Checkbox("Auto-move to safe spot", ref autoMove)) { cfg.AutoDodgeEnabled = autoMove; changed = true; }
         ImGui.SameLine();
-        ImGui.TextDisabled("(no movement controller installed — guidance only)");
+        ImGui.TextColored(new Vector4(1f, 0.7f, 0.2f, 1f), "(experimental — steers your character)");
 
         if (changed)
             cfg.Save();
