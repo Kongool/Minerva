@@ -47,7 +47,7 @@ public sealed class Plugin : IDalamudPlugin
         this.World = new WorldState((ulong)Stopwatch.Frequency, "unknown");
         this.sync = new WorldStateGameSync(this.World);
         this.modules = new ModuleManager(this.World);
-        this.movement = new MovementController();
+        this.movement = new MovementController(this.Config);
         this.ai = new AIManager(this.World, this.modules, this.Config, this.movement);
         this.replay = new ReplayService(this.World, this.Config);
 

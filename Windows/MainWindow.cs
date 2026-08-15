@@ -83,6 +83,11 @@ public sealed class MainWindow : Window, IDisposable
         ImGui.SameLine();
         ImGui.TextColored(new Vector4(1f, 0.7f, 0.2f, 1f), "(experimental — steers your character)");
 
+        var useNav = cfg.UseNavmesh;
+        if (ImGui.Checkbox("Use navmesh (Ariadne/vnavmesh) when available", ref useNav)) { cfg.UseNavmesh = useNav; changed = true; }
+        ImGui.SameLine();
+        ImGui.TextDisabled("(paths around walls; falls back to direct steering)");
+
         if (changed)
             cfg.Save();
     }

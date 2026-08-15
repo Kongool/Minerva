@@ -30,6 +30,10 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Actually steer the character to the dodge target. Off by default; needs a movement controller.</summary>
     public bool AutoDodgeEnabled { get; set; }
 
+    /// <summary>When the Ariadne/vnavmesh plugin is loaded, route auto-move through its pathfinding instead
+    /// of the raw walk override (paths around geometry). Falls back to the raw override when it's absent.</summary>
+    public bool UseNavmesh { get; set; } = true;
+
     /// <summary>Leave other players (and pets) out of recordings — much smaller, cleaner logs, especially in
     /// open-field content. Your own character and party are kept. On by default.</summary>
     public bool RecordExcludeOtherPlayers { get; set; } = true;

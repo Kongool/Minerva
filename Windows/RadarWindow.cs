@@ -97,14 +97,15 @@ public sealed class RadarWindow : Window, IDisposable
         // auto-move diagnostics: makes it obvious why steering may not be happening
         if (this.config.AutoDodgeEnabled && this.ai.Movement is MovementController mc)
         {
-            if (!mc.HookInstalled)
-                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Auto-move: movement hook NOT installed (signature outdated) — check /xllog");
-            else if (mc.Steering)
-                ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "Auto-move: steering to safe spot");
+            var backend = mc.NavmeshBackend ?? "direct";
+            if (mc.Steering)
+                ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), $"Auto-move: steering to safe spot ({backend})");
+            else if (!mc.UsingNavmesh && !mc.HookInstalled)
+                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Auto-move: no navmesh and movement hook NOT installed (signature outdated) — check /xllog");
             else if (this.ai.HasSolution && this.ai.Current.NeedToMove && !this.ai.Current.Found)
                 ImGui.TextColored(new Vector4(1f, 0.6f, 0.2f, 1f), "Auto-move: in danger but no safe spot found");
             else
-                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Auto-move: idle (no imminent danger to dodge)");
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), $"Auto-move: idle ({backend}, no imminent danger)");
         }
 
         // arena canvas
