@@ -135,6 +135,14 @@ public sealed class Plugin : IDalamudPlugin
 
     // --- UI actions: shared by the /minerva subcommands and the main-window buttons ---
     public void ToggleRadar() => this.radarWindow.Toggle();
+
+    /// <summary>Open the radar window (if closed) and switch to its Radar tab. Used by the Menu's "Radar"
+    /// button so it never just closes the window it's embedded in.</summary>
+    public void ShowRadar()
+    {
+        this.radarWindow.IsOpen = true;
+        this.radarWindow.SelectTab("Radar");
+    }
     public void ToggleDebug() => this.debugWindow.Toggle();
     public void ToggleMenu() => this.mainWindow.Toggle();
     public void ToggleReplay() => this.replayWindow.Toggle();

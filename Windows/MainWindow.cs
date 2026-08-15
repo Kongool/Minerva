@@ -35,7 +35,7 @@ public sealed class MainWindow : Window, IDisposable
 
         // window/tool toggles — same actions as the /minerva subcommands
         ImGui.TextUnformatted("Windows");
-        if (ImGui.Button("Radar")) this.plugin.ToggleRadar();
+        if (ImGui.Button("Radar")) this.plugin.ShowRadar();
         ImGui.SameLine();
         if (ImGui.Button("Debug inspector")) this.plugin.ToggleDebug();
         ImGui.SameLine();

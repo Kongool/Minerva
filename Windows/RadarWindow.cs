@@ -57,9 +57,21 @@ public sealed class RadarWindow : Window, IDisposable
     /// tab/ID stack stays balanced — an unbalanced stack is what turns a draw bug into a hard crash that
     /// takes the whole plugin down. The exception is shown in-tab and logged once so it can be fixed.
     /// </summary>
+    /// <summary>Programmatically switch to a tab next frame (e.g. from the "Radar" button in the Menu tab).</summary>
+    public void SelectTab(string tab) => this.pendingTab = tab;
+
+    private string? pendingTab;
+
     private void Tab(string label, Action content)
     {
-        if (!ImGui.BeginTabItem(label))
+        var flags = ImGuiTabItemFlags.None;
+        if (this.pendingTab == label)
+        {
+            flags = ImGuiTabItemFlags.SetSelected;
+            this.pendingTab = null;
+        }
+
+        if (!ImGui.BeginTabItem(label, flags))
             return;
         try
         {
