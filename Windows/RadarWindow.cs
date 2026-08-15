@@ -44,27 +44,36 @@ public sealed class RadarWindow : Window, IDisposable
         if (!ImGui.BeginTabBar("###radartabs"))
             return;
 
-        if (ImGui.BeginTabItem("Radar"))
-        {
-            this.DrawRadar();
-            ImGui.EndTabItem();
-        }
-        if (ImGui.BeginTabItem("Menu"))
-        {
-            this.menu.DrawContent();
-            ImGui.EndTabItem();
-        }
-        if (ImGui.BeginTabItem("Replay"))
-        {
-            this.replay.DrawContent();
-            ImGui.EndTabItem();
-        }
-        if (ImGui.BeginTabItem("Debug"))
-        {
-            this.debug.DrawContent();
-            ImGui.EndTabItem();
-        }
+        this.Tab("Radar", this.DrawRadar);
+        this.Tab("Menu", this.menu.DrawContent);
+        this.Tab("Replay", this.replay.DrawContent);
+        this.Tab("Debug", this.debug.DrawContent);
+
         ImGui.EndTabBar();
+    }
+
+    /// <summary>
+    /// Draw one tab with its content guarded. If the content throws, we still run EndTabItem so ImGui's
+    /// tab/ID stack stays balanced — an unbalanced stack is what turns a draw bug into a hard crash that
+    /// takes the whole plugin down. The exception is shown in-tab and logged once so it can be fixed.
+    /// </summary>
+    private void Tab(string label, Action content)
+    {
+        if (!ImGui.BeginTabItem(label))
+            return;
+        try
+        {
+            content();
+        }
+        catch (Exception ex)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), $"{label} draw error: {ex.Message}");
+            Service.Log.Error(ex, $"Minerva: {label} tab draw threw.");
+        }
+        finally
+        {
+            ImGui.EndTabItem();
+        }
     }
 
     private void DrawRadar()

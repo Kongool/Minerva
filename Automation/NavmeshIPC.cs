@@ -39,6 +39,8 @@ internal sealed class NavmeshIPC
     private DateTime lastProbe;
     private Backend? active;   // last-resolved ready backend (cached between probes)
     private Backend? driving;  // backend we last issued a MoveTo to, so Stop targets the right one
+    private bool everLogged;   // so the first resolution logs even when it resolves to "none"
+    private string? loggedName; // last backend name we logged, to log only on change (no per-probe spam)
 
     public NavmeshIPC()
     {
@@ -79,6 +81,17 @@ internal sealed class NavmeshIPC
             {
                 try { if (b.Ready()) { this.active = b; break; } }
                 catch { /* that plugin isn't loaded — try the next */ }
+            }
+
+            // log only when the resolved backend changes, so the fallback is visible in /xllog without spamming
+            var name = this.active?.Name;
+            if (!this.everLogged || name != this.loggedName)
+            {
+                this.everLogged = true;
+                this.loggedName = name;
+                Service.Log.Information(name != null
+                    ? $"Minerva: navmesh backend ready -> {name} (auto-move will path through it)."
+                    : "Minerva: no navmesh backend ready (auto-move steers directly).");
             }
         }
         return this.active;
