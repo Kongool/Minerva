@@ -144,6 +144,6 @@ sealed class PhantomHydraStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
+[ModuleInfo(CFCID = 1093u, NameID = 0u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
 public sealed class PhantomHydra(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(-82f, 483.5f), new ArenaBoundsSquare(18f)); // arena guessed — refine

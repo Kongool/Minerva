@@ -16,6 +16,7 @@ public sealed class ModuleManager : IDisposable
     private readonly ModuleRegistry registry;
 
     public ModuleBase? ActiveModule { get; private set; }
+    public ModuleRegistry.Info? ActiveModuleInfo { get; private set; }
     public int RegisteredCount => this.registry.Count;
 
     public ModuleManager(WorldState world)
@@ -33,6 +34,7 @@ public sealed class ModuleManager : IDisposable
         {
             this.ActiveModule.Dispose();
             this.ActiveModule = null;
+            this.ActiveModuleInfo = null;
         }
 
         // try to activate a module for the current duty + a present boss actor
@@ -53,6 +55,7 @@ public sealed class ModuleManager : IDisposable
                 if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed)
                 {
                     this.ActiveModule = info.Create(this.world, actor);
+                    this.ActiveModuleInfo = info;
                     Service.Log.Information($"Minerva: activated module {info.ModuleType.Name} for boss {actor.Name}.");
                     return;
                 }
@@ -71,5 +74,6 @@ public sealed class ModuleManager : IDisposable
     {
         this.ActiveModule?.Dispose();
         this.ActiveModule = null;
+        this.ActiveModuleInfo = null;
     }
 }

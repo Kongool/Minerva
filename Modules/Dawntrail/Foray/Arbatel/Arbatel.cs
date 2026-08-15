@@ -181,6 +181,6 @@ sealed class ArbatelStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
+[ModuleInfo(CFCID = 1093u, NameID = 0u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
 public sealed class Arbatel(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(658.9f, 659.2f), new ArenaBoundsSquare(27f)); // arena guessed — refine

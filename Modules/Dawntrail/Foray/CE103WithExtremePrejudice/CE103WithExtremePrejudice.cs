@@ -94,7 +94,7 @@ sealed class CE103WithExtremePrejudiceStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1018u, NameID = 43u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE103)")]
+[ModuleInfo(CFCID = 1018u, NameID = 43u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE103)")]
 public sealed class CE103WithExtremePrejudice(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(-352f, -608f), new ArenaBoundsCircle(19.5f))
 {

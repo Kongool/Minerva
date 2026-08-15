@@ -207,6 +207,7 @@ t.Section("Module registry");
     var forCFC = reg.ForCFC(999u);
     t.Eq("module indexed under its CFC id", forCFC.Count, 1);
     t.Eq("registry resolved primary OID", forCFC.Count == 1 ? forCFC[0].PrimaryActorOID : 0u, 0xABCDu);
+    t.True("module explicitly marks primary death as completion", forCFC.Count == 1 && forCFC[0].Attr.PrimaryActorDeathEndsEncounter);
 
     var ws = new WorldState(10_000_000, "test");
     ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
@@ -798,7 +799,30 @@ t.Section("Replay validation");
 }
 
 // ---------------------------------------------------------------------------
-// 10. Phase machine: transitions advance phases, swapping components on enter/exit
+// 10. Recording lifecycle: only positive completion can stop a recording
+// ---------------------------------------------------------------------------
+t.Section("Recording auto-stop");
+{
+    var detector = new RecordingCompletionDetector(TimeSpan.FromSeconds(2));
+    detector.Reset();
+
+    t.True("waiting before the pull never stops", !detector.Update(TimeSpan.FromMinutes(10)));
+    t.True("wipe or combat loss cannot stop without success", !detector.Update(TimeSpan.FromMinutes(10)));
+    t.True("no completion is pending before a success signal", !detector.CompletionPending);
+
+    detector.SignalCompletion();
+    t.True("success signal starts the completion delay", detector.CompletionPending);
+    t.True("first post-success second keeps recording", !detector.Update(TimeSpan.FromSeconds(1)));
+    t.True("completion stops after the grace period", detector.Update(TimeSpan.FromSeconds(1)));
+    t.True("completion fires only once", !detector.Update(TimeSpan.FromMinutes(10)));
+
+    detector.SignalCompletion();
+    detector.Reset();
+    t.True("manual stop/reset clears a pending completion", !detector.CompletionPending && !detector.Update(TimeSpan.FromMinutes(10)));
+}
+
+// ---------------------------------------------------------------------------
+// 11. Phase machine: transitions advance phases, swapping components on enter/exit
 // ---------------------------------------------------------------------------
 t.Section("Phase machine");
 {
@@ -871,7 +895,7 @@ sealed class TestModuleStates : StateMachineBuilder
 }
 
 // a [ModuleInfo]-tagged module so the registry-discovery section has something to find
-[ModuleInfo(CFCID = 999u, PrimaryActorOID = 0xABCDu, NameID = 1u)]
+[ModuleInfo(CFCID = 999u, PrimaryActorOID = 0xABCDu, NameID = 1u, PrimaryActorDeathEndsEncounter = true)]
 sealed class RegisteredTestModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f));
 

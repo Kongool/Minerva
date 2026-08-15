@@ -121,6 +121,6 @@ sealed class CE107UnbridledStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1018u, NameID = 35u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE107)")]
+[ModuleInfo(CFCID = 1018u, NameID = 35u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE107)")]
 public sealed class CE107Unbridled(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(620f, 800f), new ArenaBoundsCircle(29.5f)); // shrinks to 25y via Shrink

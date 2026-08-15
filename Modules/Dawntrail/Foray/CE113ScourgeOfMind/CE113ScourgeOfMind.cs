@@ -140,6 +140,6 @@ sealed class CE113ScourgeOfMindStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1018u, NameID = 33u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE113)")]
+[ModuleInfo(CFCID = 1018u, NameID = 33u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR CE113)")]
 public sealed class CE113ScourgeOfMind(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(300f, 730f), new ArenaBoundsCircle(29.5f));

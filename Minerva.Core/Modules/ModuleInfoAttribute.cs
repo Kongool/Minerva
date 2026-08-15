@@ -24,6 +24,12 @@ public sealed class ModuleInfoAttribute : Attribute
     /// <summary>BNpcName row id (for display).</summary>
     public uint NameID { get; set; }
 
+    /// <summary>
+    /// Whether death of this module's primary actor positively completes the encounter. Keep false
+    /// for multi-form or multi-boss encounters whose primary actor can die before the fight is over.
+    /// </summary>
+    public bool PrimaryActorDeathEndsEncounter { get; set; }
+
     public ModuleMaturity Maturity { get; set; } = ModuleMaturity.WIP;
     public string Contributors { get; set; } = "";
 }

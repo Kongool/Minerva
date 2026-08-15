@@ -83,7 +83,7 @@ sealed class D011PrimePunutiyStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 826u, NameID = 12723u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR)")]
+[ModuleInfo(CFCID = 826u, NameID = 12723u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (ids from BMR)")]
 public sealed class D011PrimePunutiy(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(35f, -95f), new ArenaBoundsSquare(19.5f))
 {

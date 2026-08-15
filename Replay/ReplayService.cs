@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using Dalamud.Game.DutyState;
 using Minerva;
 using Minerva.Generation;
+using Minerva.Modules;
 
 namespace Minerva.Replay;
 
@@ -16,9 +18,14 @@ namespace Minerva.Replay;
 /// </summary>
 public sealed class ReplayService : IDisposable
 {
+    private static readonly TimeSpan EncounterEndGracePeriod = TimeSpan.FromSeconds(2);
+
     private readonly WorldState world;
+    private readonly ModuleManager modules;
     private readonly Configuration config;
     private readonly string directory;
+    private readonly RecordingCompletionDetector recordingCompletion = new(EncounterEndGracePeriod);
+    private readonly EventSubscription actorDeathSubscription;
 
     private ReplayRecorder? recorder;
     private StreamWriter? writer;
@@ -42,12 +49,15 @@ public sealed class ReplayService : IDisposable
     // built once (reflection scan), reused across playback rebuilds/loads
     private ModuleRegistry Registry => this.registry ??= ModuleRegistry.Build(Assembly.GetExecutingAssembly(), typeof(ModuleRegistry).Assembly);
 
-    public ReplayService(WorldState world, Configuration config)
+    public ReplayService(WorldState world, ModuleManager modules, Configuration config)
     {
         this.world = world;
+        this.modules = modules;
         this.config = config;
         this.directory = Path.Combine(Service.PluginInterface.ConfigDirectory.FullName, "replays");
         Directory.CreateDirectory(this.directory);
+        this.actorDeathSubscription = world.Actors.IsDeadChanged.Subscribe(this.OnActorDeath);
+        Service.DutyState.DutyCompleted += this.OnDutyCompleted;
         this.LoadMostRecent(); // so the last recording survives a plugin reload
     }
 
@@ -73,8 +83,8 @@ public sealed class ReplayService : IDisposable
     {
         if (this.IsRecording)
         {
-            this.Stop();
-            return $"Stopped. {this.recorder?.OpCount ?? 0} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
+            var opCount = this.Stop();
+            return $"Stopped. {opCount} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
         }
         this.Start();
         return $"Recording to {Path.GetFileName(this.currentPath)}.";
@@ -88,17 +98,19 @@ public sealed class ReplayService : IDisposable
         this.writer = new StreamWriter(this.currentPath);
         var localId = Service.ObjectTable[0]?.GameObjectId ?? 0;
         this.recorder = new ReplayRecorder(this.world, this.writer, this.config.RecordExcludeOtherPlayers, localId);
+        this.recordingCompletion.Reset();
     }
 
-    public void Stop()
+    public int Stop()
     {
         if (!this.IsRecording)
-            return;
+            return 0;
         var opCount = this.recorder!.OpCount;
         this.recorder.Dispose();
         this.writer!.Dispose();
         this.recorder = null;
         this.writer = null;
+        this.recordingCompletion.Reset();
         this.LastPath = this.currentPath;
         Service.Log.Information($"Minerva: recorded {opCount} ops to {this.currentPath}.");
 
@@ -122,6 +134,35 @@ public sealed class ReplayService : IDisposable
         {
             Service.Log.Error(ex, "Minerva: failed to load recording for playback.");
         }
+
+        return opCount;
+    }
+
+    /// <summary>
+    /// Stop only after a positive completion signal. Combat loss is intentionally ignored so a wipe,
+    /// player death, or temporary disengage cannot end the recording.
+    /// </summary>
+    public string? UpdateRecording(TimeSpan realDt)
+    {
+        if (!this.IsRecording || !this.recordingCompletion.Update(realDt))
+            return null;
+
+        var opCount = this.Stop();
+        return $"Encounter ended. Recording stopped automatically: {opCount} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
+    }
+
+    private void OnActorDeath(Actor actor)
+    {
+        var active = this.modules.ActiveModule;
+        if (this.IsRecording && actor.IsDead && active != null && ReferenceEquals(actor, active.PrimaryActor)
+            && this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true)
+            this.recordingCompletion.SignalCompletion();
+    }
+
+    private void OnDutyCompleted(IDutyStateEventArgs args)
+    {
+        if (this.IsRecording)
+            this.recordingCompletion.SignalCompletion();
     }
 
     /// <summary>Parse a saved log into an interactive <see cref="ReplayPlayer"/> (replaces any current one).</summary>
@@ -279,6 +320,8 @@ public sealed class ReplayService : IDisposable
 
     public void Dispose()
     {
+        Service.DutyState.DutyCompleted -= this.OnDutyCompleted;
+        this.actorDeathSubscription.Dispose();
         this.recorder?.Dispose();
         this.writer?.Dispose();
         this.Player?.Dispose();

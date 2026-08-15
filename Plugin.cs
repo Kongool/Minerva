@@ -49,7 +49,7 @@ public sealed class Plugin : IDalamudPlugin
         this.modules = new ModuleManager(this.World);
         this.movement = new MovementController(this.Config);
         this.ai = new AIManager(this.World, this.modules, this.Config, this.movement);
-        this.replay = new ReplayService(this.World, this.Config);
+        this.replay = new ReplayService(this.World, this.modules, this.Config);
 
         this.mainWindow = new MainWindow(this);
         this.debugWindow = new WorldStateDebugWindow(this.World);
@@ -86,6 +86,12 @@ public sealed class Plugin : IDalamudPlugin
             this.sync.Update(framework.UpdateDelta);
             this.modules.Update();
             this.ai.Update();
+            var recordingResult = this.replay.UpdateRecording(framework.UpdateDelta);
+            if (recordingResult != null)
+            {
+                Service.ChatGui.Print("[Minerva] " + recordingResult);
+                this.replayWindow.IsOpen = true;
+            }
             this.replay.UpdatePlayback(framework.UpdateDelta);
             this.SyncRadarVisibility();
         }
