@@ -2,9 +2,10 @@
 // the other North Horn modules; registry activates whichever boss OID is present). No BossmodReborn reference;
 // shapes are recording-only. WIP — validate against a recording before trusting.
 //
-// Boss OID note: TWO actors are named 'Elm Gigas' — 0x4BDA (extractor's pick, the primary caster) and
-// 0x4BD9 (R3.5). Unlike the earlier mis-picks these are the SAME boss in two forms, so keying on the
-// extractor's pick is safe; if it fails to activate in-game, swap Boss to 0x4BD9.
+// Boss OID: 0x4BD9 (R3.5) — the real boss, verified from the recording (single instance, 240M HP). The
+// extractor picked 0x4BDA, but that OID is a ~48-instance untargetable swarm (the casting objects) with no
+// HP block, so it is NOT the boss and the module would never have activated on it. Mechanics are AID-keyed,
+// so they work regardless of which of the two casts them.
 //
 // Cleanup from the raw draft:
 //   - AncientAeroIII was AOEShapeCircle(0f) = draws nothing; demoted to CastHint (radius unknown).
@@ -22,8 +23,8 @@ namespace Minerva.Dawntrail.Foray.ElmGigas;
 
 public enum OID : uint
 {
-    Boss = 0x4BDA,          // 'Elm Gigas' — the boss (primary combat form / caster)
-    ElmGigasAlt = 0x4BD9,   // 'Elm Gigas' R3.5 — the other form (swap Boss to this if activation fails)
+    Boss = 0x4BD9,          // 'Elm Gigas' R3.5 — the real boss (single instance, 240M HP; verified from recording)
+    ElmGigasSwarm = 0x4BDA, // 'Elm Gigas' R4.0 — ~48 untargetable casting instances, NOT the boss
     Helper = 0x233C,        // 'Elm Gigas' R0.5 — invisible helper
     CrescentBomb = 0x4E88,  // 'Crescent Bomb' R2.4 — add (possible bomb mechanic; unconfirmed)
     _1EA1A1 = 0x1EA1A1,     // '' R2 — event object
