@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Minerva;
 using Minerva.Automation;
@@ -114,7 +115,10 @@ public sealed class RadarWindow : Window, IDisposable
 
             foreach (var (info, name) in rows)
             {
-                ImGui.TextUnformatted("    " + name);
+                DrawDutyIcon(cfc);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted(name);
                 ImGui.SameLine();
                 ImGui.TextDisabled($" 0x{info.PrimaryActorOID:X}");
                 ImGui.SameLine();
@@ -180,6 +184,42 @@ public sealed class RadarWindow : Window, IDisposable
             sb.Append(typeName[i]);
         }
         return sb.ToString();
+    }
+
+    // the duty's banner from ContentFinderCondition, drawn small before each row (shared within a duty since
+    // the game has no per-boss icon). Reserves a same-size blank when the duty has no banner (field ops), so
+    // rows stay aligned.
+    private static void DrawDutyIcon(uint cfc)
+    {
+        var size = ImGui.GetFrameHeight();
+        var box = new Vector2(size, size);
+        var id = DutyImageId(cfc);
+        if (id != 0)
+        {
+            try
+            {
+                var tex = Service.TextureProvider.GetFromGameIcon(new GameIconLookup(id)).GetWrapOrEmpty();
+                if (tex.Handle != 0 && tex.Size.Y > 0f)
+                {
+                    ImGui.Image(tex.Handle, new Vector2(size * tex.Size.X / tex.Size.Y, size));
+                    return;
+                }
+            }
+            catch { /* texture unavailable — fall through to the spacer */ }
+        }
+        ImGui.Dummy(box);
+    }
+
+    private static uint DutyImageId(uint cfc)
+    {
+        try
+        {
+            var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
+            if (sheet != null && sheet.TryGetRow(cfc, out var row))
+                return row.Image;
+        }
+        catch { /* sheet/layout mismatch */ }
+        return 0;
     }
 
     // duty/encounter name from the Content Finder Condition sheet; null if it has no display name
