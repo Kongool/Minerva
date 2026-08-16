@@ -55,25 +55,50 @@ public sealed class RadarWindow : Window, IDisposable
     }
 
     private string moduleSearch = string.Empty;
+    private string selectedCat = string.Empty; // "" = all, "E:<expansion>", or "C:<content>"
 
     /// <summary>
-    /// A searchable, grouped list of every registered module (a lightweight take on BMR's Supported Fights):
-    /// collapsible per-duty (CFC) sections, each row showing the real boss name (resolved from NameID via
-    /// BNpcName, else the prettified class name), the boss OID, and maturity.
+    /// A searchable, categorised list of every registered module (a take on BMR's Supported Fights): a
+    /// left sidebar filters by Expansion / Content-type, the right pane groups the matches by duty (CFC)
+    /// in collapsible sections, each row showing the real boss name (NameID→BNpcName, else the class name),
+    /// the boss OID, and maturity.
     /// </summary>
     private void DrawModules()
     {
-        ImGui.TextDisabled($"{this.manager.RegisteredCount} module(s) registered.");
+        var all = this.manager.ModulesByCFC.Values.SelectMany(l => l).ToList();
+        var expansions = all.Select(i => Categorize(i).expansion).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+        var contents = all.Select(i => Categorize(i).content).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+
+        // --- sidebar: category selection ---
+        ImGui.BeginChild("##modsidebar", new Vector2(150f, 0f), true);
+        if (ImGui.Selectable($"All ({all.Count})", this.selectedCat.Length == 0))
+            this.selectedCat = string.Empty;
+        ImGui.Spacing();
+        ImGui.TextDisabled("Expansion");
+        foreach (var e in expansions)
+            if (ImGui.Selectable(e, this.selectedCat == "E:" + e))
+                this.selectedCat = "E:" + e;
+        ImGui.Spacing();
+        ImGui.TextDisabled("Content");
+        foreach (var c in contents)
+            if (ImGui.Selectable(c, this.selectedCat == "C:" + c))
+                this.selectedCat = "C:" + c;
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        // --- right pane: search + grouped list ---
+        ImGui.BeginChild("##modlist", new Vector2(0f, 0f), true);
         ImGui.SetNextItemWidth(-1f);
         ImGui.InputTextWithHint("##modsearch", "Search modules…", ref this.moduleSearch, 64);
         ImGui.Separator();
 
         var filter = this.moduleSearch.Trim();
-
         foreach (var (cfc, list) in this.manager.ModulesByCFC.OrderBy(kv => kv.Key))
         {
             var duty = ResolveDutyName(cfc);
             var rows = list
+                .Where(this.MatchesCategory)
                 .Select(i => (info: i, name: ResolveBossName(i.Attr.NameID) ?? Prettify(i.ModuleType.Name)))
                 .Where(x => filter.Length == 0
                     || x.name.Contains(filter, StringComparison.OrdinalIgnoreCase)
@@ -90,13 +115,38 @@ public sealed class RadarWindow : Window, IDisposable
             foreach (var (info, name) in rows)
             {
                 ImGui.TextUnformatted("    " + name);
-                ImGui.SameLine(230f);
-                ImGui.TextDisabled($"0x{info.PrimaryActorOID:X} ");
+                ImGui.SameLine();
+                ImGui.TextDisabled($" 0x{info.PrimaryActorOID:X}");
                 ImGui.SameLine();
                 var wip = info.Attr.Maturity == ModuleMaturity.WIP;
-                ImGui.TextColored(wip ? new Vector4(1f, 0.7f, 0.2f, 1f) : new Vector4(0.3f, 1f, 0.3f, 1f), wip ? "· WIP" : "· Verified");
+                ImGui.TextColored(wip ? new Vector4(1f, 0.7f, 0.2f, 1f) : new Vector4(0.3f, 1f, 0.3f, 1f), wip ? " · WIP" : " · Verified");
             }
         }
+        ImGui.EndChild();
+    }
+
+    private bool MatchesCategory(ModuleRegistry.Info info)
+    {
+        if (this.selectedCat.Length == 0)
+            return true;
+        var (e, c) = Categorize(info);
+        return this.selectedCat == "E:" + e || this.selectedCat == "C:" + c;
+    }
+
+    // Expansion + content-type from the module's namespace/name: Minerva.<Expansion>.<Kind>.<Module>.
+    // Foray splits into "Critical Engagement" (CE### classes) vs "Field Boss"; Dungeon stays "Dungeon".
+    private static (string expansion, string content) Categorize(ModuleRegistry.Info info)
+    {
+        var ns = info.ModuleType.Namespace ?? string.Empty;
+        var parts = ns.Split('.');
+        var expansion = parts.Length > 1 ? parts[1] : "Other";
+        var name = info.ModuleType.Name;
+        var isCE = name.Length > 2 && name[0] == 'C' && name[1] == 'E' && char.IsDigit(name[2]);
+        var content = ns.Contains(".Dungeon") ? "Dungeon"
+            : isCE ? "Critical Engagement"
+            : ns.Contains(".Foray") ? "Field Boss"
+            : parts.Length > 2 ? parts[2] : "Other";
+        return (expansion, content);
     }
 
     // boss name from the BNpcName sheet (module NameID); title-cased since the sheet stores it lowercase.
