@@ -98,6 +98,6 @@ sealed class AlabasterBladeStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
+[ModuleInfo(CFCID = 1093u, NameID = 14509u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
 public sealed class AlabasterBlade(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(-519f, -641.7f), new ArenaBoundsCircle(27f)); // arena guessed — refine

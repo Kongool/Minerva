@@ -60,6 +60,6 @@ sealed class DemiMedusaStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
+[ModuleInfo(CFCID = 1093u, NameID = 14736u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
 public sealed class DemiMedusa(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(-660.5f, -55.8f), new ArenaBoundsCircle(21f)); // arena guessed — refine

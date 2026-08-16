@@ -93,6 +93,6 @@ sealed class PallmagiaStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
+[ModuleInfo(CFCID = 1093u, NameID = 14714u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
 public sealed class Pallmagia(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(806.1f, -569.9f), new ArenaBoundsSquare(28f)); // arena guessed — refine

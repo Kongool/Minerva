@@ -54,28 +54,69 @@ public sealed class RadarWindow : Window, IDisposable
         ImGui.EndTabBar();
     }
 
-    /// <summary>Lists every registered module grouped by duty (CFC), with the encounter name, boss OID and maturity.</summary>
+    private string moduleSearch = string.Empty;
+
+    /// <summary>
+    /// A searchable, grouped list of every registered module (a lightweight take on BMR's Supported Fights):
+    /// collapsible per-duty (CFC) sections, each row showing the real boss name (resolved from NameID via
+    /// BNpcName, else the prettified class name), the boss OID, and maturity.
+    /// </summary>
     private void DrawModules()
     {
         ImGui.TextDisabled($"{this.manager.RegisteredCount} module(s) registered.");
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputTextWithHint("##modsearch", "Search modules…", ref this.moduleSearch, 64);
         ImGui.Separator();
+
+        var filter = this.moduleSearch.Trim();
 
         foreach (var (cfc, list) in this.manager.ModulesByCFC.OrderBy(kv => kv.Key))
         {
-            var name = ResolveDutyName(cfc);
-            ImGui.TextColored(new Vector4(1f, 0.85f, 0.2f, 1f), name != null ? $"CFC {cfc} — {name}" : $"CFC {cfc}");
+            var duty = ResolveDutyName(cfc);
+            var rows = list
+                .Select(i => (info: i, name: ResolveBossName(i.Attr.NameID) ?? Prettify(i.ModuleType.Name)))
+                .Where(x => filter.Length == 0
+                    || x.name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                    || (duty?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false))
+                .OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (rows.Count == 0)
+                continue;
 
-            foreach (var info in list.OrderBy(i => i.ModuleType.Name, StringComparer.Ordinal))
+            var header = duty != null ? $"{duty}  (CFC {cfc}) — {rows.Count}" : $"CFC {cfc} — {rows.Count}";
+            if (!ImGui.CollapsingHeader(header, ImGuiTreeNodeFlags.DefaultOpen))
+                continue;
+
+            foreach (var (info, name) in rows)
             {
-                ImGui.TextUnformatted("    " + Prettify(info.ModuleType.Name));
-                ImGui.SameLine(210f);
+                ImGui.TextUnformatted("    " + name);
+                ImGui.SameLine(230f);
                 ImGui.TextDisabled($"0x{info.PrimaryActorOID:X} ");
                 ImGui.SameLine();
                 var wip = info.Attr.Maturity == ModuleMaturity.WIP;
                 ImGui.TextColored(wip ? new Vector4(1f, 0.7f, 0.2f, 1f) : new Vector4(0.3f, 1f, 0.3f, 1f), wip ? "· WIP" : "· Verified");
             }
-            ImGui.Spacing();
         }
+    }
+
+    // boss name from the BNpcName sheet (module NameID); title-cased since the sheet stores it lowercase.
+    // CE modules carry a small non-BNpcName id convention (e.g. 35) — only real BNpcName rows (large ids)
+    // resolve; everything else falls back to the prettified class name.
+    private static string? ResolveBossName(uint nameId)
+    {
+        if (nameId < 1000)
+            return null;
+        try
+        {
+            var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.BNpcName>();
+            if (sheet != null && sheet.TryGetRow(nameId, out var row))
+            {
+                var n = row.Singular.ExtractText();
+                return string.IsNullOrWhiteSpace(n) ? null : System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(n);
+            }
+        }
+        catch { /* sheet/layout mismatch — fall back to the class name */ }
+        return null;
     }
 
     // "DemiMedusa" -> "Demi Medusa", "CE107Unbridled" -> "CE107 Unbridled" (space before an uppercase that follows a non-uppercase)

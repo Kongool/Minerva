@@ -89,6 +89,6 @@ sealed class ElmGigasStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
+[ModuleInfo(CFCID = 1093u, NameID = 14508u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor (North Horn; no BMR reference)")]
 public sealed class ElmGigas(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(-390.2f, 700.2f), new ArenaBoundsSquare(31f)); // arena guessed — refine
