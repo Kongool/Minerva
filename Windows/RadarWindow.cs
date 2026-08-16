@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -46,10 +47,64 @@ public sealed class RadarWindow : Window, IDisposable
 
         this.Tab("Radar", this.DrawRadar);
         this.Tab("Menu", this.menu.DrawContent);
+        this.Tab("Modules", this.DrawModules);
         this.Tab("Replay", this.replay.DrawContent);
         this.Tab("Debug", this.debug.DrawContent);
 
         ImGui.EndTabBar();
+    }
+
+    /// <summary>Lists every registered module grouped by duty (CFC), with the encounter name, boss OID and maturity.</summary>
+    private void DrawModules()
+    {
+        ImGui.TextDisabled($"{this.manager.RegisteredCount} module(s) registered.");
+        ImGui.Separator();
+
+        foreach (var (cfc, list) in this.manager.ModulesByCFC.OrderBy(kv => kv.Key))
+        {
+            var name = ResolveDutyName(cfc);
+            ImGui.TextColored(new Vector4(1f, 0.85f, 0.2f, 1f), name != null ? $"CFC {cfc} — {name}" : $"CFC {cfc}");
+
+            foreach (var info in list.OrderBy(i => i.ModuleType.Name, StringComparer.Ordinal))
+            {
+                ImGui.TextUnformatted("    " + Prettify(info.ModuleType.Name));
+                ImGui.SameLine(210f);
+                ImGui.TextDisabled($"0x{info.PrimaryActorOID:X} ");
+                ImGui.SameLine();
+                var wip = info.Attr.Maturity == ModuleMaturity.WIP;
+                ImGui.TextColored(wip ? new Vector4(1f, 0.7f, 0.2f, 1f) : new Vector4(0.3f, 1f, 0.3f, 1f), wip ? "· WIP" : "· Verified");
+            }
+            ImGui.Spacing();
+        }
+    }
+
+    // "DemiMedusa" -> "Demi Medusa", "CE107Unbridled" -> "CE107 Unbridled" (space before an uppercase that follows a non-uppercase)
+    private static string Prettify(string typeName)
+    {
+        var sb = new System.Text.StringBuilder(typeName.Length + 6);
+        for (var i = 0; i < typeName.Length; ++i)
+        {
+            if (i > 0 && char.IsUpper(typeName[i]) && !char.IsUpper(typeName[i - 1]))
+                sb.Append(' ');
+            sb.Append(typeName[i]);
+        }
+        return sb.ToString();
+    }
+
+    // duty/encounter name from the Content Finder Condition sheet; null if it has no display name
+    private static string? ResolveDutyName(uint cfc)
+    {
+        try
+        {
+            var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
+            if (sheet != null && sheet.TryGetRow(cfc, out var row))
+            {
+                var n = row.Name.ExtractText();
+                return string.IsNullOrWhiteSpace(n) ? null : n;
+            }
+        }
+        catch { /* sheet/layout mismatch — just show the id */ }
+        return null;
     }
 
     /// <summary>

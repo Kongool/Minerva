@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Minerva;
 
@@ -18,6 +19,9 @@ public sealed class ModuleManager : IDisposable
     public ModuleBase? ActiveModule { get; private set; }
     public ModuleRegistry.Info? ActiveModuleInfo { get; private set; }
     public int RegisteredCount => this.registry.Count;
+
+    /// <summary>All registered modules, grouped by duty (CFC id) — for the in-game module list.</summary>
+    public IReadOnlyDictionary<uint, List<ModuleRegistry.Info>> ModulesByCFC => this.registry.ByCFC;
 
     public ModuleManager(WorldState world)
     {
