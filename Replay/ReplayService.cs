@@ -31,6 +31,14 @@ public sealed class ReplayService : IDisposable
     private StreamWriter? writer;
     private string? currentPath;
 
+    // no-module fallback: a recording made to EXTRACT a module has no module loaded, so OnActorDeath can't
+    // fire. We then identify the boss heuristically as the biggest in-combat enemy and feed the same
+    // completion signal when it dies.
+    private ulong recordingBossId;
+    private uint recordingBossMaxHP;
+    private float recordingBossLastHP;
+    private bool recordingBossSeen;
+
     private ModuleRegistry? registry;
 
     public Configuration Config => this.config;
@@ -99,6 +107,10 @@ public sealed class ReplayService : IDisposable
         var localId = Service.ObjectTable[0]?.GameObjectId ?? 0;
         this.recorder = new ReplayRecorder(this.world, this.writer, this.config.RecordExcludeOtherPlayers, localId);
         this.recordingCompletion.Reset();
+        this.recordingBossId = 0;
+        this.recordingBossMaxHP = 0;
+        this.recordingBossLastHP = 0f;
+        this.recordingBossSeen = false;
     }
 
     public int Stop()
@@ -144,7 +156,11 @@ public sealed class ReplayService : IDisposable
     /// </summary>
     public string? UpdateRecording(TimeSpan realDt)
     {
-        if (!this.IsRecording || !this.recordingCompletion.Update(realDt))
+        if (!this.IsRecording)
+            return null;
+
+        this.DetectNoModuleBossDeath();
+        if (!this.recordingCompletion.Update(realDt))
             return null;
 
         var opCount = this.Stop();
@@ -156,6 +172,54 @@ public sealed class ReplayService : IDisposable
         var active = this.modules.ActiveModule;
         if (this.IsRecording && actor.IsDead && active != null && ReferenceEquals(actor, active.PrimaryActor)
             && this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true)
+            this.recordingCompletion.SignalCompletion();
+    }
+
+    /// <summary>
+    /// Fallback for recordings made to EXTRACT a module, where no module is loaded so <see cref="OnActorDeath"/>
+    /// can't identify the boss. The boss is taken to be the biggest <b>in-combat</b> enemy (the in-combat gate
+    /// keeps ambient open-field NMs out); it re-locks to an equal-or-larger enemy so it survives the boss
+    /// appearing after the pull and same-size phase swaps. When it dies (0 HP, or despawns while near death —
+    /// a mid-HP despawn is treated as a phase change, not a kill) it feeds the same completion signal the
+    /// module/duty paths use, so the 2s grace period and stop behaviour are identical. Skipped entirely once a
+    /// module is active, since OnActorDeath then handles the boss precisely.
+    /// </summary>
+    private void DetectNoModuleBossDeath()
+    {
+        if (this.modules.ActiveModule != null)
+            return;
+
+        Actor? biggest = null;
+        foreach (var a in this.world.Actors)
+        {
+            if (a.IsAlly || !a.InCombat || a.IsDeadOrDestroyed || a.HPMP.MaxHP == 0 || a.HPMP.CurHP == 0)
+                continue;
+            if (biggest == null || a.HPMP.MaxHP > biggest.HPMP.MaxHP)
+                biggest = a;
+        }
+
+        if (biggest != null && biggest.HPMP.MaxHP >= this.recordingBossMaxHP)
+        {
+            this.recordingBossId = biggest.InstanceID;
+            this.recordingBossMaxHP = biggest.HPMP.MaxHP;
+            this.recordingBossSeen = true;
+        }
+
+        if (!this.recordingBossSeen)
+            return;
+
+        var tracked = this.world.Actors.Find(this.recordingBossId);
+        bool bossDead;
+        if (tracked == null)
+            bossDead = this.recordingBossLastHP <= 0.05f; // vanished while healthy = phase change, not a kill
+        else
+        {
+            this.recordingBossLastHP = tracked.HPRatio;
+            bossDead = tracked.IsDead || tracked.HPMP.CurHP == 0;
+        }
+
+        var nothingBiggerAlive = biggest == null || biggest.HPMP.MaxHP < this.recordingBossMaxHP;
+        if (bossDead && nothingBiggerAlive)
             this.recordingCompletion.SignalCompletion();
     }
 
