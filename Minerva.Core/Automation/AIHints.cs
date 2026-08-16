@@ -42,4 +42,23 @@ public sealed class AIHints
                 return true;
         return false;
     }
+
+    /// <summary>
+    /// Like <see cref="InImminentDanger(WPos, DateTime)"/>, but also rejects a point within <paramref name="margin"/>
+    /// of a danger zone (sampled on a ring around it). Used to pick a dodge target that keeps clearance from the
+    /// AOE edge — accounting for hitbox, reaction, and stopping distance — instead of landing right against it.
+    /// </summary>
+    public bool InImminentDanger(WPos p, DateTime deadline, float margin)
+    {
+        if (this.InImminentDanger(p, deadline))
+            return true;
+        if (margin > 0f)
+            for (var i = 0; i < 8; ++i)
+            {
+                var dir = new Angle(i * (Angle.TwoPI / 8f)).ToDirection();
+                if (this.InImminentDanger(p + dir * margin, deadline))
+                    return true;
+            }
+        return false;
+    }
 }

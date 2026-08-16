@@ -48,7 +48,9 @@ public sealed class AIManager
         }
 
         module.BuildAIHints(0, pc, this.hints);
-        this.Current = ArenaPathfinder.Solve(this.hints, this.world.CurrentTime);
+        // react earlier (5s look-ahead) and keep clearance from the AOE edge (2.5y margin) so the dodge
+        // actually clears the zone rather than stopping against it
+        this.Current = ArenaPathfinder.Solve(this.hints, this.world.CurrentTime, horizonSeconds: 5f, safetyMargin: 2.5f);
         this.HasSolution = true;
 
         // steering is opt-in and only meaningful with a real controller installed

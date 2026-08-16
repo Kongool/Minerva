@@ -15,7 +15,7 @@ public readonly record struct SafeSpot(bool NeedToMove, bool Found, WPos Target,
 /// </summary>
 public static class ArenaPathfinder
 {
-    public static SafeSpot Solve(AIHints hints, DateTime now, float horizonSeconds = 3f, float cellSize = 1f)
+    public static SafeSpot Solve(AIHints hints, DateTime now, float horizonSeconds = 3f, float cellSize = 1f, float safetyMargin = 0f)
     {
         var deadline = now.AddSeconds(horizonSeconds);
         var player = hints.PlayerPosition;
@@ -24,6 +24,18 @@ public static class ArenaPathfinder
         if (!hints.InImminentDanger(player, deadline))
             return SafeSpot.Stay;
 
+        // prefer a target that keeps `safetyMargin` clearance from every zone; if the arena is too constrained
+        // to find one, fall back to the nearest merely-safe cell so we still move out of the AOE.
+        if (TryNearestSafe(hints, deadline, player, cellSize, safetyMargin, out var spot))
+            return spot;
+        if (safetyMargin > 0f && TryNearestSafe(hints, deadline, player, cellSize, 0f, out spot))
+            return spot;
+
+        return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
+    }
+
+    private static bool TryNearestSafe(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, out SafeSpot spot)
+    {
         var center = hints.Center;
         var reach = hints.Bounds.Radius;
         var found = false;
@@ -37,7 +49,7 @@ public static class ArenaPathfinder
                 var p = new WPos(x, z);
                 if (!hints.Bounds.Contains(center, p))
                     continue;
-                if (hints.InImminentDanger(p, deadline))
+                if (hints.InImminentDanger(p, deadline, margin))
                     continue;
 
                 var d = (p - player).LengthSq();
@@ -50,9 +62,7 @@ public static class ArenaPathfinder
             }
         }
 
-        if (!found)
-            return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
-
-        return new SafeSpot(true, true, best, (best - player).Normalized());
+        spot = found ? new SafeSpot(true, true, best, (best - player).Normalized()) : default;
+        return found;
     }
 }
