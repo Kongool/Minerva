@@ -59,3 +59,7 @@ public class CastHint(ModuleBase module, uint aid, string hint) : ModuleComponen
             hints.Add(this.Hint);
     }
 }
+
+/// <summary>A single-target cast cue (e.g. a tankbuster) — a hint with a default label. Mirrors BMR's
+/// <c>SingleTargetCast</c> so ported modules using it compile unchanged.</summary>
+public class SingleTargetCast(ModuleBase module, uint aid, string hint = "Tankbuster") : CastHint(module, aid, hint);
