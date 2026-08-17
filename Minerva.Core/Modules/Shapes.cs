@@ -208,3 +208,112 @@ public class Cone(WPos center, float radius, Angle startAngle, Angle endAngle) :
 /// <summary>A cone specified by a center direction and half-angle.</summary>
 public sealed class ConeHA(WPos center, float radius, Angle centerDir, Angle halfAngle)
     : Cone(center, radius, centerDir - halfAngle, centerDir + halfAngle);
+
+/// <summary>A tessellated cone by center direction + half-angle (containment identical to <see cref="ConeHA"/>).</summary>
+public sealed class ConeV(WPos center, float radius, Angle centerDir, Angle halfAngle, int edges) : Shape
+{
+    public readonly int Edges = edges;
+    private readonly ConeHA cone = new(center, radius, centerDir, halfAngle);
+    public override bool Contains(WPos p) => this.cone.Contains(p);
+    public override IReadOnlyList<WPos> ContourWorld() => this.cone.ContourWorld();
+}
+
+/// <summary>A ring segment: inside the annulus and within the angular sector.</summary>
+public class DonutSegment(WPos center, float innerRadius, float outerRadius, Angle startAngle, Angle endAngle) : Shape
+{
+    public readonly WPos Center = center;
+    public readonly float InnerRadius = innerRadius;
+    public readonly float OuterRadius = outerRadius;
+    public readonly Angle StartAngle = startAngle;
+    public readonly Angle EndAngle = endAngle;
+
+    public override bool Contains(WPos p)
+    {
+        if (!p.InDonut(this.Center, this.InnerRadius, this.OuterRadius))
+            return false;
+        var ang = Angle.FromDirection(p - this.Center);
+        var half = (this.EndAngle - this.StartAngle).Rad * 0.5f;
+        var mid = new Angle(this.StartAngle.Rad + half);
+        return MathF.Abs((ang - mid).Normalized().Rad) <= MathF.Abs(half);
+    }
+
+    public override IReadOnlyList<WPos> ContourWorld()
+    {
+        var pts = new List<WPos>();
+        pts.AddRange(Arc(this.Center, this.OuterRadius, this.StartAngle, this.EndAngle, Segments));
+        var inner = Arc(this.Center, this.InnerRadius, this.StartAngle, this.EndAngle, Segments);
+        for (var i = inner.Count - 1; i >= 0; --i)
+            pts.Add(inner[i]);
+        return pts;
+    }
+}
+
+/// <summary>A ring segment specified by a center direction and half-angle.</summary>
+public sealed class DonutSegmentHA(WPos center, float innerRadius, float outerRadius, Angle centerDir, Angle halfAngle)
+    : DonutSegment(center, innerRadius, outerRadius, centerDir - halfAngle, centerDir + halfAngle);
+
+/// <summary>An axis-aligned-or-rotated ellipse.</summary>
+public sealed class Ellipse(WPos center, float halfWidth, float halfHeight, int edges, Angle rotation = default) : Shape
+{
+    public readonly WPos Center = center;
+    public readonly float HalfWidth = halfWidth;
+    public readonly float HalfHeight = halfHeight;
+    public readonly Angle Rotation = rotation;
+
+    public override bool Contains(WPos p)
+    {
+        var local = Rotate(p - this.Center, -this.Rotation);
+        var x = local.X / this.HalfWidth;
+        var z = local.Z / this.HalfHeight;
+        return x * x + z * z <= 1f;
+    }
+
+    public override IReadOnlyList<WPos> ContourWorld()
+    {
+        var n = Math.Max(this.Edges, 12);
+        var pts = new WPos[n];
+        var step = Angle.TwoPI / n;
+        for (var i = 0; i < n; ++i)
+        {
+            var a = step * i;
+            pts[i] = this.Center + Rotate(new WDir(this.HalfWidth * MathF.Sin(a), this.HalfHeight * MathF.Cos(a)), this.Rotation);
+        }
+        return pts;
+    }
+
+    public int Edges = edges;
+}
+
+/// <summary>A stadium/capsule: a rectangle of half-length <paramref name="halfHeight"/> with rounded ends of radius <paramref name="halfWidth"/>.</summary>
+public sealed class Capsule(WPos center, float halfHeight, float halfWidth, int edges, Angle rotation = default) : Shape
+{
+    public readonly WPos Center = center;
+    public readonly float HalfHeight = halfHeight;
+    public readonly float HalfWidth = halfWidth;
+    public readonly Angle Rotation = rotation;
+
+    public override bool Contains(WPos p)
+    {
+        // distance from the core segment (center ± halfHeight along the facing) must be within halfWidth
+        var dir = this.Rotation.ToDirection();
+        var a = this.Center + dir * this.HalfHeight;
+        var b = this.Center - dir * this.HalfHeight;
+        var ab = b - a;
+        var t = Math.Clamp((p - a).Dot(ab) / ab.LengthSq(), 0f, 1f);
+        return (p - (a + ab * t)).Length() <= this.HalfWidth;
+    }
+
+    public override IReadOnlyList<WPos> ContourWorld()
+    {
+        var dir = this.Rotation.ToDirection();
+        var a = this.Center + dir * this.HalfHeight;
+        var b = this.Center - dir * this.HalfHeight;
+        var fwd = this.Rotation;
+        var pts = new List<WPos>();
+        pts.AddRange(Arc(a, this.HalfWidth, fwd - 90f.Degrees(), fwd + 90f.Degrees(), Segments / 2));
+        pts.AddRange(Arc(b, this.HalfWidth, fwd + 90f.Degrees(), fwd + 270f.Degrees(), Segments / 2));
+        return pts;
+    }
+
+    public int Edges = edges;
+}

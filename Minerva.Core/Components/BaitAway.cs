@@ -154,6 +154,35 @@ public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysD
 }
 
 /// <summary>
+/// A bait the whole party must STACK into (shared soak), rather than spread away. Subclasses add baits;
+/// this advises stacking and — unlike <see cref="GenericBaitAway"/> — does not forbid the bait for the
+/// auto-dodge engine (you approach it). Ported from BossmodReborn's GenericBaitStack (BSD-3; see
+/// THIRD-PARTY-NOTICES.txt), simplified (no ShapeDistance overlap resolution).
+/// </summary>
+public abstract class GenericBaitStack(ModuleBase module, uint aid = default, bool onlyShowOutlines = false) : GenericBaitAway(module, aid, onlyShowOutlines: onlyShowOutlines)
+{
+    public const string HintStack = "Stack!";
+
+    public override void AddHints(int slot, Actor actor, TextHints hints)
+    {
+        var baits = this.ActiveBaits;
+        if (baits.Count == 0)
+            return;
+        // stacked if standing in any bait's shape
+        foreach (var bait in baits)
+            if (this.IsClippedBy(actor, in bait) || bait.Target == actor)
+            {
+                hints.Add(HintStack, false);
+                return;
+            }
+        hints.Add(HintStack);
+    }
+
+    // stacks are approached, not avoided — contribute no forbidden zone
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }
+}
+
+/// <summary>
 /// Bait away driven by a cast: each cast of <c>WatchedAction</c> marks its target as the baiter. One
 /// line per mechanic. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
 /// </summary>
@@ -195,6 +224,36 @@ public class BaitAwayCast(ModuleBase module, uint aid, AOEShape shape, bool cent
                 return;
             }
         }
+    }
+}
+
+/// <summary>
+/// Bait away for a charge that ends at the target: a rectangle from caster to target whose length tracks
+/// the target's live position. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class BaitAwayChargeCast(ModuleBase module, uint aid, float halfWidth) : GenericBaitAway(module, aid, tankbuster: true)
+{
+    private readonly float HalfWidth = halfWidth;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID == this.WatchedAction && this.World.Actors.Find(cast.TargetID) is { } target)
+            this.CurrentBaits.Add(new Bait(caster, target, new AOEShapeRect((target.Position - caster.Position).Length(), this.HalfWidth), this.Module.CastFinishAt(cast)));
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID != this.WatchedAction)
+            return;
+        for (var i = 0; i < this.CurrentBaits.Count; ++i)
+            if (this.CurrentBaits[i].Source.InstanceID == caster.InstanceID) { this.CurrentBaits.RemoveAt(i); return; }
+    }
+
+    public override void Update()
+    {
+        var baits = CollectionsMarshal.AsSpan(this.CurrentBaits);
+        foreach (ref var b in baits)
+            b.Shape = new AOEShapeRect((b.Target.Position - b.Source.Position).Length(), this.HalfWidth);
     }
 }
 

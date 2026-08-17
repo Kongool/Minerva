@@ -846,6 +846,23 @@ t.Section("Components: CastCounter + SimpleAOEGroups");
     var gzh = new ModuleComponent.TextHints();
     gaze.AddHints(0, facingEye, gzh);
     t.True("a player facing the gaze is warned", gzh.Exists(h => h.text.Contains("Turn away")));
+
+    // CastSharedTankbuster: a cast marks a shared buster on its target
+    var stb = new Minerva.Components.CastSharedTankbuster(mod, 840u, 6f);
+    stb.OnCastStarted(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(840u), TargetID = helper, TotalTime = 5f });
+    t.True("shared tankbuster is active after the cast", stb.Active);
+    var stbh = new ModuleComponent.TextHints();
+    stb.AddHints(0, helperActor, stbh);
+    t.True("shared tankbuster warns its target to stack", stbh.Exists(h => h.text.Contains("Shared tankbuster")));
+    stb.OnCastFinished(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(840u), TargetID = helper });
+    t.True("shared tankbuster clears when the cast finishes", !stb.Active);
+
+    // VoidzoneAtCastTarget: predicts an AOE at the cast target until the voidzone actor is present
+    var vz = new Minerva.Components.VoidzoneAtCastTarget(mod, 6f, 850u, _ => System.Array.Empty<Actor>());
+    vz.OnCastStarted(helperActor, new ActorCastInfo { Action = ActionID.MakeSpell(850u), TargetID = boss, TotalTime = 4f, Location = new Vector3(5, 0, 5) });
+    t.Eq("voidzone predicts one AOE from the active cast", vz.ActiveAOEs(0, bossActor).Length, 1);
+    vz.OnCastFinished(helperActor, new ActorCastInfo { Action = ActionID.MakeSpell(850u) });
+    t.Eq("voidzone prediction clears when the cast finishes (no source actor yet)", vz.ActiveAOEs(0, bossActor).Length, 0);
     mod.Dispose();
 }
 
@@ -878,6 +895,18 @@ t.Section("Custom shapes + arenas");
     t.True("custom AOE difference carves out the centre", !custom.Check(new WPos(0, 0), default, default));
     var inverted = new AOEShapeCustom([new Circle(new WPos(0, 0), 6f)], invertForbiddenZone: true);
     t.True("inverted custom AOE is safe inside, dangerous outside", inverted.Check(new WPos(50, 50), default, default) && !inverted.Check(new WPos(0, 0), default, default));
+
+    // more operand shapes: ellipse, donut segment, capsule
+    var ellipse = new Ellipse(new WPos(0, 0), 10f, 4f, 24);
+    t.True("ellipse contains a point along its long axis", ellipse.Contains(new WPos(9, 0)));
+    t.True("ellipse excludes a point along its short axis past the radius", !ellipse.Contains(new WPos(0, 5)));
+    var seg = new DonutSegmentHA(new WPos(0, 0), 5f, 10f, 0f.Degrees(), 45f.Degrees()); // sector facing +Z (south)
+    t.True("donut segment contains a ring point in-sector", seg.Contains(new WPos(0, 7)));
+    t.True("donut segment excludes a point inside the inner hole", !seg.Contains(new WPos(0, 3)));
+    t.True("donut segment excludes a point out of the sector", !seg.Contains(new WPos(0, -7)));
+    var capsule = new Capsule(new WPos(0, 0), 10f, 2f, 16); // core segment ±10 along +Z, radius 2
+    t.True("capsule contains a point near its core", capsule.Contains(new WPos(1, 5)));
+    t.True("capsule excludes a point beyond its rounded end", !capsule.Contains(new WPos(0, 13)));
 }
 
 // ---------------------------------------------------------------------------
