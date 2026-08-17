@@ -241,3 +241,87 @@ public class SpreadFromCastTargets(ModuleBase module, uint aid, float radius) : 
 
 /// <summary>Stack on the targets of a specific cast — one line: <c>: Components.StackWithCastTargets(module, aid, radius)</c>.</summary>
 public class StackWithCastTargets(ModuleBase module, uint aid, float radius, int minStackSize = 2, int maxStackSize = int.MaxValue) : CastStackSpread(module, aid, default, radius, default, minStackSize, maxStackSize);
+
+/// <summary>
+/// Stack/spread selected by an overhead icon and resolved by a cast event. Ported from BossmodReborn
+/// (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class IconStackSpread(ModuleBase module, uint stackIcon, uint spreadIcon, uint stackAID, uint spreadAID, float stackRadius, float spreadRadius, double activationDelay, int minStackSize = 2, int maxStackSize = int.MaxValue, int maxCasts = 1)
+    : UniformStackSpread(module, stackRadius, spreadRadius, minStackSize, maxStackSize)
+{
+    public readonly uint StackIcon = stackIcon;
+    public readonly uint SpreadIcon = spreadIcon;
+    public readonly uint StackAction = stackAID;
+    public readonly uint SpreadAction = spreadAID;
+    public readonly double ActivationDelay = activationDelay;
+    public int NumFinishedStacks;
+    public int NumFinishedSpreads;
+    public readonly int MaxCasts = maxCasts; // for stacks whose final action hits multiple times
+    public int CastCounter;
+
+    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
+    {
+        if (iconID == this.StackIcon)
+            this.AddStack(actor, this.World.FutureTime(this.ActivationDelay));
+        else if (iconID == this.SpreadIcon)
+            this.AddSpread(actor, this.World.FutureTime(this.ActivationDelay));
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        var aid = spell.Action.ID;
+        if (aid == this.StackAction && this.StackAction != default)
+        {
+            if (++this.CastCounter >= this.MaxCasts)
+            {
+                this.CastCounter = 0;
+                if (!this.RemoveByTarget(this.Stacks, spell.MainTargetID) && this.Stacks.Count != 0)
+                    this.Stacks.RemoveAt(0); // self-targeted fallback
+                ++this.NumFinishedStacks;
+            }
+        }
+        else if (aid == this.SpreadAction && this.SpreadAction != default)
+        {
+            if (!this.RemoveByTarget(this.Spreads, spell.MainTargetID) && this.Spreads.Count != 0)
+                this.Spreads.RemoveAt(0);
+            ++this.NumFinishedSpreads;
+        }
+    }
+
+    private bool RemoveByTarget(List<Stack> list, ulong targetID)
+    {
+        for (var i = 0; i < list.Count; ++i)
+            if (list[i].Target.InstanceID == targetID) { list.RemoveAt(i); return true; }
+        return false;
+    }
+
+    private bool RemoveByTarget(List<Spread> list, ulong targetID)
+    {
+        for (var i = 0; i < list.Count; ++i)
+            if (list[i].Target.InstanceID == targetID) { list.RemoveAt(i); return true; }
+        return false;
+    }
+
+    public override void Update()
+    {
+        for (var i = this.Stacks.Count - 1; i >= 0; --i)
+            if (this.Stacks[i].Target.IsDead) this.Stacks.RemoveAt(i);
+        for (var i = this.Spreads.Count - 1; i >= 0; --i)
+            if (this.Spreads[i].Target.IsDead) this.Spreads.RemoveAt(i);
+    }
+}
+
+/// <summary>Spread on players who receive a specific icon. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>
+public class SpreadFromIcon(ModuleBase module, uint icon, uint aid, float radius, double activationDelay) : IconStackSpread(module, default, icon, default, aid, default, radius, activationDelay)
+{
+    // convenience overload matching Minerva's extractor emission (module, icon, radius): no resolving cast, default delay
+    public SpreadFromIcon(ModuleBase module, uint icon, float radius, double activationDelay = 5d) : this(module, icon, default, radius, activationDelay) { }
+}
+
+/// <summary>Stack on players who receive a specific icon. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>
+public class StackWithIcon(ModuleBase module, uint icon, uint aid, float radius, double activationDelay, int minStackSize = 2, int maxStackSize = int.MaxValue, int maxCasts = 1)
+    : IconStackSpread(module, icon, default, aid, default, radius, default, activationDelay, minStackSize, maxStackSize, maxCasts)
+{
+    // convenience overload matching Minerva's extractor emission (module, icon, radius)
+    public StackWithIcon(ModuleBase module, uint icon, float radius, double activationDelay = 5d) : this(module, icon, default, radius, activationDelay) { }
+}

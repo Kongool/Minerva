@@ -819,6 +819,33 @@ t.Section("Components: CastCounter + SimpleAOEGroups");
     t.True("a non-target clipped by the bait is warned", bh.Exists(h => h.text.Contains("GTFO from baited aoe")));
     bait.OnCastFinished(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(810u), TargetID = helper });
     t.Eq("finishing the cast clears the bait", bait.CurrentBaits.Count, 0);
+
+    // RaidwideCastDelay: a visual cast arms a delayed raidwide cue; the AOE event disarms it
+    var rw = new Minerva.Components.RaidwideCastDelay(mod, 820u, 821u, 3d, "Raidwide incoming");
+    rw.OnCastStarted(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(820u), TargetID = boss, TotalTime = 2f });
+    var gh = new ModuleComponent.GlobalHints();
+    rw.AddGlobalHints(gh);
+    t.True("armed raidwide shows a global hint", gh.Contains("Raidwide incoming"));
+    rw.OnEventCast(bossActor, new ActorCastEvent(ActionID.MakeSpell(821u), boss, default, default, 0));
+    var gh2 = new ModuleComponent.GlobalHints();
+    rw.AddGlobalHints(gh2);
+    t.True("resolved raidwide clears the hint", gh2.Count == 0);
+
+    // GenericRotatingAOE: a rotating cone sequence shows the imminent cast and steps rotation on advance
+    var rot = new Minerva.Components.GenericRotatingAOE(mod);
+    rot.Sequences.Add(new Minerva.Components.GenericRotatingAOE.Sequence(new AOEShapeCone(20f, 45f.Degrees()), new WPos(0, 0), 0f.Degrees(), 90f.Degrees(), ws.CurrentTime, 2d, 3, 2));
+    rot.Update();
+    t.True("rotating sequence shows at least the imminent AOE", rot.ActiveAOEs(0, bossActor).Length >= 1);
+    rot.AdvanceSequence(0, ws.CurrentTime);
+    t.Eq("advancing the sequence steps rotation by the increment", rot.Sequences[0].Rotation.Rad, 90f.Degrees().Rad);
+
+    // CastGaze: a cast spawns an eye; a player facing it is told to look away
+    var gaze = new Minerva.Components.CastGaze(mod, 830u);
+    gaze.OnCastStarted(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(830u), TargetID = boss, TotalTime = 4f, Location = new Vector3(0, 0, 10) });
+    var facingEye = new Actor(0xF, 15, 0, "F", 0, ActorType.Player, new Vector4(0, 0, 0, 0)); // at origin, facing +Z (south=0) toward the eye at z=10
+    var gzh = new ModuleComponent.TextHints();
+    gaze.AddHints(0, facingEye, gzh);
+    t.True("a player facing the gaze is warned", gzh.Exists(h => h.text.Contains("Turn away")));
     mod.Dispose();
 }
 

@@ -182,7 +182,7 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
                 case PlayerMechanic.Bait when act.PrecedingTether != 0:
                     return ($"sealed class {name}(ModuleBase module) : Components.BaitAwayTethers(module, {act.PrecedingTether}u); // tether-bait", "special", false);
                 case PlayerMechanic.Stack when act.PrecedingIcon != 0:
-                    return ($"sealed class {name}(ModuleBase module) : Components.StackFromIcon(module, {act.PrecedingIcon}u, {SpreadRadius(hint)}f); // icon stack", "special", false);
+                    return ($"sealed class {name}(ModuleBase module) : Components.StackWithIcon(module, {act.PrecedingIcon}u, {SpreadRadius(hint)}f); // icon stack", "special", false);
                 case PlayerMechanic.Stack:
                     return ($"sealed class {name}(ModuleBase module) : Components.StackWithCastTargets(module, {aidRef}, {SpreadRadius(hint)}f);", "special", false);
                 case PlayerMechanic.Spread when act.PrecedingIcon != 0:
