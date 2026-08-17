@@ -135,3 +135,78 @@ public sealed class ArenaBoundsPolygon(params WDir[] offsets) : ArenaBounds(MaxR
         return max;
     }
 }
+
+/// <summary>
+/// A mesh arena composed of absolute-world <see cref="Shape"/>s: the field is inside any of the
+/// <c>UnionShapes</c> and outside every <c>DifferenceShape</c> (holes/pits). Matches BossmodReborn's
+/// <c>ArenaBoundsCustom</c> constructor (BSD-3; see THIRD-PARTY-NOTICES.txt) so DT arena definitions paste
+/// in unchanged. Containment is exact (analytic per shape); Minerva has no polygon clipper, so the drawn
+/// boundary is the largest union operand's outline (the difference operands draw as an inner contour).
+/// Because the operands carry absolute coordinates, the arena center passed by the module is ignored here.
+/// </summary>
+public sealed class ArenaBoundsCustom : ArenaBounds
+{
+    public readonly Shape[] UnionShapes;
+    public readonly Shape[] DifferenceShapes;
+
+    public ArenaBoundsCustom(Shape[] UnionShapes, Shape[]? DifferenceShapes = null, Shape[]? AdditionalShapes = null, float MapResolution = 0.5f, float ScaleFactor = 1f, bool AllowObstacleMap = false, float Offset = default, bool AdjustForHitboxInwards = false, bool AdjustForHitboxOutwards = false)
+        : base(ComputeRadius(UnionShapes))
+    {
+        this.UnionShapes = UnionShapes;
+        this.DifferenceShapes = DifferenceShapes ?? [];
+    }
+
+    public override bool Contains(WPos center, WPos point)
+    {
+        var inside = false;
+        foreach (var s in this.UnionShapes)
+            if (s.Contains(point)) { inside = true; break; }
+        if (!inside)
+            return false;
+        foreach (var s in this.DifferenceShapes)
+            if (s.Contains(point))
+                return false;
+        return true;
+    }
+
+    public override IReadOnlyList<WPos> Contour(WPos center) => LargestShape(this.UnionShapes).ContourWorld();
+    public override IReadOnlyList<WPos>? InnerContour(WPos center) => this.DifferenceShapes.Length > 0 ? this.DifferenceShapes[0].ContourWorld() : null;
+
+    private static Shape LargestShape(Shape[] shapes)
+    {
+        Shape best = shapes[0];
+        var bestExtent = -1f;
+        foreach (var s in shapes)
+        {
+            var (min, max) = Bounds(s.ContourWorld());
+            var extent = (max - min).LengthSq();
+            if (extent > bestExtent) { bestExtent = extent; best = s; }
+        }
+        return best;
+    }
+
+    private static float ComputeRadius(Shape[] shapes)
+    {
+        var min = new WPos(float.MaxValue, float.MaxValue);
+        var max = new WPos(float.MinValue, float.MinValue);
+        foreach (var s in shapes)
+        {
+            var (smin, smax) = Bounds(s.ContourWorld());
+            min = new WPos(MathF.Min(min.X, smin.X), MathF.Min(min.Z, smin.Z));
+            max = new WPos(MathF.Max(max.X, smax.X), MathF.Max(max.Z, smax.Z));
+        }
+        return 0.5f * (max - min).Length();
+    }
+
+    private static (WPos min, WPos max) Bounds(IReadOnlyList<WPos> pts)
+    {
+        var min = new WPos(float.MaxValue, float.MaxValue);
+        var max = new WPos(float.MinValue, float.MinValue);
+        foreach (var p in pts)
+        {
+            min = new WPos(MathF.Min(min.X, p.X), MathF.Min(min.Z, p.Z));
+            max = new WPos(MathF.Max(max.X, p.X), MathF.Max(max.Z, p.Z));
+        }
+        return (min, max);
+    }
+}

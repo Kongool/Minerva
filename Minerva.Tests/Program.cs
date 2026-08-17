@@ -850,6 +850,37 @@ t.Section("Components: CastCounter + SimpleAOEGroups");
 }
 
 // ---------------------------------------------------------------------------
+// 9c-ter. Phase 3: custom mesh shapes + arenas (BMR-ported ArenaBoundsCustom / AOEShapeCustom)
+// ---------------------------------------------------------------------------
+t.Section("Custom shapes + arenas");
+{
+    // Shape containment: a rotated-agnostic square, a regular polygon, and a cross
+    var square = new Square(new WPos(0, 0), 10f);
+    t.True("square contains an interior point", square.Contains(new WPos(5, -5)));
+    t.True("square excludes an exterior point", !square.Contains(new WPos(11, 0)));
+    var hexagon = new Polygon(new WPos(0, 0), 10f, 6);
+    t.True("polygon contains its centre", hexagon.Contains(new WPos(0, 0)));
+    t.True("polygon excludes a far point", !hexagon.Contains(new WPos(20, 20)));
+    var cross = new Cross(new WPos(0, 0), 10f, 2f);
+    t.True("cross contains a point on its arm", cross.Contains(new WPos(0, 8)));
+    t.True("cross excludes a diagonal gap", !cross.Contains(new WPos(8, 8)));
+
+    // ArenaBoundsCustom: a 20y square field with a 5y circular pit in the middle
+    var bounds = new ArenaBoundsCustom([new Square(new WPos(100, 100), 20f)], [new Circle(new WPos(100, 100), 5f)]);
+    t.True("inside the field, outside the pit -> contained", bounds.Contains(new WPos(100, 100), new WPos(112, 100)));
+    t.True("inside the central pit -> not contained", !bounds.Contains(new WPos(100, 100), new WPos(100, 100)));
+    t.True("outside the field -> not contained", !bounds.Contains(new WPos(100, 100), new WPos(125, 100)));
+
+    // AOEShapeCustom: union of two circles minus a smaller one, plus the inverted variant
+    var custom = new AOEShapeCustom([new Circle(new WPos(0, 0), 6f), new Circle(new WPos(20, 0), 6f)], [new Circle(new WPos(0, 0), 2f)]);
+    t.True("custom AOE hits inside the second circle", custom.Check(new WPos(20, 0), default, default));
+    t.True("custom AOE misses between the circles", !custom.Check(new WPos(10, 0), default, default));
+    t.True("custom AOE difference carves out the centre", !custom.Check(new WPos(0, 0), default, default));
+    var inverted = new AOEShapeCustom([new Circle(new WPos(0, 0), 6f)], invertForbiddenZone: true);
+    t.True("inverted custom AOE is safe inside, dangerous outside", inverted.Check(new WPos(50, 50), default, default) && !inverted.Check(new WPos(0, 0), default, default));
+}
+
+// ---------------------------------------------------------------------------
 // 9d. Replay validation: does the module cover the fight? (drawn / hinted / uncovered)
 // ---------------------------------------------------------------------------
 t.Section("Replay validation");

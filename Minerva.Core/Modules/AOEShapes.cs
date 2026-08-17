@@ -144,3 +144,70 @@ public sealed class AOEShapeCross(float length, float halfWidth) : AOEShape
 
     public override string ToString() => $"Cross {this.Length:f1}/{this.HalfWidth:f1}";
 }
+
+/// <summary>
+/// An arbitrary AOE built from absolute-world <see cref="Shape"/> operands: <c>shapes1</c> combined with
+/// <c>shapes2</c> via <see cref="OperandType"/>, minus <c>differenceShapes</c>. Matches BossmodReborn's
+/// <c>AOEShapeCustom</c> constructor (BSD-3; see THIRD-PARTY-NOTICES.txt) so DT shape definitions paste in
+/// unchanged. Containment is analytic (no clipper); the drawn outline is the first positive operand's
+/// (the renderer draws a single contour). Operands are absolute, so a non-default <c>origin</c>/rotation
+/// only rotates the test point about the origin (the common case is default origin + default rotation).
+/// </summary>
+public sealed class AOEShapeCustom : AOEShape
+{
+    private readonly IReadOnlyList<Shape> shapes1;
+    private readonly IReadOnlyList<Shape> difference;
+    private readonly IReadOnlyList<Shape> shapes2;
+    private readonly OperandType operand;
+    private readonly bool invert;
+
+    public AOEShapeCustom(IReadOnlyList<Shape> shapes1, IReadOnlyList<Shape>? differenceShapes = null, IReadOnlyList<Shape>? shapes2 = null, OperandType operand = OperandType.Union, WPos origin = default, bool invertForbiddenZone = false)
+    {
+        this.shapes1 = shapes1;
+        this.difference = differenceShapes ?? [];
+        this.shapes2 = shapes2 ?? [];
+        this.operand = operand;
+        this.invert = invertForbiddenZone;
+    }
+
+    private static bool AnyContains(IReadOnlyList<Shape> shapes, WPos p)
+    {
+        for (var i = 0; i < shapes.Count; ++i)
+            if (shapes[i].Contains(p))
+                return true;
+        return false;
+    }
+
+    public override bool Check(WPos position, WPos origin, Angle rotation)
+    {
+        var p = position;
+        if (rotation.Rad != 0f)
+        {
+            var off = position - origin;
+            var c = MathF.Cos(-rotation.Rad);
+            var s = MathF.Sin(-rotation.Rad);
+            p = origin + new WDir(off.X * c - off.Z * s, off.X * s + off.Z * c);
+        }
+
+        var inside = AnyContains(this.shapes1, p);
+        if (this.shapes2.Count > 0)
+        {
+            var i2 = AnyContains(this.shapes2, p);
+            inside = this.operand switch
+            {
+                OperandType.Intersection => inside && i2,
+                OperandType.Xor => inside ^ i2,
+                _ => inside || i2,
+            };
+        }
+        if (inside && this.difference.Count > 0 && AnyContains(this.difference, p))
+            inside = false;
+
+        return this.invert ? !inside : inside;
+    }
+
+    public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation)
+        => this.shapes1.Count > 0 ? this.shapes1[0].ContourWorld() : [];
+
+    public override string ToString() => $"CustomAOE u={this.shapes1.Count} d={this.difference.Count}";
+}
