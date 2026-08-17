@@ -87,6 +87,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.EmitZoneChange();
         this.DrainGlobalOps();
         this.UpdateActors();
+        this.SyncParty();
     }
 
     private void EmitFrameStart(TimeSpan frameDelta)
@@ -230,9 +231,42 @@ public sealed unsafe class WorldStateGameSync : IDisposable
 
         if (chr != null)
         {
+            var cls = (Class)(byte)chr.ClassJob.RowId;
+            if (existing.Class != cls)
+                this.ws.Execute(new ActorState.OpClassChange(id, cls));
+
             this.UpdateCast(existing, chr, addr);
             this.UpdateStatuses(existing, chr, addr);
         }
+    }
+
+    // Mirror the game's party list into WorldState so components' Raid.WithSlot()/Player() resolve.
+    // Solo: the local player occupies slot 0 (matching BMR's single-player handling).
+    private void SyncParty()
+    {
+        var pl = Service.PartyList;
+        var count = pl.Length;
+        if (count == 0)
+        {
+            this.SetPartySlot(0, 0, Service.ObjectTable[0]?.GameObjectId ?? 0);
+            for (var i = 1; i < PartyState.MaxSlots; ++i)
+                this.SetPartySlot(i, 0, 0);
+            return;
+        }
+        for (var i = 0; i < PartyState.MaxSlots; ++i)
+        {
+            if (i < count && pl[i] is { } m)
+                this.SetPartySlot(i, (ulong)m.ContentId, m.ObjectId);
+            else
+                this.SetPartySlot(i, 0, 0);
+        }
+    }
+
+    private void SetPartySlot(int slot, ulong contentId, ulong instanceId)
+    {
+        var cur = this.ws.Party.Slots[slot];
+        if (cur.ContentID != contentId || cur.InstanceID != instanceId)
+            this.ws.Execute(new PartyState.OpModify(slot, new PartyState.Member(contentId, instanceId)));
     }
 
     private void UpdateCast(Actor act, IBattleChara chr, nint addr)
@@ -309,7 +343,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     // ---------------------------------------------------------------------
 
     // ActorControl category ids (from BMR's ServerIPC.ActorControlCategory)
-    private const uint CatTargetIcon = 34, CatTether = 35, CatTetherCancel = 47, CatDirectorUpdate = 109, CatTargetVFX = 184;
+    private const uint CatTargetIcon = 34, CatTether = 35, CatTetherCancel = 47, CatModelState = 63, CatDirectorUpdate = 109, CatTargetVFX = 184, CatPlayActionTimeline = 407;
 
     private void ActorControlDetour(uint actorID, uint category, uint p1, uint p2, uint p3, uint p4, uint p5, uint p6, uint p7, uint p8, ulong targetID, byte replaying)
     {
@@ -327,6 +361,12 @@ public sealed unsafe class WorldStateGameSync : IDisposable
                 break;
             case CatTetherCancel:
                 this.QueueActorOp(actorID, new ActorState.OpTether(actorID, default));
+                break;
+            case CatModelState: // p1 = model state row index
+                this.QueueActorOp(actorID, new ActorState.OpModelState(actorID, (byte)p1));
+                break;
+            case CatPlayActionTimeline: // p1 = timeline id
+                this.QueueActorOp(actorID, new ActorState.OpActionTimeline(actorID, (ushort)p1));
                 break;
             case CatDirectorUpdate:
                 this.globalOps.Add(new WorldState.OpDirectorUpdate(p1, p2, p3, p4, p5, p6));

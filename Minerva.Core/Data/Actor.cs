@@ -14,6 +14,20 @@ public enum Class : byte
     RPR = 39, SGE = 40, VPR = 41, PCT = 42,
 }
 
+/// <summary>Helpers over <see cref="Class"/>.</summary>
+public static class ClassExtensions
+{
+    /// <summary>The combat role a class belongs to.</summary>
+    public static Role GetRole(this Class c) => c switch
+    {
+        Class.GLA or Class.PLD or Class.MRD or Class.WAR or Class.DRK or Class.GNB => Role.Tank,
+        Class.CNJ or Class.WHM or Class.SCH or Class.AST or Class.SGE => Role.Healer,
+        Class.PGL or Class.MNK or Class.LNC or Class.DRG or Class.ROG or Class.NIN or Class.SAM or Class.RPR or Class.VPR => Role.Melee,
+        Class.ARC or Class.BRD or Class.MCH or Class.DNC or Class.THM or Class.BLM or Class.ACN or Class.SMN or Class.RDM or Class.PCT or Class.BLU => Role.Ranged,
+        _ => Role.None,
+    };
+}
+
 /// <summary>Object kind &lt;&lt; 8 | subkind, matching the game's classification.</summary>
 public enum ActorType : ushort
 {

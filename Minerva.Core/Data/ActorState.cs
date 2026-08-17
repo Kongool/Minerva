@@ -27,6 +27,7 @@ public sealed class ActorState : IEnumerable<Actor>
     public readonly Event<Actor> IsDeadChanged = new();
     public readonly Event<Actor> InCombatChanged = new();
     public readonly Event<Actor> TargetChanged = new();
+    public readonly Event<Actor> ClassChanged = new();
     public readonly Event<Actor> Tethered = new();
     public readonly Event<Actor> Untethered = new();
     public readonly Event<Actor> CastStarted = new();
@@ -36,6 +37,8 @@ public sealed class ActorState : IEnumerable<Actor>
     public readonly Event<Actor, int> StatusLose = new();
     public readonly Event<Actor, ActorIconEvent> IconAppeared = new();
     public readonly Event<Actor, ActorVFXEvent> VFXAppeared = new();
+    public readonly Event<Actor, byte> ModelStateChanged = new();     // carries the new model state
+    public readonly Event<Actor, ushort> ActionTimelineEvent = new(); // carries the timeline id
 
     /// <summary>Advance per-frame state: roll position history and progress active casts.</summary>
     public void Tick(in FrameState frame)
@@ -61,6 +64,8 @@ public sealed class ActorState : IEnumerable<Actor>
                 ops.Add(new OpDead(a.InstanceID, true));
             if (a.InCombat)
                 ops.Add(new OpCombat(a.InstanceID, true));
+            if (a.Class != Class.None)
+                ops.Add(new OpClassChange(a.InstanceID, a.Class));
             if (a.TargetID != default)
                 ops.Add(new OpTarget(a.InstanceID, a.TargetID));
             if (a.Tether.ID != default)
@@ -202,6 +207,18 @@ public sealed class ActorState : IEnumerable<Actor>
         public override void Write(OperationOutput o) => o.Tag(value ? "COM+" : "COM-").Emit(this.InstanceID, "X");
     }
 
+    public sealed class OpClassChange(ulong instanceID, Class cls) : Operation(instanceID)
+    {
+        public readonly Class Class = cls;
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            actor.Class = this.Class;
+            actor.Role = this.Class.GetRole();
+            ws.Actors.ClassChanged.Fire(actor);
+        }
+        public override void Write(OperationOutput o) => o.Tag("CLAS").Emit(this.InstanceID, "X").Emit((uint)this.Class);
+    }
+
     public sealed class OpTarget(ulong instanceID, ulong value) : Operation(instanceID)
     {
         protected override void ExecActor(WorldState ws, Actor actor)
@@ -291,6 +308,22 @@ public sealed class ActorState : IEnumerable<Actor>
     {
         protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.VFXAppeared.Fire(actor, new ActorVFXEvent(vfxID, targetID));
         public override void Write(OperationOutput o) => o.Tag("VFX ").Emit(this.InstanceID, "X").Emit(vfxID).Emit(targetID, "X");
+    }
+
+    /// <summary>Model-state change (e.g. a boss opening/closing a hand). Event-only.</summary>
+    public sealed class OpModelState(ulong instanceID, byte modelState) : Operation(instanceID)
+    {
+        public readonly byte ModelState = modelState;
+        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.ModelStateChanged.Fire(actor, this.ModelState);
+        public override void Write(OperationOutput o) => o.Tag("MDLS").Emit(this.InstanceID, "X").Emit(this.ModelState);
+    }
+
+    /// <summary>Action-timeline event played on an actor. Event-only.</summary>
+    public sealed class OpActionTimeline(ulong instanceID, ushort id) : Operation(instanceID)
+    {
+        public readonly ushort ID = id;
+        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.ActionTimelineEvent.Fire(actor, this.ID);
+        public override void Write(OperationOutput o) => o.Tag("ATML").Emit(this.InstanceID, "X").Emit((uint)this.ID);
     }
 }
 

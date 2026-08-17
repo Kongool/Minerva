@@ -910,6 +910,39 @@ t.Section("Custom shapes + arenas");
 }
 
 // ---------------------------------------------------------------------------
+// 9c-quater. GameSync data spine: party slots + class/role (drives Raid.* + role logic)
+// ---------------------------------------------------------------------------
+t.Section("Party + class/role sync");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0, 0f), TimeSpan.Zero));
+    const ulong tank = 0x10000001, healer = 0x10000002;
+    ws.Execute(new ActorState.OpCreate(tank, 1, 0, "T", 0, ActorType.Player, new Vector4(100, 0, 100, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpCreate(healer, 2, 1, "H", 0, ActorType.Player, new Vector4(103, 0, 100, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpClassChange(tank, Class.WAR));
+    ws.Execute(new ActorState.OpClassChange(healer, Class.WHM));
+    t.Eq("class change derives Tank role", (int)ws.Actors.Find(tank)!.Role, (int)Role.Tank);
+    t.Eq("class change derives Healer role", (int)ws.Actors.Find(healer)!.Role, (int)Role.Healer);
+
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xAA, tank)));
+    ws.Execute(new PartyState.OpModify(1, new PartyState.Member(0xBB, healer)));
+    t.Eq("party WithSlot lists both live members", ws.Party.WithSlot().Length, 2);
+    t.Eq("party FindSlot resolves by instance id", ws.Party.FindSlot(healer), 1);
+    ws.Party.PlayerInstanceID = tank;
+    t.Eq("party Player() resolves the POV", (long)ws.Party.Player()!.InstanceID, (long)tank);
+
+    // model-state + action-timeline ops raise their events (which ModuleBase fans out to component hooks)
+    byte gotModel = 0;
+    ushort gotTimeline = 0;
+    ws.Actors.ModelStateChanged.Subscribe((a, s) => gotModel = s);
+    ws.Actors.ActionTimelineEvent.Subscribe((a, id) => gotTimeline = id);
+    ws.Execute(new ActorState.OpModelState(tank, 7));
+    ws.Execute(new ActorState.OpActionTimeline(tank, 0x123));
+    t.Eq("model-state op fires its event", gotModel, (byte)7);
+    t.Eq("action-timeline op fires its event", gotTimeline, (ushort)0x123);
+}
+
+// ---------------------------------------------------------------------------
 // 9d. Replay validation: does the module cover the fight? (drawn / hinted / uncovered)
 // ---------------------------------------------------------------------------
 t.Section("Replay validation");

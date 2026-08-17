@@ -41,6 +41,9 @@ public abstract class ModuleBase : IDisposable
             world.Actors.Tethered.Subscribe(this.DispatchTethered),
             world.Actors.Untethered.Subscribe(this.DispatchUntethered),
             world.Actors.IconAppeared.Subscribe((a, e) => this.Dispatch(c => c.OnEventIcon(a, e.IconID, e.TargetID))),
+            world.Actors.VFXAppeared.Subscribe((a, e) => this.Dispatch(c => c.OnEventVFX(a, e.VFXID, e.TargetID))),
+            world.Actors.ModelStateChanged.Subscribe((a, s) => this.Dispatch(c => c.OnActorModelStateChange(a, s, 0, 0))),
+            world.Actors.ActionTimelineEvent.Subscribe((a, id) => this.Dispatch(c => c.OnActorPlayActionTimelineEvent(a, id))),
             world.MapEffect.Subscribe(this.OnMapEffectOp));
     }
 
