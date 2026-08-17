@@ -41,6 +41,10 @@ sealed class ShapeshiftingSupercell7(ModuleBase module) : Components.SimpleAOEs(
 sealed class TongueOfFlame(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.TongueOfFlame, new AOEShapeCircle(15f));
 sealed class HellfireFetch(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.HellfireFetch, new AOEShapeCircle(6f));
 sealed class CycloneCrossing2(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.CycloneCrossing2, new AOEShapeCross(60f, 8f)); // TODO: confirm
+// pre-filled estimates so auto-move can route around them (shape type confident, size unconfirmed):
+sealed class CyclonicRing(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.CyclonicRing, new AOEShapeDonut(8f, 30f)); // ESTIMATE: "Ring" => donut, radii unconfirmed
+sealed class CycloneCrossing(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.CycloneCrossing, new AOEShapeCross(60f, 8f)); // ESTIMATE: matches CycloneCrossing2
+sealed class HellishBreath(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.HellishBreath, new AOEShapeCone(60f, 45f.Degrees())); // ESTIMATE: matches HellishBreath2/3/4
 sealed class ShapeshiftingSupercell2(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ShapeshiftingSupercell2, new AOEShapeCone(60f, 45f.Degrees())); // TODO: confirm
 sealed class ShapeshiftingSupercell6(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ShapeshiftingSupercell6, new AOEShapeCone(60f, 45f.Degrees())); // TODO: confirm
 sealed class A48348(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.A48348, new AOEShapeCone(60f, 45f.Degrees())); // TODO: confirm
@@ -52,7 +56,6 @@ sealed class HellishBreath4(ModuleBase module) : Components.SimpleAOEs(module, (
 
 // --- shape unknown / bugged in the draft: hint only until the recording shows the real shape ---
 sealed class BlackenedRain(ModuleBase module) : Components.CastHint(module, (uint)AID.BlackenedRain, "Blackened Rain (shape TBD)"); // was Circle(0)
-sealed class CyclonicRing(ModuleBase module) : Components.CastHint(module, (uint)AID.CyclonicRing, "Cyclonic Ring (donut? TBD)"); // was Rect(30,0)
 sealed class ShapeshiftingSupercell4(ModuleBase module) : Components.CastHint(module, (uint)AID.ShapeshiftingSupercell4, "Shapeshifting Supercell (shape TBD)"); // was Rect(16,0)
 sealed class ShapeshiftingSupercell5(ModuleBase module) : Components.CastHint(module, (uint)AID.ShapeshiftingSupercell5, "Shapeshifting Supercell (shape TBD)"); // was Rect(30,0)
 sealed class HellwardBound(ModuleBase module) : Components.CastHint(module, (uint)AID.HellwardBound, "Hellward Bound (donut? TBD)"); // was Donut(0,0)
@@ -61,9 +64,7 @@ sealed class Change(ModuleBase module) : Components.CastHint(module, (uint)AID.C
 sealed class Change2(ModuleBase module) : Components.CastHint(module, (uint)AID.Change2, "Change (shapeshift)");
 sealed class ShapeshiftingSupercell(ModuleBase module) : Components.CastHint(module, (uint)AID.ShapeshiftingSupercell, "Shapeshifting Supercell (shape TBD)");
 sealed class MadeMagic(ModuleBase module) : Components.CastHint(module, (uint)AID.MadeMagic, "Made Magic (shape TBD)");
-sealed class CycloneCrossing(ModuleBase module) : Components.CastHint(module, (uint)AID.CycloneCrossing, "Cyclone Crossing (11.2s — big cast)");
 sealed class DarkDealing(ModuleBase module) : Components.CastHint(module, (uint)AID.DarkDealing, "Dark Dealing (targeted)");
-sealed class HellishBreath(ModuleBase module) : Components.CastHint(module, (uint)AID.HellishBreath, "Hellish Breath (shape TBD)");
 
 sealed class MetamorphStates : StateMachineBuilder
 {
