@@ -793,6 +793,21 @@ t.Section("Components: CastCounter + SimpleAOEGroups");
     cc.OnEventCast(bossActor, new ActorCastEvent(ActionID.MakeSpell(700u), boss, default, default, 0));
     cc.OnEventCast(bossActor, new ActorCastEvent(ActionID.MakeSpell(701u), boss, default, default, 0));
     t.Eq("cast counter counts only its watched action", cc.NumCasts, 1);
+
+    // CastTowers: a cast spawns a soak tower; a forbidden soaker gets a forbidden zone + GTFO hint
+    var towers = new Minerva.Components.CastTowers(mod, 800u, 4f);
+    towers.OnCastStarted(helperActor, new ActorCastInfo { Action = ActionID.MakeSpell(800u), TargetID = helper, TotalTime = 5f, Location = new Vector3(10, 0, 10) });
+    t.Eq("cast spawns a tower", towers.Towers.Count, 1);
+    towers.Towers[0] = towers.Towers[0] with { ForbiddenSoakers = BitMask.Build(0) }; // player in slot 0 is forbidden
+    var inTower = new Actor(0xD, 13, 0, "T", 0, ActorType.Player, new Vector4(10, 0, 10, 0)); // standing in the tower
+    var th = new ModuleComponent.TextHints();
+    towers.AddHints(0, inTower, th);
+    t.True("forbidden soaker told to GTFO from tower", th.Exists(h => h.text.Contains("GTFO from tower")));
+    var thints = new AIHints { Center = mod.Center, Bounds = mod.Bounds };
+    towers.AddAIHints(0, inTower, PartyRolesConfig.Assignment.Unassigned, thints);
+    t.Eq("forbidden tower becomes a forbidden zone", thints.ForbiddenZones.Count, 1);
+    towers.OnCastFinished(helperActor, new ActorCastInfo { Action = ActionID.MakeSpell(800u) });
+    t.Eq("finishing the cast clears the tower", towers.Towers.Count, 0);
     mod.Dispose();
 }
 
