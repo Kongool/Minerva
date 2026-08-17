@@ -808,6 +808,17 @@ t.Section("Components: CastCounter + SimpleAOEGroups");
     t.Eq("forbidden tower becomes a forbidden zone", thints.ForbiddenZones.Count, 1);
     towers.OnCastFinished(helperActor, new ActorCastInfo { Action = ActionID.MakeSpell(800u) });
     t.Eq("finishing the cast clears the tower", towers.Towers.Count, 0);
+
+    // BaitAwayCast: a cast marks its target as the baiter; a non-target standing in the AOE is warned
+    var bait = new Minerva.Components.BaitAwayCast(mod, 810u, new AOEShapeCircle(5f), centerAtTarget: true);
+    bait.OnCastStarted(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(810u), TargetID = helper, TotalTime = 5f });
+    t.True("cast marks its target as a baiter", bait.IsBaitTarget(helperActor));
+    var nearBaiter = new Actor(0xE, 14, 0, "N", 0, ActorType.Player, new Vector4(11, 0, 10, 0)); // 1y from the baiter (< 5y)
+    var bh = new ModuleComponent.TextHints();
+    bait.AddHints(0, nearBaiter, bh);
+    t.True("a non-target clipped by the bait is warned", bh.Exists(h => h.text.Contains("GTFO from baited aoe")));
+    bait.OnCastFinished(bossActor, new ActorCastInfo { Action = ActionID.MakeSpell(810u), TargetID = helper });
+    t.Eq("finishing the cast clears the bait", bait.CurrentBaits.Count, 0);
     mod.Dispose();
 }
 
