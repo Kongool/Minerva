@@ -540,12 +540,12 @@ t.Section("Component library");
     // Spread: cast targets P1; P2 stands 1y away (< 6y radius) -> both warned
     var spread = new Minerva.Components.SpreadFromCastTargets(module, 500u, 6f);
     spread.OnCastStarted(ws.Actors.Find(boss)!, new ActorCastInfo { Action = ActionID.MakeSpell(500u), TargetID = p1, TotalTime = 5f });
-    t.True("spread registered a target", spread.IsTarget(actorP1));
+    t.True("spread registered a target", spread.IsSpreadTarget(actorP1));
     var sh = new ModuleComponent.TextHints();
     spread.AddHints(0, actorP2, sh);
     t.True("spread warns a nearby non-target", sh.Count > 0);
     spread.OnCastFinished(ws.Actors.Find(boss)!, new ActorCastInfo { Action = ActionID.MakeSpell(500u), TargetID = p1 });
-    t.True("spread cleared on finish", !spread.IsTarget(actorP1));
+    t.True("spread cleared on finish", !spread.IsSpreadTarget(actorP1));
 
     // Stack: cast targets P1; P2 is far -> told to stack
     ws.Execute(new ActorState.OpMove(p2, new Vector4(115, 0, 105, 0))); // far from P1
