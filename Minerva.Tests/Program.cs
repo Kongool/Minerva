@@ -574,10 +574,9 @@ t.Section("Component library");
     var facingBoss = new Actor(0xB, 11, 0, "F2", 0, ActorType.Player, new Vector4(100, 0, 110, MathF.PI)); // rotation pi = facing north
     t.True("player facing the source is flagged", Minerva.Components.Gaze.FacingToward(facingBoss, new WPos(100, 100)));
 
-    // Knockback: predicted landing off the arena
-    var kb = new Minerva.Components.SimpleKnockbacks(module, 503u, 15f);
+    // Knockback: predicted landing off the arena (AwayFromSource pushes east past the wall)
     var nearEdge = new Actor(0xC, 12, 0, "E", 0, ActorType.Player, new Vector4(115, 0, 100, 0)); // 15y east of center, arena half=20
-    var landing = kb.PredictLanding(nearEdge, new WPos(100, 100)); // pushed further east to x=130 -> off (half 20 => max 120)
+    var landing = Minerva.Components.GenericKnockback.AwayFromSource(nearEdge.Position, new WPos(100, 100), 15f); // pushed to x=130 -> off (max 120)
     t.True("knockback predicts off-arena landing", !module.Bounds.Contains(module.Center, landing));
 
     // Concentric: inner circle then outer donut -> one dangerous ring at a time, centre-safe after advance
