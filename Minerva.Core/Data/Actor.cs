@@ -1,5 +1,19 @@
 namespace Minerva;
 
+/// <summary>Combat role. Defaults to <see cref="None"/> until populated from the game.</summary>
+public enum Role { None, Tank, Melee, Ranged, Healer }
+
+/// <summary>Job/class id (subset used by modules). Defaults to <see cref="None"/> until populated.</summary>
+public enum Class : byte
+{
+    None = 0,
+    GLA = 1, PGL = 2, MRD = 3, LNC = 4, ARC = 5, CNJ = 6, THM = 7,
+    PLD = 19, MNK = 20, WAR = 21, DRG = 22, BRD = 23, WHM = 24, BLM = 25,
+    ACN = 26, SMN = 27, SCH = 28, ROG = 29, NIN = 30, MCH = 31, DRK = 32,
+    AST = 33, SAM = 34, RDM = 35, BLU = 36, GNB = 37, DNC = 38,
+    RPR = 39, SGE = 40, VPR = 41, PCT = 42,
+}
+
 /// <summary>Object kind &lt;&lt; 8 | subkind, matching the game's classification.</summary>
 public enum ActorType : ushort
 {
@@ -117,6 +131,8 @@ public sealed class Actor(
     public ActorHPMP HPMP = hpmp;
     public bool IsTargetable = targetable;
     public bool IsAlly = ally;
+    public Role Role;   // combat role (None until the game sync fills it)
+    public Class Class; // job/class (None until the game sync fills it)
     public bool IsDead;
     public bool IsDestroyed;               // removed from world; object may linger via references
     public bool InCombat;

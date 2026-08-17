@@ -18,6 +18,18 @@ public abstract class AOEShape
     public bool Check(WPos position, Actor? origin) => origin != null && this.Check(position, origin.Position, origin.Rotation);
     public IReadOnlyList<WPos> Contour(Actor origin) => this.Contour(origin.Position, origin.Rotation);
 
+    /// <summary>Signed-distance form of this shape for the auto-dodge engine. Analytic where a shape
+    /// overrides it, else a boolean (±1) fallback via <see cref="SDShapeCheck"/>.</summary>
+    public virtual ShapeDistance Distance(WPos origin, Angle rotation) => new SDShapeCheck(this, origin, rotation);
+    public virtual ShapeDistance InvertedDistance(WPos origin, Angle rotation) => new SDInverted(this.Distance(origin, rotation));
+    public ShapeDistance Distance(Actor origin) => this.Distance(origin.Position, origin.Rotation);
+
+    // draw helpers so ported components that call shape.Draw/Outline compile (they route through Arena)
+    public void Draw(Arena arena, WPos origin, Angle rotation = default, uint color = default) => arena.ZoneShape(this, origin, rotation, color);
+    public void Draw(Arena arena, Actor origin, uint color = default) => arena.ZoneShape(this, origin.Position, origin.Rotation, color);
+    public void Outline(Arena arena, WPos origin, Angle rotation = default, uint color = default, float thickness = 1f) => arena.OutlineShape(this, origin, rotation, color, thickness);
+    public void Outline(Arena arena, Actor origin, uint color = default, float thickness = 1f) => arena.OutlineShape(this, origin.Position, origin.Rotation, color, thickness);
+
     protected static void AddArc(List<WPos> pts, WPos center, float radius, Angle from, Angle to, int segments)
     {
         var step = (to - from).Rad / segments;
