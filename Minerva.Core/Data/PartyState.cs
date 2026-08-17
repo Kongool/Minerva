@@ -19,12 +19,57 @@ public sealed class PartyState
     private readonly ActorState actors;
     public readonly Member[] Slots = new Member[MaxSlots];
 
+    /// <summary>Instance id of the local player (POV), set by the plugin. 0 in replays/tests.</summary>
+    public ulong PlayerInstanceID;
+
     public PartyState(ActorState actors) => this.actors = actors;
 
     public readonly Event<int> Modified = new(); // slot index
 
     /// <summary>Resolve a slot's member to a live actor, if present in the world.</summary>
     public Actor? Actor(int slot) => this.actors.Find(this.Slots[slot].InstanceID);
+
+    /// <summary>The local player's actor (POV), or the first resolvable member as a fallback.</summary>
+    public Actor? Player()
+    {
+        if (this.PlayerInstanceID != 0 && this.actors.Find(this.PlayerInstanceID) is { } pc)
+            return pc;
+        for (var i = 0; i < MaxSlots; ++i)
+            if (this.Actor(i) is { } a)
+                return a;
+        return null;
+    }
+
+    /// <summary>Party members paired with their slot index (skipping empty/unresolved/dead slots).</summary>
+    public (int slot, Actor actor)[] WithSlot(bool includeDead = false)
+    {
+        var result = new List<(int, Actor)>(MaxSlots);
+        for (var i = 0; i < MaxSlots; ++i)
+            if (this.Actor(i) is { } a && (includeDead || !a.IsDeadOrDestroyed))
+                result.Add((i, a));
+        return [.. result];
+    }
+
+    /// <summary>Party member actors (skipping empty/unresolved/dead slots).</summary>
+    public Actor[] WithoutSlot(bool includeDead = false)
+    {
+        var result = new List<Actor>(MaxSlots);
+        for (var i = 0; i < MaxSlots; ++i)
+            if (this.Actor(i) is { } a && (includeDead || !a.IsDeadOrDestroyed))
+                result.Add(a);
+        return [.. result];
+    }
+
+    /// <summary>Slot index of the member with the given instance id, or -1.</summary>
+    public int FindSlot(ulong instanceID)
+    {
+        if (instanceID == 0)
+            return -1;
+        for (var i = 0; i < MaxSlots; ++i)
+            if (this.Slots[i].InstanceID == instanceID)
+                return i;
+        return -1;
+    }
 
     public List<WorldState.Operation> CompareToInitial()
     {

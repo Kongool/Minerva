@@ -118,6 +118,8 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.seenThisFrame.Clear();
 
         var table = Service.ObjectTable;
+        // object-table slot 0 is the POV; expose it so components' Raid.Player() resolves in-game
+        this.ws.Party.PlayerInstanceID = table[0]?.GameObjectId ?? 0;
         var len = table.Length;
         for (var i = 0; i < len; ++i)
         {

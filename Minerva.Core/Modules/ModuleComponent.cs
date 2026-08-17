@@ -13,6 +13,10 @@ public abstract class ModuleComponent(ModuleBase module)
     public WorldState World => this.Module.World;
     public Arena Arena => this.Module.Arena;
 
+    /// <summary>The player's party — matches BMR's <c>Raid</c> accessor so ported components using
+    /// <c>Raid.WithSlot()</c> / <c>Raid.Player()</c> / <c>Raid.FindSlot()</c> compile unchanged.</summary>
+    public PartyState Raid => this.Module.World.Party;
+
     /// <summary>Per-actor advice lines; <c>risk</c> marks danger (rendered prominently).</summary>
     public sealed class TextHints : List<(string text, bool risk)>
     {
