@@ -102,6 +102,40 @@ public sealed class AOEShapeCone(float radius, Angle halfAngle, Angle directionO
 /// Rectangle extending <paramref name="lenFront"/> forward and <paramref name="lenBack"/> back
 /// along the facing, with <paramref name="halfWidth"/> to each side.
 /// </summary>
+/// <summary>An annulus sector: between inner and outer radius and within ±halfAngle of the facing.</summary>
+public sealed class AOEShapeDonutSector(float innerRadius, float outerRadius, Angle halfAngle, Angle directionOffset = default) : AOEShape
+{
+    public readonly float InnerRadius = innerRadius;
+    public readonly float OuterRadius = outerRadius;
+    public readonly Angle HalfAngle = halfAngle;
+    public readonly Angle DirectionOffset = directionOffset;
+
+    public override bool Check(WPos position, WPos origin, Angle rotation)
+    {
+        if (!position.InDonut(origin, this.InnerRadius, this.OuterRadius))
+            return false;
+        var center = rotation + this.DirectionOffset;
+        var off = MathF.Abs((Angle.FromDirection(position - origin) - center).Normalized().Rad);
+        return off <= MathF.Abs(this.HalfAngle.Rad);
+    }
+
+    public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation)
+    {
+        var center = rotation + this.DirectionOffset;
+        var from = center - this.HalfAngle;
+        var to = center + this.HalfAngle;
+        var pts = new List<WPos>();
+        AddArc(pts, origin, this.OuterRadius, from, to, ArcSegments);
+        var inner = new List<WPos>();
+        AddArc(inner, origin, this.InnerRadius, from, to, ArcSegments);
+        for (var i = inner.Count - 1; i >= 0; --i)
+            pts.Add(inner[i]);
+        return pts;
+    }
+
+    public override string ToString() => $"DonutSector {this.InnerRadius:f1}/{this.OuterRadius:f1}";
+}
+
 public sealed class AOEShapeRect(float lenFront, float halfWidth, float lenBack = 0f) : AOEShape
 {
     public readonly float LenFront = lenFront;

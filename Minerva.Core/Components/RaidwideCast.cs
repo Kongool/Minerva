@@ -177,9 +177,13 @@ public class CastInterruptHint(ModuleBase module, uint aid, bool canBeInterrupte
 /// <c>SingleTargetCast</c> so ported modules using it compile unchanged.</summary>
 public class SingleTargetCast(ModuleBase module, uint aid, string hint = "Tankbuster") : CastHint(module, aid, hint);
 
+/// <summary>Single-target cue telegraphed by a visual cast that resolves as an instant hit later.
+/// Mirrors BMR's <c>SingleTargetCastDelay</c> (BSD-3); Minerva shows the hint while the visual cast is up.</summary>
+public class SingleTargetCastDelay(ModuleBase module, uint actionVisual, uint actionAOE, double delay, string hint = "Tankbuster") : CastHint(module, actionVisual, hint);
+
 /// <summary>Delayable single-target cast cue. Minerva has no predicted-damage AI, so this behaves like
 /// <see cref="SingleTargetCast"/>. Mirrors BMR's <c>SingleTargetDelayableCast</c> (BSD-3).</summary>
-public class SingleTargetDelayableCast(ModuleBase module, uint aid, string hint = "Tankbuster") : CastHint(module, aid, hint);
+public class SingleTargetDelayableCast(ModuleBase module, uint aid, string hint = "Tankbuster") : SingleTargetCastDelay(module, aid, aid, default, hint);
 
 /// <summary>Multi-AID form of <see cref="SingleTargetDelayableCast"/>. Mirrors BMR's <c>SingleTargetDelayableCasts</c> (BSD-3).</summary>
 public class SingleTargetDelayableCasts(ModuleBase module, uint[] aids, string hint = "Tankbuster") : CastHints(module, aids, hint);

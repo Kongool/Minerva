@@ -56,6 +56,8 @@ def port(text):
     # remaining BossModule references (method params, Func<BossModule,...>, etc.) but NOT BossModuleInfo,
     # which the ModuleInfo remap below rewrites separately
     text = re.sub(r'\bBossModule\b(?!Info)', 'ModuleBase', text)
+    # components that derive from BossComponent directly -> ModuleComponent
+    text = re.sub(r'\bBossComponent\b', 'ModuleComponent', text)
 
     # 3. [ModuleInfo(...)] attribute: GroupID->CFCID, BossModuleInfo.Maturity.X->ModuleMaturity, keep NameID/Contributors
     def remap_info(m):

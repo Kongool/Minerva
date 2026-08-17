@@ -164,6 +164,12 @@ public abstract class ModuleBase : IDisposable
             this.components[i].DrawArenaForeground(pcSlot, pc);
     }
 
+    // module-level virtuals BMR's BossModule exposes, so ported modules that override them compile.
+    // Minerva does not yet call CheckPull/UpdateModule/CalculateModuleAIHints in its loop (tracked).
+    protected virtual bool CheckPull() => this.PrimaryActor.IsTargetable && this.PrimaryActor.InCombat;
+    protected virtual void UpdateModule() { }
+    protected virtual void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }
+
     /// <summary>Draw the boss + tracked objects. Override to customise; default draws the primary actor.</summary>
     protected virtual void DrawEnemies(int pcSlot, Actor pc)
     {
