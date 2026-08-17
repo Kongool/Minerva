@@ -12,6 +12,12 @@ public readonly struct Angle(float rad)
     public const float RadToDeg = 180f / MathF.PI;
     public const float DegToRad = MathF.PI / 180f;
     public const float TwoPI = MathF.Tau;
+    public const float Pi = MathF.PI;
+    public const float HalfPi = MathF.PI / 2f;
+
+    // cardinal / intercardinal facings (matching BMR), for modules that key off boss orientation
+    public static readonly Angle[] AnglesIntercardinals = [(-45.003f).Degrees(), 44.998f.Degrees(), 134.999f.Degrees(), (-135.005f).Degrees()];
+    public static readonly Angle[] AnglesCardinals = [(-90.004f).Degrees(), (-0.003f).Degrees(), 180f.Degrees(), 89.999f.Degrees()];
 
     public float Deg => Rad * RadToDeg;
 

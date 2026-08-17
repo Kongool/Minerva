@@ -205,11 +205,23 @@ public abstract class ModuleBase : IDisposable
     // --- helpers used by components/modules ---
     public DateTime CastFinishAt(ActorCastInfo cast, float extraDelay = 0f) => this.World.FutureTime(cast.RemainingTime + extraDelay);
 
-    public IEnumerable<Actor> Enemies(uint oid)
+    // returns a List (matching BMR) so callers can use .Count / indexing
+    public List<Actor> Enemies(uint oid)
     {
+        var result = new List<Actor>();
         foreach (var a in this.World.Actors)
             if (a.OID == oid && !a.IsDestroyed)
-                yield return a;
+                result.Add(a);
+        return result;
+    }
+
+    public List<Actor> Enemies(uint[] oids)
+    {
+        var result = new List<Actor>();
+        foreach (var a in this.World.Actors)
+            if (!a.IsDestroyed && Array.IndexOf(oids, a.OID) >= 0)
+                result.Add(a);
+        return result;
     }
 
     private void Dispatch(Action<ModuleComponent> action)
