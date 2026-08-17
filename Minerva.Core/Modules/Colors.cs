@@ -12,6 +12,7 @@ public static class Colors
     public static readonly uint AOEImminent = RGBA(255, 40, 0, 160); // brighter fill for an AOE about to resolve
     public static readonly uint Danger = RGBA(255, 0, 0, 255);    // bright red outline
     public static readonly uint Safe = RGBA(0, 200, 0, 70);       // translucent green
+    public static readonly uint SafeFromAOE = RGBA(0, 200, 0, 70); // BMR alias for a safe zone fill
     public static readonly uint Border = RGBA(255, 255, 255, 255);
     public static readonly uint Shadow = RGBA(0, 0, 0, 200);
     public static readonly uint PC = RGBA(255, 140, 0, 255);     // local player (orange)

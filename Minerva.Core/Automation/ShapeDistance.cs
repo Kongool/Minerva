@@ -162,3 +162,19 @@ public sealed class SDShapeCheck(AOEShape shape, WPos origin, Angle rotation) : 
 {
     public override float Distance(WPos p) => shape.Check(p, origin, rotation) ? -1f : 1f;
 }
+
+// Knockback-resolution SDFs. BMR computes the post-knockback safe spot; Minerva has no knockback
+// pathfinding, so these are safe "nothing forbidden" stubs (Distance always positive) that keep ported
+// knockback modules compiling and still showing their AOE visuals. Args intentionally unused.
+#pragma warning disable CS9113 // parameter is unread (intentional stub)
+public sealed class SDKnockbackInAABBSquareAwayFromOrigin(WPos center, WPos origin, float distance, float halfWidth) : ShapeDistance
+{ public override float Distance(WPos p) => 1f; }
+public sealed class SDKnockbackInCircleLeftRightAlongZAxis(WPos center, float distance, float radius) : ShapeDistance
+{ public override float Distance(WPos p) => 1f; }
+public sealed class SDKnockbackInCircleLeftRightAlongXAxis(WPos center, float distance, float radius) : ShapeDistance
+{ public override float Distance(WPos p) => 1f; }
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadii(WPos center, WPos origin, float distance, float halfWidth, (WPos Origin, float Radius)[] aoes, int length) : ShapeDistance
+{ public override float Distance(WPos p) => 1f; }
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadiiPlusAvoidShape(WPos center, WPos origin, float distance, float halfWidth, (WPos Origin, float Radius)[] aoes, int length, ShapeDistance shape) : ShapeDistance
+{ public override float Distance(WPos p) => 1f; }
+#pragma warning restore CS9113

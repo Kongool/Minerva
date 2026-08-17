@@ -10,11 +10,23 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
     public readonly float Radius = radius;
     public readonly uint[] OIDs = oids;
     private readonly AOEShapeCircle shape = new(radius);
+    private readonly Func<ModuleBase, IEnumerable<Actor>>? sourcesFunc;
 
     public Voidzone(ModuleBase module, float radius, uint oid) : this(module, radius, [oid]) { }
 
+    /// <summary>BMR form: the live voidzone actors come from a callback (e.g. <c>m =&gt; m.Enemies(OID.Puddle)</c>).</summary>
+    public Voidzone(ModuleBase module, float radius, Func<ModuleBase, IEnumerable<Actor>> sources, float moveHintLength = default) : this(module, radius, [])
+        => this.sourcesFunc = sources;
+
     private IEnumerable<Actor> Sources()
     {
+        if (this.sourcesFunc != null)
+        {
+            foreach (var a in this.sourcesFunc(this.Module))
+                if (!a.IsDeadOrDestroyed)
+                    yield return a;
+            yield break;
+        }
         foreach (var a in this.World.Actors)
             if (!a.IsDeadOrDestroyed && Array.IndexOf(this.OIDs, a.OID) >= 0)
                 yield return a;

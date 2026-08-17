@@ -26,4 +26,31 @@ public abstract class Arena
 
     /// <summary>Draw the arena boundary.</summary>
     public abstract void DrawBoundary();
+
+    // BMR-compatible actor-drawing helpers so ported modules that call Arena.Actor / Arena.Actors compile
+    public void Actor(Actor? actor, uint color = default, bool allowDeadAndUntargetable = true)
+    {
+        if (actor != null && (allowDeadAndUntargetable || (!actor.IsDeadOrDestroyed && actor.IsTargetable)))
+            this.ActorMarker(actor.Position, actor.Rotation, actor.HitboxRadius, color == default ? Colors.Enemy : color);
+    }
+
+    public void Actors(IEnumerable<Actor> actors, uint color = default, bool allowDeadAndUntargetable = true)
+    {
+        foreach (var a in actors)
+            this.Actor(a, color, allowDeadAndUntargetable);
+    }
+
+    public void Actors(ModuleBase module, uint[] oids, uint color = default, bool allowDeadAndUntargetable = true)
+        => this.Actors(module.Enemies(oids), color, allowDeadAndUntargetable);
+
+    /// <summary>Is the point within the arena boundary?</summary>
+    public bool InBounds(WPos p) => this.Bounds.Contains(this.Center, p);
+
+    /// <summary>Draw only the actors that are currently within the arena boundary.</summary>
+    public void ActorsInBounds(IEnumerable<Actor> actors, uint color = default)
+    {
+        foreach (var a in actors)
+            if (this.InBounds(a.Position))
+                this.Actor(a, color);
+    }
 }

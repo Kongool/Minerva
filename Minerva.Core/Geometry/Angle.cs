@@ -54,6 +54,7 @@ public readonly struct Angle(float rad)
     }
 
     public bool AlmostEqual(Angle other, float epsRad) => MathF.Abs((this - other).Normalized().Rad) <= epsRad;
+    public Angle Round(float precisionDeg = 1f) => new(MathF.Round(Deg / precisionDeg) * precisionDeg * DegToRad);
 
     /// <summary>Shortest signed rotation from this angle to <paramref name="other"/> (&gt;0 = CCW).</summary>
     public Angle DistanceToAngle(Angle other) => (other - this).Normalized();

@@ -56,3 +56,10 @@ public static class RaidExtensions
         return best;
     }
 }
+
+/// <summary>Sorting helpers matching BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>
+public static class SortHelpers
+{
+    public static void SortAOEByActivation(List<AOEInstance> aoes)
+        => aoes.Sort(static (a, b) => a.Activation.CompareTo(b.Activation));
+}

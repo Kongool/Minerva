@@ -86,9 +86,11 @@ def port(text):
 
     # 3b. small body-level idioms BMR uses that Minerva doesn't
     text = re.sub(r'\[\s*with\(\d+\)\s*\]', '[]', text)   # BMR pre-sized collection-expression -> empty list
-    text = text.replace('.Quantized()', '')               # Minerva WPos has no grid quantization
     # BMR's BossComponent exposes 'WorldState'/'Raid'; Minerva's ModuleComponent exposes 'World'/party via World
     text = re.sub(r'\bWorldState\.', 'World.', text)       # property access only (type usages have no trailing dot)
+    # strip predicted-damage args Minerva's components don't take (it has no damage-based AI)
+    text = re.sub(r',\s*damageType:\s*AIHints\.PredictedDamageType\.\w+', '', text)
+    text = re.sub(r',\s*AIHints\.PredictedDamageType\.\w+', '', text)
 
     # 4. arena / overrides that don't map 1:1
     # ArenaBoundsCustom + the Shape operands (Square/Polygon/DonutV/PolygonCustom/...) are supported now;
@@ -107,6 +109,7 @@ def port(text):
               "// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).\n"
               "using System;\n"
               "using System.Collections.Generic;\n"
+              "using System.Linq;\n"
               "using System.Runtime.CompilerServices;\n"
               "using System.Runtime.InteropServices;\n"
               "using Minerva;\n\n")

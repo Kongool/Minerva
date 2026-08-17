@@ -136,18 +136,20 @@ public sealed class AOEShapeDonutSector(float innerRadius, float outerRadius, An
     public override string ToString() => $"DonutSector {this.InnerRadius:f1}/{this.OuterRadius:f1}";
 }
 
-public sealed class AOEShapeRect(float lenFront, float halfWidth, float lenBack = 0f) : AOEShape
+public sealed class AOEShapeRect(float lenFront, float halfWidth, float lenBack = 0f, Angle directionOffset = default, bool invertForbiddenZone = false) : AOEShape
 {
     public readonly float LenFront = lenFront;
     public readonly float HalfWidth = halfWidth;
     public readonly float LenBack = lenBack;
+    public readonly Angle DirectionOffset = directionOffset;
+    public readonly bool InvertForbiddenZone = invertForbiddenZone;
 
     public override bool Check(WPos position, WPos origin, Angle rotation)
-        => position.InRect(origin, rotation, this.LenFront, this.LenBack, this.HalfWidth);
+        => position.InRect(origin, rotation + this.DirectionOffset, this.LenFront, this.LenBack, this.HalfWidth) ^ this.InvertForbiddenZone;
 
     public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation)
     {
-        var fwd = rotation.ToDirection();
+        var fwd = (rotation + this.DirectionOffset).ToDirection();
         var side = fwd.OrthoL();
         return
         [
@@ -189,6 +191,20 @@ public sealed class AOEShapeCross(float length, float halfWidth) : AOEShape
     }
 
     public override string ToString() => $"Cross {this.Length:f1}/{this.HalfWidth:f1}";
+}
+
+/// <summary>A triangular cone (straight edges) of the given side length and half-angle, approximated as a
+/// sector for containment. Ported to match BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>
+public sealed class AOEShapeTriCone(float sideLength, Angle halfAngle, Angle directionOffset = default) : AOEShape
+{
+    public readonly float SideLength = sideLength;
+    public readonly Angle HalfAngle = halfAngle;
+    public readonly Angle DirectionOffset = directionOffset;
+    private AOEShapeCone Cone => new(this.SideLength, this.HalfAngle, this.DirectionOffset);
+
+    public override bool Check(WPos position, WPos origin, Angle rotation) => this.Cone.Check(position, origin, rotation);
+    public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation) => this.Cone.Contour(origin, rotation);
+    public override string ToString() => $"TriCone {this.SideLength:f1}";
 }
 
 /// <summary>A capsule AOE: a <paramref name="length"/>-long stadium of radius <paramref name="radius"/>

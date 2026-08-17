@@ -103,6 +103,49 @@ public abstract class ModuleBase : IDisposable
         return false;
     }
 
+    // BMR-compatible helpers used by ported modules' phase-completion predicates
+    public Actor? GetActor(ulong instanceID) => this.World.Actors.Find(instanceID);
+
+    public bool AllDeadOrDestroyed(uint oid)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.OID == oid && !a.IsDeadOrDestroyed)
+                return false;
+        return true;
+    }
+
+    public bool AllDeadOrDestroyed(uint[] oids)
+    {
+        foreach (var a in this.World.Actors)
+            if (!a.IsDeadOrDestroyed && Array.IndexOf(oids, a.OID) >= 0)
+                return false;
+        return true;
+    }
+
+    public bool IsAnyActorInCombat(uint oid)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.OID == oid && a.InCombat && !a.IsDeadOrDestroyed)
+                return true;
+        return false;
+    }
+
+    public bool IsAnyActorInBoundsInCombat(uint oid)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.OID == oid && a.InCombat && !a.IsDeadOrDestroyed && this.Bounds.Contains(this.Center, a.Position))
+                return true;
+        return false;
+    }
+
+    public bool AllDeadOrDestroyedInBounds(uint oid)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.OID == oid && !a.IsDeadOrDestroyed && this.Bounds.Contains(this.Center, a.Position))
+                return false;
+        return true;
+    }
+
     /// <summary>True once map-effect <paramref name="index"/> has been observed in state <paramref name="state"/>.</summary>
     public bool SawMapEffect(byte index, uint state) => this.seenMapEffects.Contains((index, state));
 
@@ -203,7 +246,7 @@ public abstract class ModuleBase : IDisposable
     }
 
     // --- helpers used by components/modules ---
-    public DateTime CastFinishAt(ActorCastInfo cast, float extraDelay = 0f) => this.World.FutureTime(cast.RemainingTime + extraDelay);
+    public DateTime CastFinishAt(ActorCastInfo cast, double extraDelay = 0d) => this.World.FutureTime(cast.RemainingTime + (float)extraDelay);
 
     // returns a List (matching BMR) so callers can use .Count / indexing
     public List<Actor> Enemies(uint oid)

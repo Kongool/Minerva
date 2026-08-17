@@ -55,6 +55,10 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
     public bool StopAtWall = stopAtWall;   // wall is solid: the push stops at the boundary rather than crossing it
     public readonly int MaxCasts = maxCasts;
 
+    /// <summary>Whether the player in <paramref name="slot"/> is knockback-immune at <paramref name="time"/>.
+    /// Minerva does not track status immunity, so this is always false (knockbacks are always shown).</summary>
+    public bool IsImmune(int slot, DateTime time) => false;
+
     public static WPos AwayFromSource(WPos pos, WPos origin, float distance) => pos != origin ? pos + distance * (pos - origin).Normalized() : pos;
     public static WPos AwayFromSource(WPos pos, Actor? source, float distance) => source != null ? AwayFromSource(pos, source.Position, distance) : pos;
 
@@ -137,7 +141,7 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
 /// <c>sealed class Shockwave(ModuleBase m) : Components.SimpleKnockbacks(m, (uint)AID.Shockwave, 15f);</c>
 /// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
 /// </summary>
-public class SimpleKnockbacks(ModuleBase module, uint aid, float distance, bool ignoreImmunes = false, int maxCasts = int.MaxValue, AOEShape? shape = null, GenericKnockback.Kind kind = GenericKnockback.Kind.AwayFromOrigin, float minDistance = default, bool stopAtWall = false)
+public class SimpleKnockbacks(ModuleBase module, uint aid, float distance, bool ignoreImmunes = false, int maxCasts = int.MaxValue, AOEShape? shape = null, GenericKnockback.Kind kind = GenericKnockback.Kind.AwayFromOrigin, float minDistance = default, bool minDistanceBetweenHitboxes = false, bool stopAtWall = false, bool stopAfterWall = false)
     : GenericKnockback(module, aid, maxCasts, stopAtWall)
 {
     public readonly float Distance = distance;
@@ -145,6 +149,8 @@ public class SimpleKnockbacks(ModuleBase module, uint aid, float distance, bool 
     public readonly Kind KnockbackKind = kind;
     public readonly float MinDistance = minDistance;
     public readonly bool IgnoreImmunes = ignoreImmunes;
+    public readonly bool MinDistanceBetweenHitboxes = minDistanceBetweenHitboxes;
+    public readonly bool StopAfterWall = stopAfterWall;
     public readonly List<Knockback> Casters = [];
 
     public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.Casters);
@@ -173,8 +179,8 @@ public class SimpleKnockbacks(ModuleBase module, uint aid, float distance, bool 
 }
 
 /// <summary>A <see cref="SimpleKnockbacks"/> that watches several actions sharing one distance/shape.</summary>
-public class SimpleKnockbackGroups(ModuleBase module, uint[] aids, float distance, bool ignoreImmunes = false, int maxCasts = int.MaxValue, AOEShape? shape = null, GenericKnockback.Kind kind = GenericKnockback.Kind.AwayFromOrigin, float minDistance = default, bool stopAtWall = false)
-    : SimpleKnockbacks(module, default, distance, ignoreImmunes, maxCasts, shape, kind, minDistance, stopAtWall)
+public class SimpleKnockbackGroups(ModuleBase module, uint[] aids, float distance, bool ignoreImmunes = false, int maxCasts = int.MaxValue, AOEShape? shape = null, GenericKnockback.Kind kind = GenericKnockback.Kind.AwayFromOrigin, float minDistance = default, bool minDistanceBetweenHitboxes = false, bool stopAtWall = false, bool stopAfterWall = false)
+    : SimpleKnockbacks(module, default, distance, ignoreImmunes, maxCasts, shape, kind, minDistance, minDistanceBetweenHitboxes, stopAtWall, stopAfterWall)
 {
     protected readonly uint[] AIDs = aids;
 

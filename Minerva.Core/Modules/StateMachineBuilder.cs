@@ -20,6 +20,11 @@ public abstract class StateMachineBuilder(ModuleBase module)
     /// <summary>A single phase that stays on for the whole encounter (no transition out).</summary>
     protected PhaseDef TrivialPhase() => this.Phase("Main");
 
+    // convenience predicates for phase transitions (delegate to the module), matching BMR usage
+    protected bool AllDeadOrDestroyed(uint oid) => this.Module.AllDeadOrDestroyed(oid);
+    protected bool AllDeadOrDestroyed(uint[] oids) => this.Module.AllDeadOrDestroyed(oids);
+    protected bool AllDeadOrDestroyedInBounds(uint oid) => this.Module.AllDeadOrDestroyedInBounds(oid);
+
     /// <summary>Begin a named phase; chain <c>ActivateOnEnter</c>/<c>TransitionOn*</c> to define it.</summary>
     protected PhaseDef Phase(string name)
     {
@@ -29,13 +34,24 @@ public abstract class StateMachineBuilder(ModuleBase module)
     }
 
     /// <summary>One phase: the components it activates on entry and the condition that ends it.</summary>
+    /// <summary>Raw per-state hooks, mirroring BMR's <c>state.Raw</c>. Ported modules set <c>Raw.Update</c>
+    /// to a completion predicate; Minerva uses it as the phase transition when no explicit one is set.</summary>
+    public sealed class RawState
+    {
+        public Func<bool>? Update;
+    }
+
     public sealed class PhaseDef(ModuleBase module, string name)
     {
         public readonly string Name = name;
         public readonly List<Type> EnterComponents = [];
+        public readonly RawState Raw = new();
 
-        /// <summary>Evaluated each frame while this phase is current; when true, the machine advances.</summary>
-        public Func<bool>? Transition { get; private set; }
+        private Func<bool>? transition;
+
+        /// <summary>Evaluated each frame while this phase is current; when true, the machine advances.
+        /// Falls back to <see cref="RawState.Update"/> when no explicit transition was set.</summary>
+        public Func<bool>? Transition => this.transition ?? this.Raw.Update;
 
         /// <summary>Turn component <typeparamref name="T"/> on when this phase is entered.</summary>
         public PhaseDef ActivateOnEnter<T>() where T : ModuleComponent
@@ -47,7 +63,7 @@ public abstract class StateMachineBuilder(ModuleBase module)
         /// <summary>Advance to the next phase when <paramref name="condition"/> first becomes true.</summary>
         public PhaseDef TransitionOn(Func<bool> condition)
         {
-            this.Transition = condition;
+            this.transition = condition;
             return this;
         }
 

@@ -26,6 +26,7 @@ public sealed class AIHints
     public sealed class Enemy(Actor actor, int priority = 0, bool shouldBeTanked = false)
     {
         public const int PriorityForbidden = int.MinValue; // must not be attacked
+        public const int PriorityInvincible = int.MinValue + 1; // currently invincible
         public const int PriorityPointless = -1;           // no reason to attack
 
         public readonly Actor Actor = actor;
