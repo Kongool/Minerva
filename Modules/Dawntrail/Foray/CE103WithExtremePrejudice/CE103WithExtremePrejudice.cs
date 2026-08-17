@@ -53,9 +53,9 @@ sealed class RockslideStoneSwell(ModuleBase module) : Components.GenericAOEs(mod
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.aoes);
 
-    public override void OnTethered(Actor source)
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
     {
-        switch (source.Tether.ID)
+        switch (tether.ID)
         {
             case (uint)TID.StoneSwell:
                 this.AddOnTarget(source, Circle);

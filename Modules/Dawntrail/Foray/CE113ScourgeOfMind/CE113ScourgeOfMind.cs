@@ -68,9 +68,8 @@ sealed class FireIceTrap(ModuleBase module) : Components.GenericAOEs(module)
         return CollectionsMarshal.AsSpan(this.noElement);
     }
 
-    public override void OnStatusGain(Actor actor, int index)
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
     {
-        var status = actor.Statuses[index];
         if (status.ID != (uint)SID.ImpElement || actor.OID != (uint)OID.JestingJackanapes)
             return;
         var isFire = status.Extra == 0x344;

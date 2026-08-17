@@ -262,11 +262,13 @@ public sealed class ActorState : IEnumerable<Actor>
         protected override void ExecActor(WorldState ws, Actor actor)
         {
             var had = actor.Statuses[this.Index].ID != default;
+            // fire StatusLose while the lost status is still in the slot, so handlers reading it by
+            // ref see the details (matches BMR); StatusGain fires after the new status is written.
+            if (this.Value.ID == default && had)
+                ws.Actors.StatusLose.Fire(actor, this.Index);
             actor.Statuses[this.Index] = this.Value;
             if (this.Value.ID != default)
                 ws.Actors.StatusGain.Fire(actor, this.Index);
-            else if (had)
-                ws.Actors.StatusLose.Fire(actor, this.Index);
         }
         public override void Write(OperationOutput o)
         {

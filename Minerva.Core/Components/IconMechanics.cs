@@ -103,11 +103,11 @@ public class TetherAOEs(ModuleBase module, uint tetherID, uint aid, AOEShape sha
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
         => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.aoes);
 
-    public override void OnTethered(Actor source)
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
     {
-        if (source.Tether.ID != this.TetherID)
+        if (tether.ID != this.TetherID)
             return;
-        var erupter = this.OnSource ? source : (this.World.Actors.Find(source.Tether.Target) ?? source);
+        var erupter = this.OnSource ? source : (this.World.Actors.Find(tether.Target) ?? source);
         this.aoes.Add(new AOEInstance(this.Shape, erupter.Position, erupter.Rotation, this.World.FutureTime(this.Delay), actorID: erupter.InstanceID));
     }
 
@@ -127,13 +127,13 @@ public class BaitAwayTethers(ModuleBase module, uint tetherID) : ModuleComponent
     public readonly uint TetherID = tetherID;
     protected readonly List<ulong> Baiters = [];
 
-    public override void OnTethered(Actor source)
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
     {
-        if (source.Tether.ID == this.TetherID)
+        if (tether.ID == this.TetherID)
             this.Baiters.Add(source.InstanceID);
     }
 
-    public override void OnUntethered(Actor source) => this.Baiters.Remove(source.InstanceID);
+    public override void OnUntethered(Actor source, in ActorTetherInfo tether) => this.Baiters.Remove(source.InstanceID);
 
     public bool IsBaiter(Actor actor) => this.Baiters.Contains(actor.InstanceID);
 

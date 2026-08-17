@@ -36,10 +36,10 @@ public abstract class ModuleBase : IDisposable
             world.Actors.CastStarted.Subscribe(a => { if (a.CastInfo != null) this.Dispatch(c => c.OnCastStarted(a, a.CastInfo)); }),
             world.Actors.CastFinished.Subscribe((a, cast) => this.Dispatch(c => c.OnCastFinished(a, cast))),
             world.Actors.CastEvent.Subscribe((a, e) => this.Dispatch(c => c.OnEventCast(a, e))),
-            world.Actors.StatusGain.Subscribe((a, i) => this.Dispatch(c => c.OnStatusGain(a, i))),
-            world.Actors.StatusLose.Subscribe((a, i) => this.Dispatch(c => c.OnStatusLose(a, i))),
-            world.Actors.Tethered.Subscribe(a => this.Dispatch(c => c.OnTethered(a))),
-            world.Actors.Untethered.Subscribe(a => this.Dispatch(c => c.OnUntethered(a))),
+            world.Actors.StatusGain.Subscribe(this.DispatchStatusGain),
+            world.Actors.StatusLose.Subscribe(this.DispatchStatusLose),
+            world.Actors.Tethered.Subscribe(this.DispatchTethered),
+            world.Actors.Untethered.Subscribe(this.DispatchUntethered),
             world.Actors.IconAppeared.Subscribe((a, e) => this.Dispatch(c => c.OnEventIcon(a, e.IconID, e.TargetID))),
             world.MapEffect.Subscribe(this.OnMapEffectOp));
     }
@@ -212,6 +212,33 @@ public abstract class ModuleBase : IDisposable
 
     private void OnActorCreated(Actor a) => this.Dispatch(c => c.OnActorCreated(a));
     private void OnActorDestroyed(Actor a) => this.Dispatch(c => c.OnActorDestroyed(a));
+
+    // status/tether events carry the struct by ref/in (matching BMR), which can't be captured in a
+    // lambda, so these fan out directly. The status slot holds the relevant status at fire time (the
+    // gained status after a gain; the still-present lost status before a lose — see OpStatus).
+    private void DispatchStatusGain(Actor a, int index)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].OnStatusGain(a, ref a.Statuses[index]);
+    }
+
+    private void DispatchStatusLose(Actor a, int index)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].OnStatusLose(a, ref a.Statuses[index]);
+    }
+
+    private void DispatchTethered(Actor a)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].OnTethered(a, in a.Tether);
+    }
+
+    private void DispatchUntethered(Actor a)
+    {
+        for (var i = 0; i < this.components.Count; ++i)
+            this.components[i].OnUntethered(a, in a.Tether);
+    }
 
     private void OnMapEffectOp(WorldState.OpMapEffect op)
     {

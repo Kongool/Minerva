@@ -42,10 +42,12 @@ public abstract class ModuleComponent(ModuleBase module)
     public virtual void OnCastStarted(Actor caster, ActorCastInfo cast) { }
     public virtual void OnCastFinished(Actor caster, ActorCastInfo cast) { }
     public virtual void OnEventCast(Actor caster, ActorCastEvent cast) { }
-    public virtual void OnStatusGain(Actor actor, int index) { }
-    public virtual void OnStatusLose(Actor actor, int index) { }
-    public virtual void OnTethered(Actor source) { }
-    public virtual void OnUntethered(Actor source) { }
+    // note: matches BMR's signatures so ported modules compile unchanged. On a status change the
+    // struct is passed by ref; on lose it still carries the lost status's details (see OpStatus).
+    public virtual void OnStatusGain(Actor actor, ref ActorStatus status) { }
+    public virtual void OnStatusLose(Actor actor, ref ActorStatus status) { }
+    public virtual void OnTethered(Actor source, in ActorTetherInfo tether) { }
+    public virtual void OnUntethered(Actor source, in ActorTetherInfo tether) { }
     public virtual void OnMapEffect(byte index, uint state) { }
     public virtual void OnEventIcon(Actor actor, uint iconID, ulong targetID) { }
 }

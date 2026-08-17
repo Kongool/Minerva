@@ -755,7 +755,8 @@ t.Section("Extractor: boss detection + tether AOEs");
     var mod = new TestModule(ws, ws.Actors.Find(bossBig)!) { Arena = new NullArena() };
     var tether = new Minerva.Components.TetherAOEs(mod, 303u, 500u, new AOEShapeCircle(16f));
     ws.Execute(new ActorState.OpTether(addSmall, new ActorTetherInfo(303, bossBig))); // add tethered to the boss (target)
-    tether.OnTethered(ws.Actors.Find(addSmall)!);
+    var addSmallActor = ws.Actors.Find(addSmall)!;
+    tether.OnTethered(addSmallActor, in addSmallActor.Tether);
     t.Eq("tether drops an AOE on the target", tether.ActiveAOEs(0, ws.Actors.Find(addSmall)!).Length, 1);
     tether.OnCastFinished(ws.Actors.Find(bossBig)!, new ActorCastInfo { Action = ActionID.MakeSpell(500u) });
     t.Eq("the target's cast clears the tether AOE", tether.ActiveAOEs(0, ws.Actors.Find(addSmall)!).Length, 0);
