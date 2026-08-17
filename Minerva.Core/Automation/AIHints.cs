@@ -50,6 +50,7 @@ public sealed class AIHints
     public readonly List<Func<WPos, float>> GoalZones = [];
     public readonly List<(Angle center, Angle halfWidth, DateTime activation)> ForbiddenDirections = [];
     public readonly List<(BitMask players, DateTime activation, PredictedDamageType type)> PredictedDamage = [];
+    public readonly List<(SpecialMode mode, DateTime activation, DateTime finish)> SpecialModes = [];
     public readonly ActionQueue ActionsToExecute = new();
 
     public void Clear()
@@ -60,6 +61,7 @@ public sealed class AIHints
         this.GoalZones.Clear();
         this.ForbiddenDirections.Clear();
         this.PredictedDamage.Clear();
+        this.SpecialModes.Clear();
         this.ActionsToExecute.Clear();
     }
 
@@ -106,8 +108,12 @@ public sealed class AIHints
 
     public void PrioritizeTargetsByOIDAndForbidDOTs(uint oid, int priority, bool forbidDots) => this.PrioritizeTargetsByOID(oid, priority);
 
-    // --- goal zones / obstacles / directions / predicted damage / special modes (recorded, not yet driving movement) ---
-    public void AddSpecialMode(SpecialMode mode, DateTime activation, DateTime finish = default) { }
+    // --- goal zones / obstacles / directions / predicted damage / special modes ---
+    // TemporaryObstacles and GoalZones DO drive the auto-dodge (obstacles are avoided, goal zones bias
+    // the dodge target). PredictedDamage (mitigation timing) and ForbiddenDirections (facing/gaze) and
+    // SpecialModes are recorded for modules/inspection — they are outside an avoidance-only dodge's remit.
+    public void AddSpecialMode(SpecialMode mode, DateTime activation, DateTime finish = default)
+        => this.SpecialModes.Add((mode, activation, finish));
     public void AddPredictedDamage(BitMask players, DateTime activation, PredictedDamageType type = PredictedDamageType.Raidwide)
         => this.PredictedDamage.Add((players, activation, type));
 
@@ -116,9 +122,29 @@ public sealed class AIHints
     public static Func<WPos, float> GoalSingleTarget(Actor target, float range, float weight = 1f)
         => GoalSingleTarget(target.Position, range + target.HitboxRadius, weight);
 
-    /// <summary>Is a point inside any zone that resolves at or before <paramref name="deadline"/>?</summary>
+    /// <summary>Combined attractor weight of a point across all goal zones (higher = more desirable).</summary>
+    public float GoalScore(WPos p)
+    {
+        var score = 0f;
+        for (var i = 0; i < this.GoalZones.Count; ++i)
+            score += this.GoalZones[i](p);
+        return score;
+    }
+
+    /// <summary>True if a point sits inside a standing obstacle (always dangerous, no activation time).</summary>
+    public bool InObstacle(WPos p)
+    {
+        for (var i = 0; i < this.TemporaryObstacles.Count; ++i)
+            if (this.TemporaryObstacles[i].Contains(p))
+                return true;
+        return false;
+    }
+
+    /// <summary>Is a point inside any zone that resolves at or before <paramref name="deadline"/> (or any standing obstacle)?</summary>
     public bool InImminentDanger(WPos p, DateTime deadline)
     {
+        if (this.InObstacle(p))
+            return true;
         foreach (var z in this.ForbiddenZones)
             if (z.Activation <= deadline && z.Contains(p))
                 return true;

@@ -229,6 +229,13 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         if (existing.TargetID != target)
             this.ws.Execute(new ActorState.OpTarget(id, target));
 
+        var eventState = GameData.EventState(addr);
+        if (existing.EventState != eventState)
+            this.ws.Execute(new ActorState.OpEventState(id, eventState));
+        var renderflags = GameData.RenderFlags(addr);
+        if (existing.Renderflags != renderflags)
+            this.ws.Execute(new ActorState.OpRenderflags(id, renderflags));
+
         if (chr != null)
         {
             var cls = (Class)(byte)chr.ClassJob.RowId;
@@ -256,7 +263,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         for (var i = 0; i < PartyState.MaxSlots; ++i)
         {
             if (i < count && pl[i] is { } m)
-                this.SetPartySlot(i, (ulong)m.ContentId, m.ObjectId);
+                this.SetPartySlot(i, (ulong)m.ContentId, m.EntityId);
             else
                 this.SetPartySlot(i, 0, 0);
         }
@@ -343,7 +350,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     // ---------------------------------------------------------------------
 
     // ActorControl category ids (from BMR's ServerIPC.ActorControlCategory)
-    private const uint CatTargetIcon = 34, CatTether = 35, CatTetherCancel = 47, CatModelState = 63, CatDirectorUpdate = 109, CatTargetVFX = 184, CatPlayActionTimeline = 407;
+    private const uint CatTargetIcon = 34, CatTether = 35, CatTetherCancel = 47, CatModelState = 63, CatDirectorUpdate = 109, CatTargetVFX = 184, CatPlayActionTimeline = 407, CatEObjSetState = 409, CatEObjAnimation = 413;
 
     private void ActorControlDetour(uint actorID, uint category, uint p1, uint p2, uint p3, uint p4, uint p5, uint p6, uint p7, uint p8, ulong targetID, byte replaying)
     {
@@ -367,6 +374,12 @@ public sealed unsafe class WorldStateGameSync : IDisposable
                 break;
             case CatPlayActionTimeline: // p1 = timeline id
                 this.QueueActorOp(actorID, new ActorState.OpActionTimeline(actorID, (ushort)p1));
+                break;
+            case CatEObjSetState: // p1 = event-object state
+                this.QueueActorOp(actorID, new ActorState.OpActorEState(actorID, (ushort)p1));
+                break;
+            case CatEObjAnimation: // p1, p2 = animation params
+                this.QueueActorOp(actorID, new ActorState.OpActorEAnim(actorID, p1 | (p2 << 16)));
                 break;
             case CatDirectorUpdate:
                 this.globalOps.Add(new WorldState.OpDirectorUpdate(p1, p2, p3, p4, p5, p6));

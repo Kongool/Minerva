@@ -503,6 +503,21 @@ t.Section("Auto-dodge pathfinding");
     t.True("fully covered -> need to move", noSpot.NeedToMove);
     t.True("fully covered -> no safe spot found", !noSpot.Found);
 
+    // TemporaryObstacles are avoided just like forbidden zones (they have no activation time)
+    var withObstacle = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = center };
+    withObstacle.AddForbiddenZone(new AOEShapeCircle(8f), center, default, now.AddSeconds(2));
+    withObstacle.TemporaryObstacles.Add(new SDCircle(center + new WDir(12f, 0f), 6f)); // a wall to the east
+    var obDodge = ArenaPathfinder.Solve(withObstacle, now);
+    t.True("dodge avoids the standing obstacle", !withObstacle.InObstacle(obDodge.Target));
+    t.True("dodge still escapes the AOE", !new AOEShapeCircle(8f).Check(obDodge.Target, center, default));
+
+    // GoalZones gently bias the chosen safe spot: with two equidistant escape sides, prefer the goal side
+    var withGoal = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = center };
+    withGoal.AddForbiddenZone(new AOEShapeCircle(8f), center, default, now.AddSeconds(2));
+    withGoal.GoalZones.Add(AIHints.GoalSingleTarget(center + new WDir(0f, 12f), 4f, 1f)); // goal to the south (+Z)
+    var goalDodge = ArenaPathfinder.Solve(withGoal, now);
+    t.True("goal bias pulls the dodge toward the goal side", goalDodge.Target.Z > center.Z);
+
     // component -> AIHints wiring: a SimpleAOEs feeds the dodge engine through the module
     var ws = new WorldState(10_000_000, "test");
     ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
@@ -940,6 +955,26 @@ t.Section("Party + class/role sync");
     ws.Execute(new ActorState.OpActionTimeline(tank, 0x123));
     t.Eq("model-state op fires its event", gotModel, (byte)7);
     t.Eq("action-timeline op fires its event", gotTimeline, (ushort)0x123);
+
+    // event-object / renderflags / event-state ops fire their events and persist where applicable
+    byte gotEventState = 0;
+    ushort gotEState = 0;
+    uint gotEAnim = 0;
+    var gotRender = 0;
+    ws.Actors.EventStateChanged.Subscribe((a, v) => gotEventState = v);
+    ws.Actors.EStateChanged.Subscribe((a, s) => gotEState = s);
+    ws.Actors.EAnimChanged.Subscribe((a, s) => gotEAnim = s);
+    ws.Actors.RenderflagsChanged.Subscribe((a, f) => gotRender = f);
+    ws.Execute(new ActorState.OpEventState(tank, 5));
+    ws.Execute(new ActorState.OpActorEState(tank, 0x11));
+    ws.Execute(new ActorState.OpActorEAnim(tank, 0x00220011));
+    ws.Execute(new ActorState.OpRenderflags(tank, 0x40));
+    t.Eq("event-state op fires + persists on the actor", (int)ws.Actors.Find(tank)!.EventState, 5);
+    t.Eq("event-state event carries the value", (int)gotEventState, 5);
+    t.Eq("event-object state event fires", (int)gotEState, 0x11);
+    t.Eq("event-object animation event fires", (long)gotEAnim, 0x00220011L);
+    t.Eq("renderflags op fires + persists on the actor", ws.Actors.Find(tank)!.Renderflags, 0x40);
+    t.Eq("renderflags event carries the value", gotRender, 0x40);
 }
 
 // ---------------------------------------------------------------------------

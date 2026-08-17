@@ -39,6 +39,10 @@ public sealed class ActorState : IEnumerable<Actor>
     public readonly Event<Actor, ActorVFXEvent> VFXAppeared = new();
     public readonly Event<Actor, byte> ModelStateChanged = new();     // carries the new model state
     public readonly Event<Actor, ushort> ActionTimelineEvent = new(); // carries the timeline id
+    public readonly Event<Actor, byte> EventStateChanged = new();     // polled GameObject.EventState
+    public readonly Event<Actor, int> RenderflagsChanged = new();     // polled GameObject.RenderFlags
+    public readonly Event<Actor, ushort> EStateChanged = new();       // EObjSetState (event-object state)
+    public readonly Event<Actor, uint> EAnimChanged = new();          // EObjAnimation
 
     /// <summary>Advance per-frame state: roll position history and progress active casts.</summary>
     public void Tick(in FrameState frame)
@@ -66,6 +70,10 @@ public sealed class ActorState : IEnumerable<Actor>
                 ops.Add(new OpCombat(a.InstanceID, true));
             if (a.Class != Class.None)
                 ops.Add(new OpClassChange(a.InstanceID, a.Class));
+            if (a.EventState != 0)
+                ops.Add(new OpEventState(a.InstanceID, a.EventState));
+            if (a.Renderflags != 0)
+                ops.Add(new OpRenderflags(a.InstanceID, a.Renderflags));
             if (a.TargetID != default)
                 ops.Add(new OpTarget(a.InstanceID, a.TargetID));
             if (a.Tether.ID != default)
@@ -324,6 +332,46 @@ public sealed class ActorState : IEnumerable<Actor>
         public readonly ushort ID = id;
         protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.ActionTimelineEvent.Fire(actor, this.ID);
         public override void Write(OperationOutput o) => o.Tag("ATML").Emit(this.InstanceID, "X").Emit((uint)this.ID);
+    }
+
+    /// <summary>Polled GameObject.EventState change (persistent; stored on the actor).</summary>
+    public sealed class OpEventState(ulong instanceID, byte value) : Operation(instanceID)
+    {
+        public readonly byte Value = value;
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            actor.EventState = this.Value;
+            ws.Actors.EventStateChanged.Fire(actor, this.Value);
+        }
+        public override void Write(OperationOutput o) => o.Tag("ESTA").Emit(this.InstanceID, "X").Emit((uint)this.Value);
+    }
+
+    /// <summary>Polled GameObject.RenderFlags change (persistent; stored on the actor).</summary>
+    public sealed class OpRenderflags(ulong instanceID, int value) : Operation(instanceID)
+    {
+        public readonly int Value = value;
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            actor.Renderflags = this.Value;
+            ws.Actors.RenderflagsChanged.Fire(actor, this.Value);
+        }
+        public override void Write(OperationOutput o) => o.Tag("RFLG").Emit(this.InstanceID, "X").Emit((uint)this.Value, "X");
+    }
+
+    /// <summary>Event-object state change (EObjSetState). Event-only.</summary>
+    public sealed class OpActorEState(ulong instanceID, ushort state) : Operation(instanceID)
+    {
+        public readonly ushort State = state;
+        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.EStateChanged.Fire(actor, this.State);
+        public override void Write(OperationOutput o) => o.Tag("EOBS").Emit(this.InstanceID, "X").Emit((uint)this.State);
+    }
+
+    /// <summary>Event-object animation (EObjAnimation). Event-only.</summary>
+    public sealed class OpActorEAnim(ulong instanceID, uint state) : Operation(instanceID)
+    {
+        public readonly uint State = state;
+        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.EAnimChanged.Fire(actor, this.State);
+        public override void Write(OperationOutput o) => o.Tag("EOBA").Emit(this.InstanceID, "X").Emit(this.State, "X");
     }
 }
 

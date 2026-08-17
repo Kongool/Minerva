@@ -34,13 +34,18 @@ public static class ArenaPathfinder
         return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
     }
 
+    // a point inside a goal zone is worth this many yards² of extra travel — enough to nudge the dodge
+    // toward objectives (uptime spots) without ever overriding safety or making the AI run across the arena
+    private const float GoalBias = 9f;
+
     private static bool TryNearestSafe(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, out SafeSpot spot)
     {
         var center = hints.Center;
         var reach = hints.Bounds.Radius;
+        var hasGoals = hints.GoalZones.Count > 0;
         var found = false;
         var best = player;
-        var bestDistSq = float.MaxValue;
+        var bestCost = float.MaxValue;
 
         for (var x = center.X - reach; x <= center.X + reach; x += cellSize)
         {
@@ -52,10 +57,13 @@ public static class ArenaPathfinder
                 if (hints.InImminentDanger(p, deadline, margin))
                     continue;
 
-                var d = (p - player).LengthSq();
-                if (d < bestDistSq)
+                // cost is travel distance, reduced for cells inside goal zones (a gentle attractor)
+                var cost = (p - player).LengthSq();
+                if (hasGoals)
+                    cost -= hints.GoalScore(p) * GoalBias;
+                if (cost < bestCost)
                 {
-                    bestDistSq = d;
+                    bestCost = cost;
                     best = p;
                     found = true;
                 }

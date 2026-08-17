@@ -136,7 +136,7 @@ sealed class StormSurge(ModuleBase module) : Components.GenericAOEs(module)
 sealed class ElectrifyingFlight(ModuleBase module) : Components.GenericKnockback(module)
 {
     private readonly List<Knockback> _kbs = [];
-    private ShapeDistance distance;
+    private ShapeDistance distance = null!;
     private static readonly AOEShapeRect rect = new(30f, 30f);
 
     public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) => CollectionsMarshal.AsSpan(_kbs);

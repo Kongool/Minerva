@@ -26,6 +26,14 @@ internal static unsafe class GameData
     public static byte ShieldPercent(nint characterAddress)
         => characterAddress != 0 ? ((Character*)characterAddress)->ShieldValue : (byte)0;
 
+    /// <summary>The object's event state (used by some mechanics to gate on a boss's phase/prop state).</summary>
+    public static byte EventState(nint objectAddress)
+        => objectAddress != 0 ? ((GameObject*)objectAddress)->EventState : (byte)0;
+
+    /// <summary>The object's render flags (0 = fully visible; non-zero hides/desaturates — used to detect (in)active props).</summary>
+    public static int RenderFlags(nint objectAddress)
+        => objectAddress != 0 ? (int)((GameObject*)objectAddress)->RenderFlags : 0;
+
     /// <summary>
     /// True if the actor has a live cast-info block. Dalamud's cast getters (<c>IsCasting</c>,
     /// <c>CastActionId</c>, …) dereference this pointer <i>without</i> a null check and throw when it's

@@ -147,7 +147,8 @@ public sealed class Actor(
     public bool IsAlly = ally;
     public Role Role;   // combat role (None until the game sync fills it)
     public Class Class; // job/class (None until the game sync fills it)
-    public ushort EventState; // actor event/animation state (0 until the game sync fills it)
+    public byte EventState;  // GameObject event state (0 until the game sync fills it)
+    public int Renderflags;  // GameObject render flags (0 until the game sync fills it)
     public bool IsDead;
     public bool IsDestroyed;               // removed from world; object may linger via references
     public bool InCombat;
