@@ -38,7 +38,7 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
         }
     }
 
-    public override void AddAIHints(int slot, Actor actor, AIHints hints)
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         foreach (var a in this.Sources())
             hints.AddForbiddenZone(this.shape, a.Position, default, this.World.CurrentTime);

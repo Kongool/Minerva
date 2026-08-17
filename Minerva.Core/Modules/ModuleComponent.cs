@@ -26,8 +26,9 @@ public abstract class ModuleComponent(ModuleBase module)
     public virtual void AddHints(int slot, Actor actor, TextHints hints) { }
     public virtual void AddGlobalHints(GlobalHints hints) { }
 
-    /// <summary>Contribute danger zones for the auto-dodge engine (see <see cref="AIHints"/>).</summary>
-    public virtual void AddAIHints(int slot, Actor actor, AIHints hints) { }
+    /// <summary>Contribute danger zones for the auto-dodge engine (see <see cref="AIHints"/>). The
+    /// <paramref name="assignment"/> role slot (matching BMR) lets role-based positioning port unchanged.</summary>
+    public virtual void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }
 
     /// <summary>Draw danger zones / fills (called before the boundary).</summary>
     public virtual void DrawArenaBackground(int pcSlot, Actor pc) { }

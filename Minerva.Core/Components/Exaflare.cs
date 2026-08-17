@@ -9,7 +9,7 @@ namespace Minerva.Components;
 /// drive it directly with <see cref="Lines"/>, or use <see cref="SimpleExaflare"/> for the common
 /// cast-driven case.
 /// </summary>
-public class Exaflare(ModuleBase module, AOEShape shape) : GenericAOEs(module, "GTFO from exaflare!")
+public class Exaflare(ModuleBase module, AOEShape shape) : GenericAOEs(module, warningText: "GTFO from exaflare!")
 {
     /// <summary>One marching line: its next explosion point, step vector, cadence and steps remaining.</summary>
     public sealed class Line(WPos next, WDir advance, DateTime nextExplosion, double timeToMove, int explosionsLeft, int maxShown)

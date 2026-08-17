@@ -183,15 +183,17 @@ public abstract class ModuleBase : IDisposable
             this.components[i].AddHints(slot, actor, hints);
     }
 
-    /// <summary>Populate the auto-dodge hints from every component, for the given player.</summary>
-    public void BuildAIHints(int slot, Actor actor, AIHints hints)
+    /// <summary>Populate the auto-dodge hints from every component, for the given player. The party
+    /// role <paramref name="assignment"/> is passed through to components (Unassigned by default, since
+    /// Minerva has no role-config UI yet).</summary>
+    public void BuildAIHints(int slot, Actor actor, AIHints hints, PartyRolesConfig.Assignment assignment = PartyRolesConfig.Assignment.Unassigned)
     {
         hints.Clear();
         hints.PlayerPosition = actor.Position;
         hints.Center = this.Center;
         hints.Bounds = this.Bounds;
         for (var i = 0; i < this.components.Count; ++i)
-            this.components[i].AddAIHints(slot, actor, hints);
+            this.components[i].AddAIHints(slot, actor, assignment, hints);
     }
 
     // --- helpers used by components/modules ---

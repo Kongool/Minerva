@@ -559,7 +559,7 @@ t.Section("Component library");
     ws.Execute(new ActorState.OpCreate(puddle, 0x9999, 0, "Puddle", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 1f, default, true, false, 0));
     var voidzone = new Minerva.Components.Voidzone(module, 6f, 0x9999u);
     var vh = new AIHints { Center = module.Center, Bounds = module.Bounds };
-    voidzone.AddAIHints(0, actorP1, vh);
+    voidzone.AddAIHints(0, actorP1, PartyRolesConfig.Assignment.Unassigned, vh);
     t.Eq("voidzone contributes a forbidden zone", vh.ForbiddenZones.Count, 1);
     var vt = new ModuleComponent.TextHints();
     var inPuddle = new Actor(0x9, 9, 0, "X", 0, ActorType.Player, new Vector4(100, 0, 102, 0)); // 2y from puddle center
@@ -760,6 +760,40 @@ t.Section("Extractor: boss detection + tether AOEs");
     t.Eq("tether drops an AOE on the target", tether.ActiveAOEs(0, ws.Actors.Find(addSmall)!).Length, 1);
     tether.OnCastFinished(ws.Actors.Find(bossBig)!, new ActorCastInfo { Action = ActionID.MakeSpell(500u) });
     t.Eq("the target's cast clears the tether AOE", tether.ActiveAOEs(0, ws.Actors.Find(addSmall)!).Length, 0);
+    mod.Dispose();
+}
+
+// ---------------------------------------------------------------------------
+// 9c-bis. Components: CastCounter + SimpleAOEGroups (BMR-ported AOE family)
+// ---------------------------------------------------------------------------
+t.Section("Components: CastCounter + SimpleAOEGroups");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0, 0f), TimeSpan.Zero));
+    const ulong boss = 0x400000801, helper = 0x400000802;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1000, 0, "Boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 5f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(helper, 0x1001, 1, "Helper", 0, ActorType.Helper, new Vector4(10, 0, 10, 0), 0.5f, default, true, false, 0));
+    var bossActor = ws.Actors.Find(boss)!;
+    var helperActor = ws.Actors.Find(helper)!;
+    var mod = new TestModule(ws, bossActor) { Arena = new NullArena() };
+
+    ActorCastInfo MkCast(uint aid) => new() { Action = ActionID.MakeSpell(aid), TargetID = boss, TotalTime = 3f, Location = new Vector3(10, 0, 10) };
+
+    // SimpleAOEGroups: two different action ids share one 6y circle; each caster is a distinct actor
+    var grp = new Minerva.Components.SimpleAOEGroups(mod, [700u, 701u], 6f);
+    grp.OnCastStarted(bossActor, MkCast(700u));
+    grp.OnCastStarted(helperActor, MkCast(701u));
+    t.Eq("group tracks both watched actions", grp.ActiveAOEs(0, bossActor).Length, 2);
+    grp.OnCastStarted(bossActor, MkCast(999u)); // unwatched
+    t.Eq("group ignores an unwatched action", grp.ActiveAOEs(0, bossActor).Length, 2);
+    grp.OnCastFinished(bossActor, MkCast(700u));
+    t.Eq("finishing one caster's cast clears one AOE", grp.ActiveAOEs(0, bossActor).Length, 1);
+
+    // CastCounter only tallies resolved casts of its watched action
+    var cc = new Minerva.Components.CastCounter(mod, 700u);
+    cc.OnEventCast(bossActor, new ActorCastEvent(ActionID.MakeSpell(700u), boss, default, default, 0));
+    cc.OnEventCast(bossActor, new ActorCastEvent(ActionID.MakeSpell(701u), boss, default, default, 0));
+    t.Eq("cast counter counts only its watched action", cc.NumCasts, 1);
     mod.Dispose();
 }
 

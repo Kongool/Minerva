@@ -91,10 +91,9 @@ public class StackFromIcon(ModuleBase module, uint iconID, float radius) : Modul
 /// <c>WatchedAction</c> finishes on that target. Common "leash then AOE" mechanic (e.g. Occult Crescent
 /// CE StoneSwell/Rockslide). Set <c>onSource</c> for the variant that erupts at the tether source.
 /// </summary>
-public class TetherAOEs(ModuleBase module, uint tetherID, uint aid, AOEShape shape, double delay = 6d, bool onSource = false) : GenericAOEs(module)
+public class TetherAOEs(ModuleBase module, uint tetherID, uint aid, AOEShape shape, double delay = 6d, bool onSource = false) : GenericAOEs(module, aid)
 {
     public readonly uint TetherID = tetherID;
-    public readonly uint WatchedAction = aid;
     public readonly AOEShape Shape = shape;
     public readonly double Delay = delay;
     public readonly bool OnSource = onSource;

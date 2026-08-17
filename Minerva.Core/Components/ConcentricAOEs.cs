@@ -9,7 +9,7 @@ namespace Minerva.Components;
 /// about to resolve is treated as dangerous (safe rings are hidden); pass <paramref name="showAll"/>
 /// to preview the whole set with only the next ring flagged risky.
 /// </summary>
-public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll = false) : GenericAOEs(module, "Wrong ring — move!")
+public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll = false) : GenericAOEs(module, warningText: "Wrong ring — move!")
 {
     /// <summary>One in-flight bullseye: where it's centred and how many of its rings have resolved.</summary>
     public sealed class Sequence(WPos origin, Angle rotation = default, DateTime nextActivation = default)
