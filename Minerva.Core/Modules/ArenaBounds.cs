@@ -149,11 +149,28 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     public readonly Shape[] UnionShapes;
     public readonly Shape[] DifferenceShapes;
 
+    /// <summary>Bounding-box centre of the union operands — what modules pass as the arena centre.</summary>
+    public readonly WPos Center;
+
     public ArenaBoundsCustom(Shape[] UnionShapes, Shape[]? DifferenceShapes = null, Shape[]? AdditionalShapes = null, float MapResolution = 0.5f, float ScaleFactor = 1f, bool AllowObstacleMap = false, float Offset = default, bool AdjustForHitboxInwards = false, bool AdjustForHitboxOutwards = false)
         : base(ComputeRadius(UnionShapes))
     {
         this.UnionShapes = UnionShapes;
         this.DifferenceShapes = DifferenceShapes ?? [];
+        this.Center = ComputeCenter(UnionShapes);
+    }
+
+    private static WPos ComputeCenter(Shape[] shapes)
+    {
+        var min = new WPos(float.MaxValue, float.MaxValue);
+        var max = new WPos(float.MinValue, float.MinValue);
+        foreach (var s in shapes)
+        {
+            var (smin, smax) = Bounds(s.ContourWorld());
+            min = new WPos(MathF.Min(min.X, smin.X), MathF.Min(min.Z, smin.Z));
+            max = new WPos(MathF.Max(max.X, smax.X), MathF.Max(max.Z, smax.Z));
+        }
+        return min + (max - min) * 0.5f;
     }
 
     public override bool Contains(WPos center, WPos point)

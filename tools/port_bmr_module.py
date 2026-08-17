@@ -12,10 +12,28 @@ import re, sys, pathlib
 
 # components Minerva already has — anything else is flagged to add/map
 KNOWN = {
-    "GenericAOEs", "SimpleAOEs", "RaidwideCast", "RaidwideCasts", "CastHint", "SingleTargetCast",
-    "Voidzone", "TetherAOEs", "BaitAwayTethers", "Gaze", "LineStack", "SimpleKnockbacks",
-    "SpreadFromCastTargets", "SpreadFromIcon", "StackFromIcon", "StackWithCastTargets",
-    "ConcentricAOEs", "Exaflare", "SimpleExaflare", "ArenaChange",
+    # AOE family
+    "GenericAOEs", "SimpleAOEs", "SimpleAOEGroups", "SimpleAOEGroupsByTimewindow",
+    "ChargeAOEs", "SimpleChargeAOEGroups", "ConcentricAOEs", "Exaflare", "SimpleExaflare",
+    "GenericRotatingAOE",
+    # cast counting / hints
+    "CastCounter", "CastCounterMulti", "CastHint", "CastHints", "CastInterruptHint",
+    "SingleTargetCast", "SingleTargetDelayableCast", "SingleTargetDelayableCasts",
+    "RaidwideCast", "RaidwideCasts", "RaidwideInstant", "RaidwideCastDelay", "RaidwideCastsDelay",
+    # stack / spread
+    "GenericStackSpread", "UniformStackSpread", "CastStackSpread", "IconStackSpread",
+    "SpreadFromCastTargets", "StackWithCastTargets", "SpreadFromIcon", "StackWithIcon",
+    "LineStack",
+    # bait
+    "GenericBaitAway", "BaitAwayCast", "BaitAwayIcon", "BaitAwayTethers",
+    # knockback
+    "GenericKnockback", "SimpleKnockbacks", "SimpleKnockbackGroups",
+    # towers
+    "GenericTowers", "CastTowers",
+    # gaze
+    "Gaze", "GenericGaze", "CastGaze", "CastGazes",
+    # misc
+    "Voidzone", "TetherAOEs", "ArenaChange", "Adds", "AddsPointless", "AddsMulti", "StayMove",
 }
 
 
@@ -56,9 +74,17 @@ def port(text):
     if n == 0:
         report.append("WARN: no [ModuleInfo(...)] found")
 
+    # 3b. small body-level idioms BMR uses that Minerva doesn't
+    text = re.sub(r'\[\s*with\(\d+\)\s*\]', '[]', text)   # BMR pre-sized collection-expression -> empty list
+    text = text.replace('.Quantized()', '')               # Minerva WPos has no grid quantization
+    # BMR's BossComponent exposes 'WorldState'/'Raid'; Minerva's ModuleComponent exposes 'World'/party via World
+    text = re.sub(r'\bWorldState\.', 'World.', text)       # property access only (type usages have no trailing dot)
+
     # 4. arena / overrides that don't map 1:1
-    if 'ArenaBoundsCustom' in text or 'DefaultBounds' in text:
-        report.append("MANUAL: uses ArenaBoundsCustom/DefaultBounds — approximate with ArenaBoundsCircle/Square/Rect/Donut/Polygon")
+    # ArenaBoundsCustom + the Shape operands (Square/Polygon/DonutV/PolygonCustom/...) are supported now;
+    # only flag DefaultBounds, which has no Minerva equivalent yet.
+    if 'DefaultBounds' in text:
+        report.append("MANUAL: uses DefaultBounds — pick an explicit Minerva ArenaBounds (Circle/Square/Rect/Donut/Custom)")
     if re.search(r'protected override void Draw', text):
         report.append("MANUAL: main class overrides a Draw* method — review or drop (Minerva default draws the primary)")
 
@@ -67,7 +93,13 @@ def port(text):
         if c not in KNOWN:
             report.append(f"MISSING COMPONENT: Components.{c} — add to Minerva.Core/Components or map it")
 
-    header = "// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt). Auto-ported by tools/port_bmr_module.py;\n// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).\nusing System;\nusing Minerva;\n\n"
+    header = ("// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt). Auto-ported by tools/port_bmr_module.py;\n"
+              "// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).\n"
+              "using System;\n"
+              "using System.Collections.Generic;\n"
+              "using System.Runtime.CompilerServices;\n"
+              "using System.Runtime.InteropServices;\n"
+              "using Minerva;\n\n")
     return header + text, report
 
 
