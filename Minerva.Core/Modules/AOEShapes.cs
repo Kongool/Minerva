@@ -145,6 +145,39 @@ public sealed class AOEShapeCross(float length, float halfWidth) : AOEShape
     public override string ToString() => $"Cross {this.Length:f1}/{this.HalfWidth:f1}";
 }
 
+/// <summary>A capsule AOE: a <paramref name="length"/>-long stadium of radius <paramref name="radius"/>
+/// extending forward from the origin. Ported to match BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>
+public sealed class AOEShapeCapsule(float radius, float length, Angle directionOffset = default) : AOEShape
+{
+    public readonly float Radius = radius;
+    public readonly float Length = length;
+    public readonly Angle DirectionOffset = directionOffset;
+
+    public override bool Check(WPos position, WPos origin, Angle rotation)
+    {
+        var dir = (rotation + this.DirectionOffset).ToDirection();
+        var ab = dir * this.Length;
+        var t = Math.Clamp((position - origin).Dot(ab) / ab.LengthSq(), 0f, 1f);
+        return (position - (origin + ab * t)).Length() <= this.Radius;
+    }
+
+    public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation)
+    {
+        var fwd = rotation + this.DirectionOffset;
+        var a = origin;
+        var b = origin + fwd.ToDirection() * this.Length;
+        var half = MathF.PI * 0.5f;
+        var pts = new List<WPos>();
+        for (var i = 0; i <= ArcSegments / 2; ++i)
+            pts.Add(b + new Angle(fwd.Rad - half + MathF.PI * i / (ArcSegments / 2)).ToDirection() * this.Radius);
+        for (var i = 0; i <= ArcSegments / 2; ++i)
+            pts.Add(a + new Angle(fwd.Rad + half + MathF.PI * i / (ArcSegments / 2)).ToDirection() * this.Radius);
+        return pts;
+    }
+
+    public override string ToString() => $"Capsule {this.Radius:f1}x{this.Length:f1}";
+}
+
 /// <summary>
 /// An arbitrary AOE built from absolute-world <see cref="Shape"/> operands: <c>shapes1</c> combined with
 /// <c>shapes2</c> via <see cref="OperandType"/>, minus <c>differenceShapes</c>. Matches BossmodReborn's

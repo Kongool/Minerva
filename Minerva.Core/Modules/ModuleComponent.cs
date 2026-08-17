@@ -55,4 +55,20 @@ public abstract class ModuleComponent(ModuleBase module)
     public virtual void OnUntethered(Actor source, in ActorTetherInfo tether) { }
     public virtual void OnMapEffect(byte index, uint state) { }
     public virtual void OnEventIcon(Actor actor, uint iconID, ulong targetID) { }
+
+    // Additional BMR event hooks, declared so ported components that override them compile. Minerva's
+    // world sync does not raise all of these yet, so overrides may not fire until the sync is extended
+    // (tracked in the BMR-porting notes); they are safe no-ops until then.
+    public virtual void OnActorTargetable(Actor actor) { }
+    public virtual void OnActorUntargetable(Actor actor) { }
+    public virtual void OnActorRenderflagsChange(Actor actor, int renderflags) { }
+    public virtual void OnEventVFX(Actor actor, uint vfxID, ulong targetID) { }
+    public virtual void OnActorEState(Actor actor, ushort state) { }
+    public virtual void OnActorEAnim(Actor actor, uint state) { }
+    public virtual void OnActorPlayActionTimelineEvent(Actor actor, ushort id) { }
+    public virtual void OnActorNpcYell(Actor actor, ushort id) { }
+    public virtual void OnActorModelStateChange(Actor actor, byte modelState, byte animState1, byte animState2) { }
+    public virtual void OnActorEventStateChange(Actor actor, byte value) { }
+    public virtual void OnLegacyMapEffect(byte seq, byte param, byte[] data) { }
+    public virtual void OnEventDirectorUpdate(uint updateID, uint param1, uint param2, uint param3, uint param4) { }
 }

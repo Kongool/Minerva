@@ -32,8 +32,13 @@ KNOWN = {
     "GenericTowers", "CastTowers",
     # gaze
     "Gaze", "GenericGaze", "CastGaze", "CastGazes",
+    # shared tankbuster / bait-stack / wild charge / cleanse
+    "GenericSharedTankbuster", "CastSharedTankbuster", "IconSharedTankbuster",
+    "GenericBaitStack", "BaitAwayChargeCast", "GenericWildCharge", "CleansableDebuff",
+    # voidzone
+    "Voidzone", "VoidzoneAtCastTarget", "VoidzoneAtCastTargetGroup",
     # misc
-    "Voidzone", "TetherAOEs", "ArenaChange", "Adds", "AddsPointless", "AddsMulti", "StayMove",
+    "TetherAOEs", "ArenaChange", "Adds", "AddsPointless", "AddsMulti", "StayMove",
 }
 
 
@@ -48,6 +53,9 @@ def port(text):
     # 2. base class BossModule -> ModuleBase
     text = text.replace('(BossModule module)', '(ModuleBase module)')
     text = re.sub(r':\s*BossModule\(', ': ModuleBase(', text)
+    # remaining BossModule references (method params, Func<BossModule,...>, etc.) but NOT BossModuleInfo,
+    # which the ModuleInfo remap below rewrites separately
+    text = re.sub(r'\bBossModule\b(?!Info)', 'ModuleBase', text)
 
     # 3. [ModuleInfo(...)] attribute: GroupID->CFCID, BossModuleInfo.Maturity.X->ModuleMaturity, keep NameID/Contributors
     def remap_info(m):
