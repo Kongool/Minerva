@@ -113,6 +113,14 @@ public sealed class ReplayService : IDisposable
         this.recordingBossSeen = false;
     }
 
+    // make a boss name safe for a filename (keeps spaces/hyphens; replaces only the truly-invalid chars)
+    private static string Sanitize(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars())
+            name = name.Replace(c, '_');
+        return name.Trim();
+    }
+
     public int Stop()
     {
         if (!this.IsRecording)
@@ -135,6 +143,27 @@ public sealed class ReplayService : IDisposable
         {
             Service.Log.Error(ex, "Minerva: failed to analyze recording.");
             this.LastFactSheet = "Analysis failed: " + ex.Message;
+        }
+
+        // rename the log to include the boss name now that analysis knows it — the recording picker shows
+        // filenames, and a timestamp alone is unreadable. Kept the timestamp prefix so sorting stays intact.
+        try
+        {
+            var boss = this.LastInput?.BossName;
+            if (!string.IsNullOrWhiteSpace(boss) && this.currentPath != null)
+            {
+                var renamed = Path.Combine(this.directory, $"{Path.GetFileNameWithoutExtension(this.currentPath)}-{Sanitize(boss)}.log");
+                if (!string.Equals(renamed, this.currentPath, StringComparison.OrdinalIgnoreCase) && !File.Exists(renamed))
+                {
+                    File.Move(this.currentPath, renamed);
+                    this.currentPath = renamed;
+                    this.LastPath = renamed;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Warning(ex, "Minerva: could not rename recording with the boss name.");
         }
 
         // load the just-recorded fight for interactive playback
