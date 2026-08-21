@@ -29,6 +29,7 @@ public sealed class AIManager
     /// </summary>
     private readonly DaedalusRosterIPC roster = new();
     private readonly List<WPos> knownVoids = [];
+    private bool floorProbeStoodDown; // tracks the self-calibration state so the stand-down log fires on transition, not every frame
     private ushort voidsZone;
     private WPos? committedTarget;
     private Positional requestedPositional;
@@ -193,6 +194,7 @@ public sealed class AIManager
         {
             this.voidsZone = this.world.CurrentZone;
             this.knownVoids.Clear(); // a hole in the last arena says nothing about this one
+            this.floorProbeStoodDown = false; // re-evaluate the probe fresh in the new zone (fresh stand-down signal)
         }
 
         var playerY = pc.PosRot.Y;
@@ -234,7 +236,21 @@ public sealed class AIManager
         // cannot answer for -- and every cell would read as a hole, which stops the dodge dead. Trusting a
         // broken probe is worse than not having one, so stand down rather than freeze.
         if (!GameSync.GameData.HasFloorAt(from.X, from.Z, from.Y))
+        {
+            // instrumentation: only log the transition so a live pull can tell "stood down" from "never ran",
+            // without spamming a line every frame the probe is miscalibrated for this zone
+            if (!this.floorProbeStoodDown)
+            {
+                Service.Log.Information("Minerva floor probe: STOOD DOWN — no floor detected under the player's own feet (miscalibrated ray or unloaded collision); floor checks disabled until it reads floor again.");
+                this.floorProbeStoodDown = true;
+            }
             return spot;
+        }
+        if (this.floorProbeStoodDown)
+        {
+            Service.Log.Information("Minerva floor probe: RECOVERED — floor detected under the player's feet; floor checks re-enabled.");
+            this.floorProbeStoodDown = false;
+        }
 
         for (var attempt = 0; attempt < MaxFloorRetries; ++attempt)
         {
@@ -242,6 +258,8 @@ public sealed class AIManager
             if (GameSync.GameData.PathHasFloor(new Vector3(from.X, from.Y, from.Z), to))
                 return spot;
 
+            // instrumentation: the probe caught a ledge — a discrete, low-frequency event worth a line each
+            Service.Log.Information($"Minerva floor probe: REJECTED dodge target {spot.Target} — no floor along the path (attempt {attempt + 1}/{MaxFloorRetries}); re-solving around the void.");
             this.RememberVoid(spot.Target);
             this.hints.TemporaryObstacles.Add(new SDCircle(spot.Target, VoidRadius));
             spot = ArenaPathfinder.Solve(this.hints, now, horizonSeconds: horizon, safetyMargin: margin, goal: goal);
@@ -250,6 +268,7 @@ public sealed class AIManager
         }
 
         // three answers in a row over the void: holding beats walking off, even inside an AOE
+        Service.Log.Information("Minerva floor probe: HELD — three floorless answers in a row; holding position rather than dodging off the edge.");
         return SafeSpot.Stay;
     }
 
