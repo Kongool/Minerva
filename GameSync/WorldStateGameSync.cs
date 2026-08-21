@@ -247,6 +247,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         var radius = obj.HitboxRadius;
         var targetable = obj.IsTargetable;
 
+        var type = (ActorType)(((int)obj.ObjectKind << 8) + obj.SubKind);
         var hpmp = default(ActorHPMP);
         var inCombat = false;
         var isDead = false;
@@ -258,14 +259,16 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             hpmp = new ActorHPMP(chr.CurrentHp, chr.MaxHp, shield, chr.CurrentMp, chr.MaxMp);
             inCombat = chr.StatusFlags.HasFlag(Dalamud.Game.ClientState.Objects.Enums.StatusFlags.InCombat);
             isDead = chr.IsDead;
-            friendly = !chr.StatusFlags.HasFlag(Dalamud.Game.ClientState.Objects.Enums.StatusFlags.Hostile);
+            // Ally/enemy from the game's own classifier (matches BMR), not the flaky Hostile flag. Helpers are
+            // the boss's invisible casters — never allies — and the game won't classify an untargetable helper
+            // as an enemy, so exclude them explicitly.
+            friendly = type != ActorType.Helper && !GameData.IsClassifiedEnemy(addr);
             target = SanitizeId(chr.TargetObjectId);
         }
 
         var existing = this.ws.Actors.Find(id);
         if (existing == null)
         {
-            var type = (ActorType)(((int)obj.ObjectKind << 8) + obj.SubKind);
             this.ws.Execute(new ActorState.OpCreate(id, obj.BaseId, index, name, nameID, type, posRot, radius, hpmp, targetable, friendly, SanitizeId(obj.OwnerId)));
             existing = this.ws.Actors.Find(id)!;
         }

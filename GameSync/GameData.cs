@@ -38,6 +38,15 @@ internal static unsafe class GameData
         => objectAddress != 0 ? (int)((GameObject*)objectAddress)->RenderFlags : 0;
 
     /// <summary>
+    /// The game's own target classification — the red/yellow/green nameplate logic — reporting whether this
+    /// object is an <c>Enemy</c>. This is what BossmodReborn uses for ally/enemy, and it is far more reliable
+    /// than the <c>Hostile</c> status flag (which reads false on out-of-combat enemies). Note: an untargetable
+    /// helper is not classified as an enemy here, so callers must special-case <see cref="ActorType.Helper"/>.
+    /// </summary>
+    public static bool IsClassifiedEnemy(nint objectAddress)
+        => objectAddress != 0 && ActionManager.ClassifyTarget((Character*)objectAddress) == ActionManager.TargetCategory.Enemy;
+
+    /// <summary>
     /// True if the actor has a live cast-info block. Dalamud's cast getters (<c>IsCasting</c>,
     /// <c>CastActionId</c>, …) dereference this pointer <i>without</i> a null check and throw when it's
     /// absent — which it is for any BattleChara not currently casting — so callers must gate on this.
