@@ -57,7 +57,7 @@ sealed class ArenaChanges(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (spell.Action.ID == (uint)AID.LeporineLoaf)
         {
-            _aoe = [new(donut, Arena.Center, default, Module.CastFinishAt(spell, 0.9d))];
+            _aoe = [new(donut, Module.Center, default, Module.CastFinishAt(spell, 0.9d))];
         }
     }
 
@@ -74,8 +74,8 @@ sealed class ArenaChanges(ModuleBase module) : Components.GenericAOEs(module)
 
         void SetArena(ArenaBounds bounds)
         {
-            Arena.Bounds = bounds;
-            Arena.Center = D093Lunipyati.ArenaCenter;
+            Module.Bounds = bounds;
+            Module.Center = D093Lunipyati.ArenaCenter;
             _aoe = [];
         }
     }

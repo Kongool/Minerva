@@ -54,9 +54,9 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.FrostingFracas && Arena.Bounds.Radius != 20f)
+        if (spell.Action.ID == (uint)AID.FrostingFracas && Module.Bounds.Radius != 20f)
         {
-            _aoe = [new(donut, Arena.Center, default, Module.CastFinishAt(spell, 0.6d))];
+            _aoe = [new(donut, Module.Center, default, Module.CastFinishAt(spell, 0.6d))];
         }
     }
 
@@ -64,7 +64,7 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (index == 0x17 && state == 0x00020001u)
         {
-            Arena.Bounds = D021RyoqorTerteh.DefaultBounds;
+            Module.Bounds = D021RyoqorTerteh.DefaultBounds;
             _aoe = [];
         }
     }

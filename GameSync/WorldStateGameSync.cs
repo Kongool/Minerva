@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Hooking;
 using Dalamud.Memory;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using Minerva;
 
 namespace Minerva.GameSync;
@@ -48,6 +51,45 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     private delegate void RSVDataDelegate(byte* packet);
     private readonly Hook<RSVDataDelegate>? rsvHook;
 
+    private delegate void ActorCastDelegate(uint casterID, ActorCastPacket* packet);
+    private readonly Hook<ActorCastDelegate>? actorCastHook;
+
+    /// <summary>
+    /// Where each in-flight cast is aimed, straight off the wire. The game only stores a cast's target
+    /// location in memory for *area*-targeted actions, so a boss self-casting — a line-of-sight mechanic, a
+    /// cone, a raidwide — reads back (0,0,0). The packet carries it either way. Keyed by caster, cleared when
+    /// the cast ends, so it never outgrows the actors on screen.
+    /// </summary>
+    private readonly Dictionary<ulong, Vector3> castPositions = [];
+
+    /// <summary>
+    /// The server's ActorCast packet, laid out as the game sends it. Only the trailing position matters here,
+    /// but every preceding field has to be declared for the offsets to land.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct ActorCastPacket
+    {
+        public ushort SpellID;
+        public byte ActionType;
+        public byte BaseCastTime100ms;
+        public uint ActionID;
+        public float CastTime;
+        public uint TargetID;
+        public ushort Rotation;
+        public byte Interruptible;
+        public byte U1;
+        public uint BallistaEntityID;
+        public ushort PosX;
+        public ushort PosY;
+        public ushort PosZ;
+        public ushort U3;
+    }
+
+    // Resolved actions (ActionEffect). This is what turns a cast into a *cast event* — without it
+    // OnEventCast never fires, NumCasts never increments, and every component that resolves on a landed
+    // action stays stuck. Hooked by address from FFXIVClientStructs rather than a signature, matching BMR.
+    private readonly Hook<ActionEffectHandler.Delegates.Receive>? actionEffectHook;
+
     public WorldStateGameSync(WorldState ws)
     {
         this.ws = ws;
@@ -55,6 +97,25 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.actorControlHook = this.TryHook<ActorControlDelegate>("E8 ?? ?? ?? ?? 0F B7 0B 83 E9 64", this.ActorControlDetour, "ActorControl");
         this.mapEffectHook = this.TryHook<MapEffectDelegate>("48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 8B FA 41 0F B7 E8", this.MapEffectDetour, "MapEffect");
         this.rsvHook = this.TryHook<RSVDataDelegate>("44 8B 09 4C 8D 41 34", this.RSVDataDetour, "RSVData");
+        this.actorCastHook = this.TryHook<ActorCastDelegate>("40 53 57 48 81 EC ?? ?? ?? ?? 48 8B FA 8B D1", this.ActorCastDetour, "ActorCast");
+        this.actionEffectHook = this.TryHookAddress<ActionEffectHandler.Delegates.Receive>(
+            ActionEffectHandler.Addresses.Receive.Value, this.ActionEffectDetour, "ActionEffect");
+    }
+
+    /// <summary>Install a hook at a known address (FFXIVClientStructs), guarded like <see cref="TryHook"/>.</summary>
+    private Hook<T>? TryHookAddress<T>(nint address, T detour, string name) where T : Delegate
+    {
+        try
+        {
+            var hook = Service.GameInterop.HookFromAddress(address, detour);
+            hook.Enable();
+            return hook;
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Warning(ex, $"Minerva: failed to install {name} hook. Continuing without it.");
+            return null;
+        }
     }
 
     private Hook<T>? TryHook<T>(string signature, T detour, string name) where T : Delegate
@@ -283,7 +344,10 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         // without guarding it, and it's null whenever the actor isn't casting -> NRE inside the getter
         if (GameData.HasCastInfo(addr) && chr.IsCasting && chr.CastActionId != 0)
         {
-            var location = GameData.TryCastLocation(addr, out var loc) ? loc : default;
+            // prefer the packet's aim point; the in-memory field is only filled for area-targeted casts
+            var location = this.castPositions.TryGetValue(act.InstanceID, out var packetLoc) ? packetLoc
+                : GameData.TryCastLocation(addr, out var loc) ? loc
+                : default;
             cur = new ActorCastInfo
             {
                 Action = new ActionID((ActionType)chr.CastActionType, chr.CastActionId),
@@ -305,6 +369,9 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             prev.ElapsedTime = cur.ElapsedTime;
             return;
         }
+
+        if (cur == null)
+            this.castPositions.Remove(act.InstanceID);
 
         this.ws.Execute(new ActorState.OpCastInfo(act.InstanceID, cur));
     }
@@ -351,6 +418,65 @@ public sealed unsafe class WorldStateGameSync : IDisposable
 
     // ActorControl category ids (from BMR's ServerIPC.ActorControlCategory)
     private const uint CatTargetIcon = 34, CatTether = 35, CatTetherCancel = 47, CatModelState = 63, CatDirectorUpdate = 109, CatTargetVFX = 184, CatPlayActionTimeline = 407, CatEObjSetState = 409, CatEObjAnimation = 413;
+
+    /// <summary>
+    /// A resolved action: the server has told us the cast landed, on whom, and what it did. Emits the
+    /// <see cref="ActorState.OpCastEvent"/> that drives <c>OnEventCast</c> and every cast counter.
+    /// </summary>
+    private void ActionEffectDetour(uint casterID, Character* casterObj, Vector3* targetPos, ActionEffectHandler.Header* header, ActionEffectHandler.TargetEffects* effects, GameObjectId* targets)
+    {
+        this.actionEffectHook!.Original(casterID, casterObj, targetPos, header, effects, targets);
+        try
+        {
+            var ev = new ActorCastEvent(
+                ActionID.MakeSpell(header->ActionId),
+                header->AnimationTargetId,
+                new Angle(header->RotationInt * (180f / 32768f) * Angle.DegToRad),
+                *targetPos,
+                header->GlobalSequence);
+
+            var raw = (ulong*)effects;
+            var numTargets = Math.Min((int)header->NumTargets, 16); // defensive: the packet is fixed-size
+            for (var i = 0; i < numTargets; ++i)
+            {
+                var slots = new ulong[ActorCastEvent.Target.MaxEffects];
+                for (var j = 0; j < slots.Length; ++j)
+                    slots[j] = raw[i * 8 + j];
+                ev.Targets.Add(new ActorCastEvent.Target(targets[i], slots));
+            }
+
+            this.QueueActorOp(casterID, new ActorState.OpCastEvent(casterID, ev));
+        }
+        catch (Exception ex)
+        {
+            // never let a decode fault take the game's action pipeline down
+            Service.Log.Error(ex, "Minerva: ActionEffect decode failed.");
+        }
+    }
+
+    /// <summary>
+    /// A cast started: record where it is aimed before handing the packet on. The coordinates arrive as
+    /// unsigned 16-bit fixed point spanning ±1000 yalms, the game's standard position encoding.
+    /// </summary>
+    private void ActorCastDetour(uint casterID, ActorCastPacket* packet)
+    {
+        try
+        {
+            if (packet != null)
+                this.castPositions[casterID] = FixedToWorld(packet->PosX, packet->PosY, packet->PosZ);
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Warning(ex, "Minerva: ActorCast detour failed; continuing without a cast position.");
+        }
+
+        this.actorCastHook!.Original(casterID, packet);
+    }
+
+    private const float FixedToYalms = 2000f / 65535f;
+
+    private static Vector3 FixedToWorld(ushort x, ushort y, ushort z)
+        => new((x * FixedToYalms) - 1000f, (y * FixedToYalms) - 1000f, (z * FixedToYalms) - 1000f);
 
     private void ActorControlDetour(uint actorID, uint category, uint p1, uint p2, uint p3, uint p4, uint p5, uint p6, uint p7, uint p8, ulong targetID, byte replaying)
     {

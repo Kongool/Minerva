@@ -187,6 +187,13 @@ public sealed class ReplayParser
             ElapsedTime = r.NextFloat(),
             TotalTime = r.NextFloat(),
         };
+        // optional: recordings made before the cast location was captured simply end here
+        if (r.HasMore)
+        {
+            var loc = r.NextVec4();
+            cast.Location = new Vector3(loc.X, loc.Y, loc.Z);
+        }
+
         return new ActorState.OpCastInfo(id, cast);
     }
 
@@ -197,7 +204,21 @@ public sealed class ReplayParser
         var target = r.NextHex64();
         var rotation = r.NextAngleDeg();
         var seq = r.NextU32();
-        return new ActorState.OpCastEvent(id, new ActorCastEvent(action, target, rotation, default, seq));
+        var ev = new ActorCastEvent(action, target, rotation, default, seq);
+        // targets are optional: recordings made before they were captured simply end here
+        if (r.HasMore)
+        {
+            var count = r.NextInt();
+            for (var i = 0; i < count && r.HasMore; ++i)
+            {
+                var targetID = r.NextHex64();
+                var effects = new ulong[ActorCastEvent.Target.MaxEffects];
+                for (var j = 0; j < effects.Length && r.HasMore; ++j)
+                    effects[j] = r.NextHex64();
+                ev.Targets.Add(new ActorCastEvent.Target(targetID, effects));
+            }
+        }
+        return new ActorState.OpCastEvent(id, ev);
     }
 
     private static WorldState.Operation BuildStatusGain(OpTokenReader r)

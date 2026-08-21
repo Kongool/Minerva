@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using Dalamud.Game.DutyState;
+using Minerva.GameSync;
 using Minerva;
 using Minerva.Generation;
 using Minerva.Modules;
@@ -20,11 +21,20 @@ public sealed class ReplayService : IDisposable
 {
     private static readonly TimeSpan EncounterEndGracePeriod = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// Out of combat this long and the recording ends itself.
+    /// <para>Long enough to sit through a wipe-and-rez or the lull between an add pack and the boss, short
+    /// enough that an abandoned pull does not append ten minutes of walking to the file. It exists because
+    /// starting on combat and only stopping on a death detection leaves every other ending — a despawn, a
+    /// reset, giving up — recording forever.</para>
+    /// </summary>
+    private static readonly TimeSpan OutOfCombatEndsRecording = TimeSpan.FromSeconds(8);
+
     private readonly WorldState world;
     private readonly ModuleManager modules;
     private readonly Configuration config;
     private readonly string directory;
-    private readonly RecordingCompletionDetector recordingCompletion = new(EncounterEndGracePeriod);
+    private readonly RecordingCompletionDetector recordingCompletion = new(EncounterEndGracePeriod, OutOfCombatEndsRecording);
     private readonly EventSubscription actorDeathSubscription;
 
     private ReplayRecorder? recorder;
@@ -38,6 +48,9 @@ public sealed class ReplayService : IDisposable
     private uint recordingBossMaxHP;
     private float recordingBossLastHP;
     private bool recordingBossSeen;
+    private Actor? recordingPrimary;      // the module's boss, kept so its death is still detectable after
+    private bool recordingPrimaryEnds;    // ... the module deactivates and takes ActiveModule with it
+    private string? recordingEncounterName; // Occult CE name, when the fight came from the director
 
     private ModuleRegistry? registry;
 
@@ -111,6 +124,9 @@ public sealed class ReplayService : IDisposable
         this.recordingBossMaxHP = 0;
         this.recordingBossLastHP = 0f;
         this.recordingBossSeen = false;
+        this.recordingPrimary = null;
+        this.recordingPrimaryEnds = false;
+        this.recordingEncounterName = null;
     }
 
     // make a boss name safe for a filename (keeps spaces/hyphens; replaces only the truly-invalid chars)
@@ -149,7 +165,10 @@ public sealed class ReplayService : IDisposable
         // filenames, and a timestamp alone is unreadable. Kept the timestamp prefix so sorting stays intact.
         try
         {
-            var boss = this.LastInput?.BossName;
+            // Prefer the encounter name where there is one: Occult content is known by its critical
+            // encounter, not by whichever enemy happens to be biggest, and that is also how the modules for
+            // it are filed. Falls back to the boss the analysis identified everywhere else.
+            var boss = this.recordingEncounterName ?? this.LastInput?.BossName;
             if (!string.IsNullOrWhiteSpace(boss) && this.currentPath != null)
             {
                 var renamed = Path.Combine(this.directory, $"{Path.GetFileNameWithoutExtension(this.currentPath)}-{Sanitize(boss)}.log");
@@ -186,15 +205,53 @@ public sealed class ReplayService : IDisposable
     public string? UpdateRecording(TimeSpan realDt)
     {
         if (!this.IsRecording)
-            return null;
+        {
+            // Start on a module activating OR on an unscripted boss appearing. The second case is the one
+            // that matters for authoring: a fight with no module yet is exactly the fight you need a
+            // recording of, and Occult Crescent's critical engagements are named after the FATE rather than
+            // the boss, so they can't be recognised by name either. Stopping is already handled — the
+            // completion detector ends it on the boss's death, module or not.
+            if (this.config.AutoRecordEncounters)
+            {
+                var module = this.modules.ActiveModule;
+                if (module != null)
+                {
+                    this.Start();
+                    return $"Auto-recording {module.GetType().Name} to {Path.GetFileName(this.currentPath)}.";
+                }
 
+                if (this.UnknownBoss() is { } boss)
+                {
+                    this.Start();
+
+                    // Named after the boss, which is the one thing here that is verifiable. A critical
+                    // encounter's own name would read better — that is what the content is known by — but
+                    // the encounter director reports every event in the zone, so it cannot say whether
+                    // THIS player is in THAT one. Labelling from it produced a recording of the Regnant
+                    // Chimera FATE filed under 'Familiar Tactics', a CE running elsewhere on the map.
+                    this.recordingEncounterName = boss.Name;
+                    return $"Auto-recording unscripted boss '{boss.Name}' to {Path.GetFileName(this.currentPath)}.";
+                }
+            }
+
+            return null;
+        }
+
+        this.DetectModuleBossDeath();
         this.DetectNoModuleBossDeath();
+        this.recordingCompletion.NoteCombat(this.modules.LocalPlayer() is { InCombat: true }, realDt);
         if (!this.recordingCompletion.Update(realDt))
             return null;
 
         var opCount = this.Stop();
         return $"Encounter ended. Recording stopped automatically: {opCount} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
     }
+
+    /// <summary>
+    /// A big enemy, near the player, that the player is fighting. The rule itself lives in
+    /// <see cref="EncounterTrigger"/> so it can be tested without a game.
+    /// </summary>
+    private Actor? UnknownBoss() => EncounterTrigger.NearbyEngagedBoss(this.modules.LocalPlayer(), this.world.Actors);
 
     private void OnActorDeath(Actor actor)
     {
@@ -213,6 +270,28 @@ public sealed class ReplayService : IDisposable
     /// module/duty paths use, so the 2s grace period and stop behaviour are identical. Skipped entirely once a
     /// module is active, since OnActorDeath then handles the boss precisely.
     /// </summary>
+    /// <summary>
+    /// End the recording when the module's boss dies, by asking every frame rather than by catching the
+    /// moment it happens.
+    /// <para><see cref="OnActorDeath"/> already listens for the death event, and a Thundergust Griffin
+    /// recording still ran nine seconds past a boss that verifiably died — the event is one frame wide, and
+    /// anything that misses it (the module deactivating in the same tick and taking
+    /// <c>ActiveModule</c> with it, a subscription that was not live yet) leaves nothing to fall back on
+    /// but the idle timeout. A remembered reference and a poll cannot be missed, and re-signalling is
+    /// harmless because the detector only completes once.</para>
+    /// </summary>
+    private void DetectModuleBossDeath()
+    {
+        if (this.modules.ActiveModule is { PrimaryActor: { } primary })
+        {
+            this.recordingPrimary = primary;
+            this.recordingPrimaryEnds = this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true;
+        }
+
+        if (this.recordingPrimaryEnds && this.recordingPrimary is { } boss && (boss.IsDead || boss.HPMP.CurHP == 0))
+            this.recordingCompletion.SignalCompletion();
+    }
+
     private void DetectNoModuleBossDeath()
     {
         if (this.modules.ActiveModule != null)
@@ -264,7 +343,7 @@ public sealed class ReplayService : IDisposable
         using var reader = new StreamReader(path);
         var timeline = ReplayParser.ParseTimeline(reader);
         this.Player?.Dispose();
-        this.Player = new ReplayPlayer(timeline, this.Registry);
+        this.Player = new ReplayPlayer(timeline, this.Registry, this.config);
         this.PlaybackPath = path;
         return $"Loaded {timeline.Ops.Count} ops ({this.Player.DurationSeconds:f0}s) for playback.";
     }
@@ -375,7 +454,7 @@ public sealed class ReplayService : IDisposable
         var generator = new ModuleGenerator(new LuminaShapeResolver(), new LuminaNameResolver());
         var result = generator.Generate(this.LastInput);
 
-        var path = Path.Combine(this.directory, $"D{this.LastInput.CFCID}.generated.cs");
+        var path = Path.Combine(this.directory, this.LastInput.DraftFileName());
         File.WriteAllText(path, result.Code);
         this.LastGeneratedPath = path;
         Service.Log.Information($"Minerva: generated module -> {path}\n{result.Report}");

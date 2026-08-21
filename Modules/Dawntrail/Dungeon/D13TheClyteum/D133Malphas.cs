@@ -103,6 +103,6 @@ sealed class D133MalphasStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1011u, NameID = 14758u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "HerStolenLight (ported from BMR)")]
+[ModuleInfo(CFCID = 1011u, NameID = 14758u, PrimaryActorOID = (uint)OID.Malphas, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "HerStolenLight (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class D133Malphas(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(760f, -803f), new ArenaBoundsCircle(20f));

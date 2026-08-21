@@ -52,9 +52,9 @@ sealed class ImmuneResponseArenaChange(ModuleBase module) : Components.GenericAO
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.ImmuneResponseVisualSmall && Arena.Bounds.Radius > 20f)
+        if (spell.Action.ID == (uint)AID.ImmuneResponseVisualSmall && Module.Bounds.Radius > 20f)
         {
-            _aoe = [new(rect, Arena.Center, default, Module.CastFinishAt(spell, 0.8d))];
+            _aoe = [new(rect, Module.Center, default, Module.CastFinishAt(spell, 0.8d))];
         }
     }
 
@@ -62,7 +62,7 @@ sealed class ImmuneResponseArenaChange(ModuleBase module) : Components.GenericAO
     {
         if (index == 0x03 && state == 0x00020001u)
         {
-            Arena.Bounds = new ArenaBoundsRect(20f, 15f);
+            Module.Bounds = new ArenaBoundsRect(20f, 15f);
             _aoe = [];
         }
     }
@@ -108,7 +108,7 @@ sealed class PathoCircuitCrossPurge(ModuleBase module) : Components.GenericAOEs(
             var isDonuts = donut0 && aoe1.Shape == donut;
             var isConeWithDelay = (aoe1.Shape == coneBig || aoe1.Shape == coneSmall) && (aoe1.Activation - aoe0.Activation).TotalSeconds > 2d;
             var isCross = aoe1.Shape == cross;
-            var isFrontDonutAndConeSmall = aoe1.Origin.AlmostEqual(Arena.Center, 1f) && aoe1.Shape == donut && aoe0.Shape == coneSmall;
+            var isFrontDonutAndConeSmall = aoe1.Origin.AlmostEqual(Module.Center, 1f) && aoe1.Shape == donut && aoe0.Shape == coneSmall;
             var isRisky = !isDonuts && !(isConeWithDelay && isCross) && !isFrontDonutAndConeSmall && !(donut0 && isCross);
             aoe1.Risky = isRisky;
         }

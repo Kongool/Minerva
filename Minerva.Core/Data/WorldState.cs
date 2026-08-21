@@ -74,6 +74,8 @@ public sealed class WorldState
             ops.Add(new OpZoneChange(this.CurrentZone, this.CurrentCFCID));
         foreach (var (k, v) in this.RSVEntries)
             ops.Add(new OpRSVData(k, v));
+        foreach (var (k, v) in this.MapEffectStates)
+            ops.Add(new OpMapEffect(k, v));
         ops.AddRange(this.Actors.CompareToInitial());
         ops.AddRange(this.Party.CompareToInitial());
         return ops;
@@ -115,13 +117,28 @@ public sealed class WorldState
     /// <paramref name="State"/>. Transient — many mechanics key off these (moving walls, tile
     /// hazards, arena reshaping). Event-only.
     /// </summary>
+    /// <summary>
+    /// Last state seen for each map-effect index — the floor's current shape, essentially.
+    /// <para>Map effects are events, and a recording that starts after one has fired never learns it
+    /// happened. Thundergust Griffin shrinks its arena from 29.5 to 20 yalms on the first raidwide; a
+    /// recording begun after that replays the entire fight against a floor thirty percent bigger than the
+    /// one that exists, and nothing in the replay can tell. Retaining the state lets a recording open with
+    /// the world as it stands rather than as it started.</para>
+    /// </summary>
+    public readonly Dictionary<byte, uint> MapEffectStates = [];
+
     public readonly Event<OpMapEffect> MapEffect = new();
     public sealed class OpMapEffect(byte index, uint state) : Operation
     {
         public readonly byte Index = index;
         public readonly uint State = state;
 
-        protected override void Exec(WorldState ws) => ws.MapEffect.Fire(this);
+        protected override void Exec(WorldState ws)
+        {
+            ws.MapEffectStates[this.Index] = this.State;
+            ws.MapEffect.Fire(this);
+        }
+
         public override void Write(OperationOutput o) => o.Tag("ENVC").Emit((uint)this.Index, "X2").Emit(this.State, "X8");
     }
 

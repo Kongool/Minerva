@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Reflection;
 
 namespace Minerva;
@@ -37,7 +38,7 @@ public sealed class ModuleRegistry
 
         var reg = new ModuleRegistry();
         foreach (var asm in assemblies)
-            foreach (var type in asm.GetTypes())
+            foreach (var type in LoadableTypes(asm))
             {
                 if (type.IsAbstract || !type.IsSubclassOf(typeof(ModuleBase)))
                     continue;
@@ -53,6 +54,24 @@ public sealed class ModuleRegistry
                 reg.Count++;
             }
         return reg;
+    }
+
+    /// <summary>
+    /// Types that actually loaded. The plugin assembly also contains Dalamud-dependent types (the entry
+    /// point, services, windows); outside the game those fail to load and <c>GetTypes()</c> throws. Boss
+    /// modules only reference Minerva.Core, so they load fine — keeping the survivors lets the registry be
+    /// built headlessly (e.g. by the offline replay validator).
+    /// </summary>
+    private static IEnumerable<Type> LoadableTypes(Assembly asm)
+    {
+        try
+        {
+            return asm.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t != null)!;
+        }
     }
 
     /// <summary>Modules registered for a duty, or empty.</summary>

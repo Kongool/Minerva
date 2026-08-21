@@ -187,32 +187,38 @@ public sealed class ActorState : IEnumerable<Actor>
 
     public sealed class OpTargetable(ulong instanceID, bool value) : Operation(instanceID)
     {
+        public readonly bool Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.IsTargetable = value;
+            actor.IsTargetable = this.Value;
             ws.Actors.IsTargetableChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag(value ? "ATG+" : "ATG-").Emit(this.InstanceID, "X");
+        public override void Write(OperationOutput o) => o.Tag(this.Value ? "ATG+" : "ATG-").Emit(this.InstanceID, "X");
     }
 
     public sealed class OpDead(ulong instanceID, bool value) : Operation(instanceID)
     {
+        public readonly bool Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.IsDead = value;
+            actor.IsDead = this.Value;
             ws.Actors.IsDeadChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag(value ? "DIE+" : "DIE-").Emit(this.InstanceID, "X");
+        public override void Write(OperationOutput o) => o.Tag(this.Value ? "DIE+" : "DIE-").Emit(this.InstanceID, "X");
     }
 
     public sealed class OpCombat(ulong instanceID, bool value) : Operation(instanceID)
     {
+        public readonly bool Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.InCombat = value;
+            actor.InCombat = this.Value;
             ws.Actors.InCombatChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag(value ? "COM+" : "COM-").Emit(this.InstanceID, "X");
+        public override void Write(OperationOutput o) => o.Tag(this.Value ? "COM+" : "COM-").Emit(this.InstanceID, "X");
     }
 
     public sealed class OpClassChange(ulong instanceID, Class cls) : Operation(instanceID)
@@ -229,12 +235,14 @@ public sealed class ActorState : IEnumerable<Actor>
 
     public sealed class OpTarget(ulong instanceID, ulong value) : Operation(instanceID)
     {
+        public readonly ulong Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.TargetID = value;
+            actor.TargetID = this.Value;
             ws.Actors.TargetChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag("TARG").Emit(this.InstanceID, "X").Emit(value, "X");
+        public override void Write(OperationOutput o) => o.Tag("TARG").Emit(this.InstanceID, "X").Emit(this.Value, "X");
     }
 
     public sealed class OpTether(ulong instanceID, ActorTetherInfo value) : Operation(instanceID)
@@ -266,7 +274,12 @@ public sealed class ActorState : IEnumerable<Actor>
         public override void Write(OperationOutput o)
         {
             if (this.Value is { } c)
-                o.Tag("CST+").Emit(this.InstanceID, "X").Emit(c.Action.ID, "X").Emit(c.TargetID, "X").Emit(c.Rotation).Emit(c.ElapsedTime).Emit(c.TotalTime);
+                // Location is where a ground-targeted cast actually lands. Without it a replay can only fall
+                // back to the caster's position, which is wrong whenever a helper places a puddle from a
+                // parking spot — the AOE replays at the helper instead of on the floor it hit. Appended last
+                // so recordings written before it still parse (the reader stops when the tokens run out).
+                o.Tag("CST+").Emit(this.InstanceID, "X").Emit(c.Action.ID, "X").Emit(c.TargetID, "X").Emit(c.Rotation).Emit(c.ElapsedTime).Emit(c.TotalTime)
+                 .Emit(new Vector4(c.Location.X, c.Location.Y, c.Location.Z, 0f));
             else
                 o.Tag("CST-").Emit(this.InstanceID, "X");
         }
@@ -277,7 +290,18 @@ public sealed class ActorState : IEnumerable<Actor>
     {
         public readonly ActorCastEvent Value = value;
         protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.CastEvent.Fire(actor, this.Value);
-        public override void Write(OperationOutput o) => o.Tag("CST!").Emit(this.InstanceID, "X").Emit(this.Value.Action.ID, "X").Emit(this.Value.MainTargetID, "X").Emit(this.Value.Rotation).Emit(this.Value.GlobalSequence);
+        public override void Write(OperationOutput o)
+        {
+            o.Tag("CST!").Emit(this.InstanceID, "X").Emit(this.Value.Action.ID, "X").Emit(this.Value.MainTargetID, "X")
+             .Emit(this.Value.Rotation).Emit(this.Value.GlobalSequence).Emit(this.Value.Targets.Count);
+            // targets are appended last so a parser that stops early still reads a valid pre-targets event
+            foreach (var t in this.Value.Targets)
+            {
+                o.Emit(t.ID, "X");
+                for (var i = 0; i < ActorCastEvent.Target.MaxEffects; ++i)
+                    o.Emit(i < t.Effects.Length ? t.Effects[i] : 0ul, "X");
+            }
+        }
     }
 
     public sealed class OpStatus(ulong instanceID, int index, ActorStatus value) : Operation(instanceID)
@@ -307,8 +331,11 @@ public sealed class ActorState : IEnumerable<Actor>
     /// <summary>Overhead marker icon appeared on an actor. Event-only.</summary>
     public sealed class OpIcon(ulong instanceID, uint iconID, ulong targetID) : Operation(instanceID)
     {
-        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.IconAppeared.Fire(actor, new ActorIconEvent(iconID, targetID));
-        public override void Write(OperationOutput o) => o.Tag("ICON").Emit(this.InstanceID, "X").Emit(iconID).Emit(targetID, "X");
+        public readonly uint IconID = iconID;
+        public readonly ulong TargetID = targetID;
+
+        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.IconAppeared.Fire(actor, new ActorIconEvent(this.IconID, this.TargetID));
+        public override void Write(OperationOutput o) => o.Tag("ICON").Emit(this.InstanceID, "X").Emit(this.IconID).Emit(this.TargetID, "X");
     }
 
     /// <summary>A targeted VFX played on an actor. Event-only.</summary>

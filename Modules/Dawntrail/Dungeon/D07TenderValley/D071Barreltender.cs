@@ -48,9 +48,9 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.HeavyweightNeedlesVisual && Arena.Bounds.Radius > 20f)
+        if (spell.Action.ID == (uint)AID.HeavyweightNeedlesVisual && Module.Bounds.Radius > 20f)
         {
-            _aoe = [new(square, Arena.Center, default, Module.CastFinishAt(spell, 0.7d))];
+            _aoe = [new(square, Module.Center, default, Module.CastFinishAt(spell, 0.7d))];
         }
     }
 
@@ -58,7 +58,7 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (index == 0x03 && state == 0x00020001u)
         {
-            Arena.Bounds = new ArenaBoundsSquare(20f);
+            Module.Bounds = new ArenaBoundsSquare(20f);
             _aoe = [];
         }
     }
@@ -188,7 +188,7 @@ sealed class BarrelBreaker(ModuleBase module) : Components.SimpleKnockbacks(modu
                 circles[i] = (aoe.Origin, aoe.ActorID == default ? 7f : 12f);
             }
             // square intentionally slightly smaller to prevent sus knockback
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadii(Arena.Center, c.Origin, 20f, 19f, circles, max), act);
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadii(Module.Center, c.Origin, 20f, 19f, circles, max), act);
         }
     }
 

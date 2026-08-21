@@ -144,7 +144,7 @@ sealed class Stonecarver(ModuleBase module) : Components.GenericAOEs(module)
         base.AddAIHints(slot, actor, assignment, hints);
         if (AOEs.Count != 0)
         {
-            hints.AddForbiddenZone(new SDInvertedRect(Arena.Center, new WDir(1f, default), 1.5f, 1.5f, 40f), _kb!.Casters.Count != 0 ? _kb.Casters.Ref(0).Activation : AOEs.Ref(0).Activation);
+            hints.AddForbiddenZone(new SDInvertedRect(Module.Center, new WDir(1f, default), 1.5f, 1.5f, 40f), _kb!.Casters.Count != 0 ? _kb.Casters.Ref(0).Activation : AOEs.Ref(0).Activation);
         }
     }
 }
@@ -205,7 +205,7 @@ abstract class Impact(ModuleBase module, uint aid, float distance) : Components.
             var dist = Distance;
 
             // square intentionally slightly smaller to prevent sus knockback
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, c.Origin, dist, halfWidth), c.Activation);
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Module.Center, c.Origin, dist, halfWidth), c.Activation);
         }
     }
 }

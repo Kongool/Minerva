@@ -71,9 +71,9 @@ sealed class DubiousTulidisasterArenaChange(ModuleBase module) : Components.Gene
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.DubiousTulidisaster && Arena.Bounds.Radius > 12f)
+        if (spell.Action.ID == (uint)AID.DubiousTulidisaster && Module.Bounds.Radius > 12f)
         {
-            _aoe = [new(square, Arena.Center, default, Module.CastFinishAt(spell, 4.8d))];
+            _aoe = [new(square, Module.Center, default, Module.CastFinishAt(spell, 4.8d))];
         }
     }
 
@@ -81,7 +81,7 @@ sealed class DubiousTulidisasterArenaChange(ModuleBase module) : Components.Gene
     {
         if (index == 0x00 && state == 0x00020001u)
         {
-            Arena.Bounds = new ArenaBoundsSquare(12f);
+            Module.Bounds = new ArenaBoundsSquare(12f);
             _aoe = [];
         }
     }
@@ -99,7 +99,7 @@ sealed class GreatestFlood(ModuleBase module) : Components.SimpleKnockbacks(modu
             var act = c.Activation;
             if (!IsImmune(slot, act))
             {
-                hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, c.Origin, 15f, 11f), act);
+                hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Module.Center, c.Origin, 15f, 11f), act);
             }
         }
     }
@@ -144,8 +144,8 @@ sealed class GreatestLabyrinth(ModuleBase module) : Components.GenericAOEs(modul
 
         void AddAOEs(int index)
         {
-            _aoes.Add(new(forbiddenShapes[index], Arena.Center));
-            _aoes.Add(new(safeShapes[index], Arena.Center, default, World.FutureTime(10d), Colors.SafeFromAOE));
+            _aoes.Add(new(forbiddenShapes[index], Module.Center));
+            _aoes.Add(new(safeShapes[index], Module.Center, default, World.FutureTime(10d), Colors.SafeFromAOE));
         }
         switch (state)
         {

@@ -12,11 +12,46 @@ public abstract class ArenaBounds(float radius)
 
     public abstract bool Contains(WPos center, WPos point);
 
+    /// <summary>
+    /// Distance from <paramref name="origin"/> along <paramref name="dir"/> to the boundary. Solved
+    /// generically off <see cref="Contains"/> — march out to find the first outside sample, then bisect —
+    /// so it works for every bounds shape including custom polygons, at the cost of being approximate
+    /// (~1cm). Returns 0 if the origin is already outside.
+    /// </summary>
+    public float IntersectRay(WPos center, WPos origin, WDir dir)
+    {
+        if (!this.Contains(center, origin))
+            return 0f;
+        var far = this.Radius * 2f + 1f;
+        var lo = 0f;
+        var hi = far;
+        // if even the far sample is inside (shouldn't happen for sane bounds), report the far distance
+        if (this.Contains(center, origin + far * dir))
+            return far;
+        for (var i = 0; i < 24; ++i) // 24 halvings of <=81y is well under a centimetre
+        {
+            var mid = 0.5f * (lo + hi);
+            if (this.Contains(center, origin + mid * dir))
+                lo = mid;
+            else
+                hi = mid;
+        }
+        return lo;
+    }
+
     /// <summary>Closed outer boundary polygon in world space, given the arena center.</summary>
     public abstract IReadOnlyList<WPos> Contour(WPos center);
 
     /// <summary>Inner boundary loop for ring arenas (a donut hole), or null when the field is solid.</summary>
     public virtual IReadOnlyList<WPos>? InnerContour(WPos center) => null;
+
+    /// <summary>
+    /// Interior cut-outs the field excludes — boulders, pillars, rubble. A ring arena's single hole is
+    /// <see cref="InnerContour"/>; this carries an arbitrary number of them, so the radar can draw every
+    /// obstacle rather than just one. Fights where the mechanic *is* the obstacle (hide behind a rock to
+    /// break line of sight) are unplayable if the player can only see the first.
+    /// </summary>
+    public virtual IReadOnlyList<IReadOnlyList<WPos>> Obstacles(WPos center) => [];
 
     protected static List<WPos> Circle(WPos center, float radius, int segments = 60)
     {
@@ -187,7 +222,16 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     }
 
     public override IReadOnlyList<WPos> Contour(WPos center) => LargestShape(this.UnionShapes).ContourWorld();
-    public override IReadOnlyList<WPos>? InnerContour(WPos center) => this.DifferenceShapes.Length > 0 ? this.DifferenceShapes[0].ContourWorld() : null;
+    public override IReadOnlyList<IReadOnlyList<WPos>> Obstacles(WPos center)
+    {
+        var n = this.DifferenceShapes.Length;
+        if (n == 0)
+            return [];
+        var contours = new IReadOnlyList<WPos>[n];
+        for (var i = 0; i < n; ++i)
+            contours[i] = this.DifferenceShapes[i].ContourWorld();
+        return contours;
+    }
 
     private static Shape LargestShape(Shape[] shapes)
     {
@@ -202,17 +246,24 @@ public sealed class ArenaBoundsCustom : ArenaBounds
         return best;
     }
 
+    /// <summary>
+    /// True circumradius about the arena centre — the farthest any boundary point sits from it. The radar
+    /// scales the canvas by this, so it has to be the real extent: half the bounding-box *diagonal*
+    /// over-states a circular field by sqrt(2), rendering a 19.5y arena as though it were 27.6y and
+    /// shrinking it to 71% of the canvas. A square is unaffected either way, since its farthest boundary
+    /// point is the corner.
+    /// </summary>
     private static float ComputeRadius(Shape[] shapes)
     {
-        var min = new WPos(float.MaxValue, float.MaxValue);
-        var max = new WPos(float.MinValue, float.MinValue);
+        var center = ComputeCenter(shapes);
+        var radius = 0f;
         foreach (var s in shapes)
         {
-            var (smin, smax) = Bounds(s.ContourWorld());
-            min = new WPos(MathF.Min(min.X, smin.X), MathF.Min(min.Z, smin.Z));
-            max = new WPos(MathF.Max(max.X, smax.X), MathF.Max(max.Z, smax.Z));
+            var contour = s.ContourWorld();
+            for (var i = 0; i < contour.Count; ++i)
+                radius = MathF.Max(radius, (contour[i] - center).Length());
         }
-        return 0.5f * (max - min).Length();
+        return radius;
     }
 
     private static (WPos min, WPos max) Bounds(IReadOnlyList<WPos> pts)

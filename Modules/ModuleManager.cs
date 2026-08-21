@@ -33,8 +33,10 @@ public sealed class ModuleManager : IDisposable
 
     public void Update()
     {
-        // drop the active module if it's no longer valid
-        if (this.ActiveModule != null && (this.ActiveModule.PrimaryActor.IsDestroyed || this.world.CurrentCFCID == 0))
+        // Drop the active module once it's no longer valid. A killed boss is not *destroyed* — the corpse
+        // lingers for a while — so death has to be checked separately or the module keeps running over a
+        // dead encounter and its components keep painting whatever AOEs they were left holding.
+        if (this.ActiveModule != null && (this.ActiveModule.PrimaryActor.IsDestroyed || this.world.CurrentCFCID == 0 || this.EncounterOver()))
         {
             this.ActiveModule.Dispose();
             this.ActiveModule = null;
@@ -56,7 +58,8 @@ public sealed class ModuleManager : IDisposable
             var info = candidates[i];
             foreach (var actor in this.world.Actors)
             {
-                if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed)
+                // ... and don't immediately re-activate on that same corpse
+                if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed && !(info.Attr.PrimaryActorDeathEndsEncounter && actor.IsDead))
                 {
                     this.ActiveModule = info.Create(this.world, actor);
                     this.ActiveModuleInfo = info;
@@ -66,6 +69,13 @@ public sealed class ModuleManager : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Has the fight finished? Only true for modules whose primary actor dying really is the end — a
+    /// multi-form boss can die and be replaced, so those keep running until the actor goes away.
+    /// </summary>
+    private bool EncounterOver()
+        => this.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true && this.ActiveModule!.PrimaryActor.IsDead;
 
     /// <summary>The local player's actor in the world state, if resolvable (object-table slot 0 is the POV).</summary>
     public Actor? LocalPlayer()

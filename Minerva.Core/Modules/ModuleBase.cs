@@ -137,6 +137,14 @@ public abstract class ModuleBase : IDisposable
         return false;
     }
 
+    public bool IsAnyActorInCombat(uint[] oids)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.InCombat && !a.IsDeadOrDestroyed && Array.IndexOf(oids, a.OID) >= 0)
+                return true;
+        return false;
+    }
+
     public bool IsAnyActorInBoundsInCombat(uint oid)
     {
         foreach (var a in this.World.Actors)
@@ -145,10 +153,26 @@ public abstract class ModuleBase : IDisposable
         return false;
     }
 
+    public bool IsAnyActorInBoundsInCombat(uint[] oids)
+    {
+        foreach (var a in this.World.Actors)
+            if (a.InCombat && !a.IsDeadOrDestroyed && Array.IndexOf(oids, a.OID) >= 0 && this.Bounds.Contains(this.Center, a.Position))
+                return true;
+        return false;
+    }
+
     public bool AllDeadOrDestroyedInBounds(uint oid)
     {
         foreach (var a in this.World.Actors)
             if (a.OID == oid && !a.IsDeadOrDestroyed && this.Bounds.Contains(this.Center, a.Position))
+                return false;
+        return true;
+    }
+
+    public bool AllDeadOrDestroyedInBounds(uint[] oids)
+    {
+        foreach (var a in this.World.Actors)
+            if (!a.IsDeadOrDestroyed && Array.IndexOf(oids, a.OID) >= 0 && this.Bounds.Contains(this.Center, a.Position))
                 return false;
         return true;
     }
@@ -256,22 +280,61 @@ public abstract class ModuleBase : IDisposable
     public DateTime CastFinishAt(ActorCastInfo cast, double extraDelay = 0d) => this.World.FutureTime(cast.RemainingTime + (float)extraDelay);
 
     // returns a List (matching BMR) so callers can use .Count / indexing
-    public List<Actor> Enemies(uint oid)
-    {
-        var result = new List<Actor>();
-        foreach (var a in this.World.Actors)
-            if (a.OID == oid && !a.IsDestroyed)
-                result.Add(a);
-        return result;
-    }
+    // Enemy lists handed out by Enemies(), kept current for the module's lifetime. Modules follow BMR's
+    // idiom of capturing one in a readonly field at construction — `readonly List<Actor> rocks =
+    // module.Enemies([...])` — so a plain snapshot silently freezes at activation: anything that spawns
+    // after that moment never appears, and the module quietly works from a short list forever. On Treno
+    // that meant nine of thirteen boulders cast a line-of-sight shadow and the rest looked like cover
+    // the radar refused to mark safe.
+    private readonly List<(uint[] OIDs, List<Actor> Actors)> trackedEnemies = [];
 
+    public List<Actor> Enemies(uint oid) => this.Enemies([oid]);
+
+    /// <summary>
+    /// Live list of the actors matching these OIDs. The same list instance is returned for the same set of
+    /// OIDs and the framework keeps it in step with the world, so callers can hold on to it.
+    /// </summary>
     public List<Actor> Enemies(uint[] oids)
     {
+        for (var i = 0; i < this.trackedEnemies.Count; ++i)
+            if (SameSet(this.trackedEnemies[i].OIDs, oids))
+                return this.trackedEnemies[i].Actors;
+
         var result = new List<Actor>();
         foreach (var a in this.World.Actors)
             if (!a.IsDestroyed && Array.IndexOf(oids, a.OID) >= 0)
                 result.Add(a);
+        this.trackedEnemies.Add((oids, result));
         return result;
+    }
+
+    private static bool SameSet(uint[] a, uint[] b)
+    {
+        if (a.Length != b.Length)
+            return false;
+        for (var i = 0; i < a.Length; ++i)
+            if (Array.IndexOf(b, a[i]) < 0)
+                return false;
+        return true;
+    }
+
+    private void TrackEnemy(Actor a, bool added)
+    {
+        for (var i = 0; i < this.trackedEnemies.Count; ++i)
+        {
+            var (oids, list) = this.trackedEnemies[i];
+            if (Array.IndexOf(oids, a.OID) < 0)
+                continue;
+            if (added)
+            {
+                if (!list.Contains(a))
+                    list.Add(a);
+            }
+            else
+            {
+                list.Remove(a);
+            }
+        }
     }
 
     private void Dispatch(Action<ModuleComponent> action)
@@ -280,8 +343,17 @@ public abstract class ModuleBase : IDisposable
             action(this.components[i]);
     }
 
-    private void OnActorCreated(Actor a) => this.Dispatch(c => c.OnActorCreated(a));
-    private void OnActorDestroyed(Actor a) => this.Dispatch(c => c.OnActorDestroyed(a));
+    private void OnActorCreated(Actor a)
+    {
+        this.TrackEnemy(a, added: true);
+        this.Dispatch(c => c.OnActorCreated(a));
+    }
+
+    private void OnActorDestroyed(Actor a)
+    {
+        this.TrackEnemy(a, added: false);
+        this.Dispatch(c => c.OnActorDestroyed(a));
+    }
 
     // status/tether events carry the struct by ref/in (matching BMR), which can't be captured in a
     // lambda, so these fan out directly. The status slot holds the relevant status at fire time (the

@@ -1,3 +1,4 @@
+using System.Linq;
 namespace Minerva.Generation;
 
 /// <summary>An object id observed in the fight, with lifetime + voidzone / arena-marker candidacy.</summary>
@@ -32,7 +33,12 @@ public readonly record struct ActionFact(
     uint AID, uint CasterOID, string CasterName, TargetKind Target, float CastTime, int Count,
     int DistinctPlayerTargets, int MaxSimultaneous, PlayerMechanic PlayerMechanic,
     uint PrecedingIcon, uint PrecedingTether, int Phase, bool ExaflareCandidate = false,
-    bool ConcentricCandidate = false, bool GazeCandidate = false, float KnockbackDistance = 0f);
+    bool ConcentricCandidate = false, bool GazeCandidate = false, float KnockbackDistance = 0f,
+    int Resolutions = 0, int MinPlayersHit = 0, int MaxPlayersHit = 0)
+{
+    /// <summary>Whether the recording actually saw this land, i.e. whether the hit counts mean anything.</summary>
+    public bool Measured => this.Resolutions > 0;
+}
 
 /// <summary>What kind of signal starts a phase — decides which transition the generator emits.</summary>
 public enum PhaseTrigger
@@ -79,4 +85,31 @@ public sealed class GenerationInput
     public IReadOnlyList<uint> Statuses { get; init; } = [];
     public IReadOnlyList<uint> Tethers { get; init; } = [];
     public IReadOnlyList<uint> Icons { get; init; } = [];
+
+    /// <summary>
+    /// A file name for this draft that does not collide with the next boss in the same duty.
+    /// <para>Naming it after the duty alone loses work silently: every boss in Occult Crescent North Horn
+    /// reports CFC 1093, so generating a second one there overwrites the first with no warning.</para>
+    /// </summary>
+    public string DraftFileName() => $"{this.DraftIdentifier()}.generated.cs";
+
+    /// <summary>
+    /// A C# identifier for this draft — its class name, its namespace, and the stem of its file name.
+    /// <para>Keyed on the boss, not the duty. Every boss in Occult Crescent North Horn reports CFC 1093, so
+    /// naming after the duty alone gives two drafts the same file (silently overwriting one), the same
+    /// namespace, and the same class — the last of which does not even compile. A generator that cannot
+    /// emit two bosses from one duty cannot cover a duty.</para>
+    /// </summary>
+    public string DraftIdentifier()
+    {
+        var name = this.BossName;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var clean = new string([.. name.Where(char.IsLetterOrDigit)]);
+            if (clean.Length != 0 && !char.IsDigit(clean[0]))
+                return $"D{this.CFCID}{clean}";
+        }
+
+        return $"D{this.CFCID}Boss{this.BossOID:X}";
+    }
 }

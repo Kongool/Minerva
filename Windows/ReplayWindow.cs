@@ -28,6 +28,13 @@ public sealed class ReplayWindow : Window, IDisposable
         };
     }
 
+    private (int Colors, int Vars) theme;
+
+    public override void PreDraw() => this.theme = AegisTheme.Push();
+
+    public override void PostDraw() => AegisTheme.Pop(this.theme);
+
+
     public override void Draw() => this.DrawContent();
 
     /// <summary>The replay body, factored out so it can also be embedded as a tab in the radar window.</summary>

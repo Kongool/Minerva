@@ -54,7 +54,7 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.Thunderspark && Arena.Bounds.Radius > 20f)
+        if (spell.Action.ID == (uint)AID.Thunderspark && Module.Bounds.Radius > 20f)
         {
             var shape = new AOEShapeDonut(20f, 30f);
             var pos = D123ThundergustGriffin.ArenaCenter;
@@ -66,7 +66,7 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (index == 0x17 && state == 0x00020001u)
         {
-            Arena.Bounds = new ArenaBoundsCustom([new Polygon(Arena.Center, 20f, 64)], MapResolution: 0.35f);
+            Module.Bounds = new ArenaBoundsCustom([new Polygon(Module.Center, 20f, 64)], MapResolution: 0.35f);
             _aoe = [];
         }
     }
@@ -146,14 +146,14 @@ sealed class ElectrifyingFlight(ModuleBase module) : Components.GenericKnockback
         if (spell.Action.ID == (uint)AID.ElectrifyingFlight)
         {
             var act = Module.CastFinishAt(spell);
-            var pos = Arena.Center;
+            var pos = Module.Center;
             var rot = spell.Rotation;
             var offset = 90f.Degrees();
             var rot1 = rot + offset;
             var isAlongZAxis = rot1.AlmostEqual(default, Angle.DegToRad) || rot1.AlmostEqual(180f.Degrees(), Angle.DegToRad);
             _kbs.Add(new(pos, 12f, act, rect, rot1, Kind.DirForward));
             _kbs.Add(new(pos, 12f, act, rect, rot - offset, Kind.DirForward));
-            distance = isAlongZAxis ? new SDKnockbackInCircleLeftRightAlongZAxis(Arena.Center, 12f, 19f) : new SDKnockbackInCircleLeftRightAlongXAxis(Arena.Center, 12f, 19f);
+            distance = isAlongZAxis ? new SDKnockbackInCircleLeftRightAlongZAxis(Module.Center, 12f, 19f) : new SDKnockbackInCircleLeftRightAlongXAxis(Module.Center, 12f, 19f);
         }
     }
 
@@ -181,6 +181,14 @@ sealed class ElectrifyingFlight(ModuleBase module) : Components.GenericKnockback
 }
 
 [SkipLocalsInit]
+// The three Thunderbolt telegraphs. Every one starts in the same instant as a real Thunderbolt from a
+// sibling helper and resolves 1.2s earlier (recording 2026-08-20: 16 Visual1 and 10 Thunderbolt2 casts at
+// t+15.4s, 4.0s against 5.2s), so the danger the player has to move for is already drawn by Thunderbolt.
+// BossmodReborn reaches the same conclusion -- it names them Visual and draws nothing.
+sealed class ThunderboltVisuals(ModuleBase module) : Components.IgnoredCasts(module,
+    [(uint)AID.ThunderboltVisual1, (uint)AID.ThunderboltVisual2, (uint)AID.ThunderboltVisual3],
+    "telegraph for Thunderbolt, which is drawn");
+
 sealed class D123ThundergustGriffinStates : StateMachineBuilder
 {
     public D123ThundergustGriffinStates(ModuleBase module) : base(module)
@@ -195,11 +203,12 @@ sealed class D123ThundergustGriffinStates : StateMachineBuilder
             .ActivateOnEnter<Rush>()
             .ActivateOnEnter<ElectrogeneticForce>()
             .ActivateOnEnter<StormSurge>()
-            .ActivateOnEnter<ElectrifyingFlight>();
+            .ActivateOnEnter<ElectrifyingFlight>()
+            .ActivateOnEnter<ThunderboltVisuals>();
     }
 }
 
-[ModuleInfo(CFCID = 1064u, NameID = 14288u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
+[ModuleInfo(CFCID = 1064u, NameID = 14288u, PrimaryActorOID = (uint)OID.ThundergustGriffin, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class D123ThundergustGriffin : ModuleBase
 {

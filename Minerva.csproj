@@ -18,7 +18,7 @@
 
     <!-- The plugin project lives at the repo root, so its recursive globs would otherwise
          swallow the sibling projects' sources. Keep those out of this project. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Minerva.Core\**;Minerva.Tests\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Minerva.Core\**;Minerva.Tests\**;Minerva.Validate\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

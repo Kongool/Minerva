@@ -46,6 +46,28 @@ public abstract class Arena
     /// <summary>Is the point within the arena boundary?</summary>
     public bool InBounds(WPos p) => this.Bounds.Contains(this.Center, p);
 
+    /// <summary>Distance from <paramref name="origin"/> along <paramref name="dir"/> to the boundary.</summary>
+    public float IntersectRayBounds(WPos origin, WDir dir) => this.Bounds.IntersectRay(this.Center, origin, dir);
+
+    /// <summary>
+    /// Draw an actor marker at a projected destination — where a forced march or knockback would put it.
+    /// A destination outside the arena is clamped to the boundary so the marker stays visible.
+    /// </summary>
+    public void ActorProjected(WPos from, WPos to, Angle rotation, uint color)
+    {
+        if (this.InBounds(to))
+        {
+            this.ActorMarker(to, rotation, 0.5f, color);
+            return;
+        }
+        var dir = to - from;
+        var len = dir.Length();
+        if (len <= 0f)
+            return;
+        var t = this.IntersectRayBounds(from, dir / len);
+        this.ActorMarker(from + Math.Min(t, len) * (dir / len), rotation, 0.5f, color);
+    }
+
     /// <summary>Draw only the actors that are currently within the arena boundary.</summary>
     public void ActorsInBounds(IEnumerable<Actor> actors, uint color = default)
     {
@@ -53,4 +75,11 @@ public abstract class Arena
             if (this.InBounds(a.Position))
                 this.Actor(a, color);
     }
+
+    public void ActorsInBounds(ModuleBase module, uint[] oids, uint color = default)
+        => this.ActorsInBounds(module.Enemies(oids), color);
+
+    /// <summary>Outline a circular zone (safe spots, orb footprints) without filling it.</summary>
+    public void ZoneCircleOutline(WPos center, float radius, uint color = default, float thickness = 1f)
+        => this.AddCircle(center, radius, color == default ? Colors.Safe : color, thickness);
 }

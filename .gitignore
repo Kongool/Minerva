@@ -5,8 +5,15 @@ obj/
 *.user
 *.suo
 
+# Generated / machine-local tooling artifacts (regenerable from game data)
+tools/__pycache__/
+tools/action_names.tsv
+
 # Local, machine-specific Claude settings (keep the rest of .claude tracked)
 .claude/settings.local.json
+
+# Local replay captures + generated drafts — machine-specific test fixtures, not repo source
+.claude/replays/
 
 # Local reference docs (IPC specs, integration notes) — not part of the shipped plugin
 docs/

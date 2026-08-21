@@ -90,9 +90,9 @@ sealed class ArenaChanges(ModuleBase module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.Electrowave && Arena.Bounds == StartingBounds)
+        if (spell.Action.ID == (uint)AID.Electrowave && Module.Bounds == StartingBounds)
         {
-            _aoe = [new(square, Arena.Center, default, Module.CastFinishAt(spell, 0.7d))];
+            _aoe = [new(square, Module.Center, default, Module.CastFinishAt(spell, 0.7d))];
         }
     }
 
@@ -102,16 +102,16 @@ sealed class ArenaChanges(ModuleBase module) : Components.GenericAOEs(module)
         {
             if (ArenaBoundsMap.TryGetValue(index, out var value))
             {
-                Arena.Bounds = value;
+                Module.Bounds = value;
             }
             else if (index == 0x12)
             {
-                Arena.Bounds = defaultBounds;
+                Module.Bounds = defaultBounds;
                 _aoe = [];
             }
         }
         else if (state == 0x00080004u)
-            Arena.Bounds = defaultBounds;
+            Module.Bounds = defaultBounds;
     }
 }
 
@@ -156,7 +156,7 @@ sealed class Surge(ModuleBase module) : Components.GenericKnockback(module)
     {
         foreach (var kvp in ArenaChanges.ArenaBoundsMap)
         {
-            if (Arena.Bounds == kvp.Value)
+            if (Module.Bounds == kvp.Value)
             {
                 return kvp.Key switch
                 {
@@ -186,7 +186,7 @@ sealed class Surge(ModuleBase module) : Components.GenericKnockback(module)
             var safewalls = GetActiveSafeWalls();
             var forbidden = new ShapeDistance[4];
 
-            var centerX = Arena.Center.X;
+            var centerX = Module.Center.X;
             for (var i = 0; i < 4; ++i)
             {
                 var safeWall = safewalls[i];
@@ -210,7 +210,7 @@ sealed class SurgeHint(ModuleBase module) : Components.GenericAOEs(module)
         if (spell.Action.ID == (uint)AID.Surge)
         {
             var activeSafeWalls = _kb.GetActiveSafeWalls();
-            var centerX = Arena.Center.X;
+            var centerX = Module.Center.X;
             for (var i = 0; i < 4; ++i)
             {
                 var safewall = activeSafeWalls[i].Vertex1;

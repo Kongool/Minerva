@@ -111,6 +111,6 @@ sealed class D132ChortStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1011u, NameID = 14734u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Wen (ported from BMR)")]
+[ModuleInfo(CFCID = 1011u, NameID = 14734u, PrimaryActorOID = (uint)OID.Chort, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Wen (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class Chort(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(660f, -141f), new ArenaBoundsCircle(15f));

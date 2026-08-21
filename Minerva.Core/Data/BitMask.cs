@@ -18,6 +18,9 @@ public struct BitMask(ulong raw = 0)
     public void Clear(int index) => this.Raw &= ~(1ul << index);
     public void Toggle(int index) => this.Raw ^= 1ul << index;
 
+    /// <summary>Fluent set: returns a copy with <paramref name="index"/> set (BMR's <c>WithBit</c>).</summary>
+    public readonly BitMask WithBit(int index) => index >= 0 ? new BitMask(this.Raw | (1ul << index)) : this;
+
     public readonly int LowestSetBit() => this.Raw == 0 ? -1 : System.Numerics.BitOperations.TrailingZeroCount(this.Raw);
 
     public static BitMask Build(params int[] bits)

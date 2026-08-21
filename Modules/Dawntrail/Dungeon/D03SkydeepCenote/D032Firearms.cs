@@ -53,9 +53,9 @@ sealed class DynamicDominanceArenaChange(ModuleBase module) : Components.Generic
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.DynamicDominance && Arena.Bounds.Radius > 20f)
+        if (spell.Action.ID == (uint)AID.DynamicDominance && Module.Bounds.Radius > 20f)
         {
-            _aoe = [new(square, Arena.Center, default, Module.CastFinishAt(spell, 0.6d))];
+            _aoe = [new(square, Module.Center, default, Module.CastFinishAt(spell, 0.6d))];
         }
     }
 
@@ -63,7 +63,7 @@ sealed class DynamicDominanceArenaChange(ModuleBase module) : Components.Generic
     {
         if (state == 0x00020001 && index == 0x14)
         {
-            Arena.Bounds = D032Firearms.DefaultBounds;
+            Module.Bounds = D032Firearms.DefaultBounds;
             _aoe = [];
         }
     }

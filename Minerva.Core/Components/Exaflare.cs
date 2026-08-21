@@ -12,7 +12,7 @@ namespace Minerva.Components;
 public class Exaflare(ModuleBase module, AOEShape shape) : GenericAOEs(module, warningText: "GTFO from exaflare!")
 {
     /// <summary>One marching line: its next explosion point, step vector, cadence and steps remaining.</summary>
-    public sealed class Line(WPos next, WDir advance, DateTime nextExplosion, double timeToMove, int explosionsLeft, int maxShown)
+    public sealed class Line(WPos next, WDir advance, DateTime nextExplosion, double timeToMove, int explosionsLeft, int maxShown, Angle rotation = default)
     {
         public WPos Next = next;
         public WDir Advance = advance;
@@ -20,6 +20,7 @@ public class Exaflare(ModuleBase module, AOEShape shape) : GenericAOEs(module, w
         public double TimeToMove = timeToMove;
         public int ExplosionsLeft = explosionsLeft;
         public int MaxShown = maxShown; // how many upcoming steps to preview
+        public Angle Rotation = rotation; // facing for directional shapes (rects/cones); irrelevant for circles
     }
 
     public readonly AOEShape Shape = shape;
@@ -38,7 +39,7 @@ public class Exaflare(ModuleBase module, AOEShape shape) : GenericAOEs(module, w
             if (l.ExplosionsLeft <= 0)
                 continue;
             // the imminent explosion at the current position is the real danger
-            this.active.Add(new AOEInstance(this.Shape, l.Next, default, l.NextExplosion));
+            this.active.Add(new AOEInstance(this.Shape, l.Next, l.Rotation, l.NextExplosion));
             // preview a few upcoming steps marching along Advance (drawn, but not "you're in danger" yet)
             var preview = Math.Min(l.ExplosionsLeft, l.MaxShown);
             var pos = l.Next;
@@ -47,10 +48,20 @@ public class Exaflare(ModuleBase module, AOEShape shape) : GenericAOEs(module, w
             {
                 pos += l.Advance;
                 time = time.AddSeconds(l.TimeToMove);
-                this.active.Add(new AOEInstance(this.Shape, pos, default, time, risky: false));
+                this.active.Add(new AOEInstance(this.Shape, pos, l.Rotation, time, risky: false));
             }
         }
         return CollectionsMarshal.AsSpan(this.active);
+    }
+
+    /// <summary>Step <paramref name="line"/> one explosion forward from an observed position, rather
+    /// than from its own bookkeeping — use this when the game tells you where the step actually landed.
+    /// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>
+    protected void AdvanceLine(Line line, WPos pos)
+    {
+        line.Next = pos + line.Advance;
+        line.NextExplosion = this.World.FutureTime(line.TimeToMove);
+        line.ExplosionsLeft--;
     }
 
     /// <summary>Step <paramref name="line"/> one explosion forward along its path.</summary>

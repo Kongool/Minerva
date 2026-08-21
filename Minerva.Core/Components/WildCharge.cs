@@ -24,7 +24,8 @@ public class GenericWildCharge(ModuleBase module, float halfWidth, uint aid = de
     public DateTime Activation;
     public PlayerRole[] PlayerRoles = new PlayerRole[PartyState.MaxSlots];
 
-    protected (WPos origin, WDir dir, float length) GetAOEForTarget(WPos sourcePos, WPos targetPos)
+    /// <summary>Geometry of one charge lane. Virtual so inverse variants can move the origin.</summary>
+    protected virtual (WPos origin, WDir dir, float length) GetAOEForTarget(WPos sourcePos, WPos targetPos)
     {
         var toTarget = targetPos - sourcePos;
         var length = this.FixedLength > 0 ? this.FixedLength : toTarget.Length();
@@ -81,5 +82,26 @@ public class GenericWildCharge(ModuleBase module, float halfWidth, uint aid = de
         var dangerous = this.PlayerRoles[pcSlot] == PlayerRole.Avoid;
         foreach (var aoe in this.EnumerateAOEs())
             this.Arena.ZoneShape(new AOEShapeRect(aoe.length, this.HalfWidth), aoe.origin, Angle.FromDirection(aoe.dir), dangerous ? Colors.AOE : Colors.Safe);
+    }
+}
+
+/// <summary>
+/// Wild charge run backwards: the lane starts <c>DistanceBehind</c> yards *behind* the target and runs
+/// toward the source, so sharers line up on the far side of the target rather than between them and the
+/// boss. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class InverseWildCharge(ModuleBase module, float halfWidth, float distanceBehind, uint aid = default, float fixedLength = default)
+    : GenericWildCharge(module, halfWidth, aid, fixedLength)
+{
+    public readonly float DistanceBehind = distanceBehind;
+
+    protected override (WPos origin, WDir dir, float length) GetAOEForTarget(WPos sourcePos, WPos targetPos)
+    {
+        var toTarget = targetPos - sourcePos;
+        var dir = toTarget.Normalized();
+        // start behind the target and aim back at the source
+        var origin = targetPos + this.DistanceBehind * dir;
+        var length = this.FixedLength > 0 ? this.FixedLength : (origin - sourcePos).Length();
+        return (origin, -dir, length);
     }
 }

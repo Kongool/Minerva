@@ -50,8 +50,12 @@ public sealed class PartyState
         return [.. result];
     }
 
-    /// <summary>Party member actors (skipping empty/unresolved/dead slots).</summary>
-    public Actor[] WithoutSlot(bool includeDead = false)
+    /// <summary>
+    /// Party member actors (skipping empty/unresolved/dead slots). <paramref name="excludeAlliance"/> and
+    /// <paramref name="excludeNPCs"/> exist so BMR modules port unchanged, but are no-ops: Minerva's
+    /// PartyState holds only the player's own 8 slots, so neither alliance members nor NPCs are in it.
+    /// </summary>
+    public Actor[] WithoutSlot(bool includeDead = false, bool excludeAlliance = false, bool excludeNPCs = false)
     {
         var result = new List<Actor>(MaxSlots);
         for (var i = 0; i < MaxSlots; ++i)

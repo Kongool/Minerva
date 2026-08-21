@@ -36,6 +36,30 @@ public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll =
     /// next; the sequence is dropped once its last ring has gone off. Returns false if no sequence
     /// matched (so a caller can tell an unexpected cast from an expected advance).
     /// </summary>
+    /// <summary>
+    /// Order-aware advance: only matches a sequence that has resolved exactly <paramref name="order"/>
+    /// rings so far (and, when given, is turned to <paramref name="rotation"/>). Use this when several
+    /// bullseyes overlap and the ring index is what disambiguates them. A negative order is a no-op that
+    /// reports success, matching BMR. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+    /// </summary>
+    public bool AdvanceSequence(int order, WPos origin, DateTime nextActivation = default, Angle rotation = default)
+    {
+        if (order < 0)
+            return true;
+
+        foreach (var s in this.Sequences)
+        {
+            if (s.Done == order && s.Origin.AlmostEqual(origin, 1f) && s.Rotation.AlmostEqual(rotation, 0.05f))
+            {
+                s.NextActivation = nextActivation;
+                if (++s.Done >= this.Shapes.Length)
+                    this.Sequences.Remove(s);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public bool AdvanceSequence(WPos origin, DateTime nextActivation = default)
     {
         foreach (var s in this.Sequences)

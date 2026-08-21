@@ -114,6 +114,23 @@ public sealed class ActorCastEvent(ActionID action, ulong mainTargetID, Angle ro
     public readonly Vector3 TargetPos = targetPos;
     public readonly uint GlobalSequence = globalSequence;
 
+    /// <summary>
+    /// Who the action actually hit, and what it did to them. The game sends this with every resolved
+    /// action; components use it to tell a real hit from a whiffed one and to count per-target resolves.
+    /// Empty when the recording predates target capture (older logs) — treat that as "unknown", not "none".
+    /// </summary>
+    public readonly List<Target> Targets = [];
+
+    /// <summary>One resolved target. <see cref="Effects"/> are the game's raw 8 effect slots, kept
+    /// undecoded — modules only ever test them for presence, and decoding them is a separate concern.</summary>
+    public readonly struct Target(ulong id, ulong[] effects)
+    {
+        public readonly ulong ID = id;
+        public readonly ulong[] Effects = effects;
+
+        public const int MaxEffects = 8;
+    }
+
     public WPos TargetXZ => new(this.TargetPos.X, this.TargetPos.Z);
 }
 

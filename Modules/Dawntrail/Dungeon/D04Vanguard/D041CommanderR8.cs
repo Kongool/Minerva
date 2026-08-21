@@ -57,9 +57,9 @@ sealed class ElectrowaveArenaChange(ModuleBase module) : Components.GenericAOEs(
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.Electrowave && Arena.Bounds.Radius > 19f)
+        if (spell.Action.ID == (uint)AID.Electrowave && Module.Bounds.Radius > 19f)
         {
-            _aoe = [new(new AOEShapeCustom([new Square(D041CommanderR8.ArenaCenter, 20f)], [new Square(D041CommanderR8.ArenaCenter, 17f)]), Arena.Center, default, Module.CastFinishAt(spell, 0.4d))];
+            _aoe = [new(new AOEShapeCustom([new Square(D041CommanderR8.ArenaCenter, 20f)], [new Square(D041CommanderR8.ArenaCenter, 17f)]), Module.Center, default, Module.CastFinishAt(spell, 0.4d))];
         }
     }
 
@@ -67,7 +67,7 @@ sealed class ElectrowaveArenaChange(ModuleBase module) : Components.GenericAOEs(
     {
         if (index == 0x0A && state == 0x00020001u)
         {
-            Arena.Bounds = D041CommanderR8.DefaultBounds;
+            Module.Bounds = D041CommanderR8.DefaultBounds;
             _aoe = [];
         }
     }
@@ -173,7 +173,7 @@ sealed class RapidRotary(ModuleBase module) : Components.GenericAOEs(module)
         }
         void AddAOEs(AOEShape shape2, Angle initialAngle)
         {
-            var pos = Arena.Center.Quantized();
+            var pos = Module.Center.Quantized();
             for (var i = 0; i < 3; ++i)
             {
                 var activation = Module.CastFinishAt(spell, 1.8d + i * 0.3d);

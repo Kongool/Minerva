@@ -62,8 +62,9 @@ public sealed class ReplayValidator
         var castCount = new SortedDictionary<uint, int>();
         var drawn = new HashSet<uint>();
         var helperCast = new HashSet<uint>(); // AIDs cast by Helpers (0x233C) — only ever mechanics
-        var initialRadius = 0f;
+        ArenaBounds? initialBounds = null;
         bool boundsChanged = false, arenaMarkerSpawned = false;
+        List<int> countsBefore = [], countsAfter = []; // reused each op; the timeline is millions of ops long
 
         foreach (var (_, op) in timeline.Ops)
         {
@@ -73,27 +74,36 @@ public sealed class ReplayValidator
             if (op is ActorState.OpCastInfo ci && ci.Value is { } cast && cast.Action.ID != 0)
             {
                 var caster = world.Actors.Find(ci.InstanceID);
-                if (caster != null && caster.Type is not (ActorType.Player or ActorType.Pet or ActorType.Chocobo))
+                // Buddy is Duty Support: Alphinaud's Avatar and friends run full job rotations, and without
+                // this every one of their casts lands in the uncovered list as a mechanic nobody handled.
+                // A Treno run reported 23 uncovered casts, 21 of which were the NPC party's own abilities —
+                // and this report is the pass/fail signal the module loop runs on, so the noise is not
+                // cosmetic. ReplayAnalysis already excludes Buddy; this was the copy that did not.
+                if (caster != null && caster.Type is not (ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy))
                 {
                     enemyCastAid = cast.Action.ID;
                     byHelper = caster.Type == ActorType.Helper;
                 }
             }
 
-            var before = module != null ? AoeCount(module) : 0;
+            DrawCounts(module, countsBefore);
             world.Execute(op);
             if (module == null)
             {
                 module = TryActivate(world, registry, watched);
                 if (module != null)
-                    initialRadius = module.Bounds.Radius;
+                    initialBounds = module.Bounds;
             }
             module?.Update();
-            var after = module != null ? AoeCount(module) : 0;
+            DrawCounts(module, countsAfter);
 
             if (module != null)
             {
-                if (MathF.Abs(module.Bounds.Radius - initialRadius) > 0.5f)
+                // Reference, not radius. A dynamic arena that swaps which holes are cut out of the floor
+                // -- Treno's rocks crumbling one by one -- keeps exactly the same extent, so a radius
+                // comparison reports "the module never changed bounds" for a module that changes them
+                // thirteen times. Bounds are immutable, so a reassignment is the change.
+                if (!ReferenceEquals(module.Bounds, initialBounds))
                     boundsChanged = true;
                 if (op is ActorState.OpCreate created && created.Type == ActorType.EventObj)
                     arenaMarkerSpawned = true; // an environment object appeared mid-fight (likely an arena change)
@@ -104,8 +114,8 @@ public sealed class ReplayValidator
                 castCount[enemyCastAid] = castCount.GetValueOrDefault(enemyCastAid) + 1;
                 if (byHelper)
                     helperCast.Add(enemyCastAid);
-                if (after > before)
-                    drawn.Add(enemyCastAid); // the module reacted with a new AOE for this cast
+                if (AnyRose(countsBefore, countsAfter))
+                    drawn.Add(enemyCastAid); // some component started showing something for this cast
             }
         }
 
@@ -149,25 +159,50 @@ public sealed class ReplayValidator
         return null;
     }
 
-    private static int AoeCount(ModuleBase module)
+    /// <summary>
+    /// How many things each component is currently telling the player to move out of — AOE zones, plus stack
+    /// and spread circles, which hang off a different base class and used to be counted as nothing at all
+    /// (so a spread mechanic could never be seen as covered, however correctly it was handled).
+    /// <para>Kept per component rather than summed. Components interact: a module may blank one overlay while
+    /// another lights up, and a single total then stays flat across the very op that drew something.</para>
+    /// </summary>
+    private static void DrawCounts(ModuleBase? module, List<int> into)
     {
-        var n = 0;
+        into.Clear();
+        if (module == null)
+            return;
         foreach (var c in module.Components)
-            if (c is Components.GenericAOEs g)
-                n += g.ActiveAOEs(0, module.PrimaryActor).Length;
-        return n;
+            into.Add(c switch
+            {
+                Components.GenericAOEs g => g.ActiveAOEs(0, module.PrimaryActor).Length,
+                Components.GenericStackSpread s => s.ActiveStacks.Count + s.ActiveSpreads.Count,
+                Components.GenericKnockback k => k.ActiveKnockbacks(0, module.PrimaryActor).Length,
+                _ => 0,
+            });
     }
 
-    // collect the action ids components explicitly watch (WatchedAction uint / AIDs uint[]) so raidwides,
-    // tankbusters, gazes etc. count as "handled" even though they draw no AOE zone
+    /// <summary>Did any single component start showing more than it was? Components can be added mid-fight
+    /// by a phase change, so a slot that did not exist before counts as having been at zero.</summary>
+    private static bool AnyRose(List<int> before, List<int> after)
+    {
+        for (var i = 0; i < after.Count; ++i)
+            if (after[i] > (i < before.Count ? before[i] : 0))
+                return true;
+        return false;
+    }
+
+    // collect the action ids components explicitly watch so raidwides, tankbusters, gazes etc. count as
+    // "handled" even though they draw no AOE zone. Any uint field whose name ends in Action qualifies:
+    // CastCounter calls it WatchedAction, but CastStackSpread splits it into StackAction/SpreadAction, and
+    // matching only the first name filed every cast-driven stack and spread as an uncovered mechanic.
     private static void CollectWatchedActions(ModuleBase module, HashSet<uint> watched)
     {
         foreach (var c in module.Components)
             foreach (var f in c.GetType().GetFields())
             {
-                if (f.FieldType == typeof(uint) && f.Name == "WatchedAction")
+                if (f.FieldType == typeof(uint) && f.Name.EndsWith("Action", StringComparison.Ordinal))
                     watched.Add((uint)f.GetValue(c)!);
-                else if (f.FieldType == typeof(uint[]) && f.Name == "AIDs")
+                else if (f.FieldType == typeof(uint[]) && f.Name is "AIDs" or "Actions" or "WatchedActions")
                     foreach (var a in (uint[])f.GetValue(c)!)
                         watched.Add(a);
             }

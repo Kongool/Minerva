@@ -6,6 +6,7 @@ using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Minerva;
 using Minerva.Automation;
+using Minerva.GameSync;
 using Minerva.Modules;
 using Minerva.Radar;
 
@@ -40,6 +41,13 @@ public sealed class RadarWindow : Window, IDisposable
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
+
+    private (int Colors, int Vars) theme;
+
+    public override void PreDraw() => this.theme = AegisTheme.Push();
+
+    public override void PostDraw() => AegisTheme.Pop(this.theme);
+
 
     public override void Draw()
     {
@@ -326,8 +334,12 @@ public sealed class RadarWindow : Window, IDisposable
 
         this.arena.Center = module.Center;
         this.arena.Bounds = module.Bounds;
-        // heading-up: rotate so the player's facing points up (φ = rotation + π); 0 = north-up
-        this.arena.Rotation = this.config.RotateRadar && pc != null ? pc.Rotation.Rad + MathF.PI : 0f;
+        // camera-align: put the camera's forward direction at the top of the screen. W2S rotates the world
+        // offset by Rotation, so a world direction θ ends up at the top when Rotation = θ - π; the camera's
+        // forward is (azimuth + π) in world-rotation terms, which cancels down to just the azimuth.
+        this.arena.Rotation = this.config.RadarHeading == RadarHeading.CameraAlign && GameData.TryCameraAzimuth(out var azimuth)
+            ? azimuth
+            : 0f;
         this.arena.Begin(canvasTopLeft, canvasSize);
 
         module.Arena = this.arena;
@@ -341,6 +353,8 @@ public sealed class RadarWindow : Window, IDisposable
             this.arena.ClipOutsideArena(ImGui.GetColorU32(ImGuiCol.WindowBg) | 0xFF000000u);
             this.arena.DrawBoundary();
         }
+
+        this.arena.DrawCompass();
 
         if (pc != null)
         {

@@ -22,6 +22,7 @@ public readonly struct Angle(float rad)
     public float Deg => Rad * RadToDeg;
 
     public static Angle FromDirection(WDir dir) => new(MathF.Atan2(dir.X, dir.Z));
+    public static Angle Asin(float x) => new(MathF.Asin(x));
 
     public WDir ToDirection()
     {

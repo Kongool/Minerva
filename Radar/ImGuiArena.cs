@@ -16,6 +16,7 @@ public sealed class ImGuiArena : Arena
 {
     private ImDrawListPtr draw;
     private Vector2 screenCenter;
+    private Vector2 canvasTopLeft;
     private Vector2 canvasSize;
     private float scale = 1f;
 
@@ -30,6 +31,7 @@ public sealed class ImGuiArena : Arena
     {
         this.draw = ImGui.GetWindowDrawList();
         this.screenCenter = canvasTopLeft + canvasSize * 0.5f;
+        this.canvasTopLeft = canvasTopLeft;
         this.canvasSize = canvasSize;
         var half = MathF.Min(canvasSize.X, canvasSize.Y) * 0.5f - margin;
         this.scale = this.Bounds.Radius > 0f ? half / this.Bounds.Radius : 1f;
@@ -77,8 +79,9 @@ public sealed class ImGuiArena : Arena
                 this.FillConvex(RectPts(origin, rotation, x.Length, x.Length, x.HalfWidth), color);
                 this.FillConvex(RectPts(origin, rotation + new Angle(MathF.PI / 2f), x.Length, x.Length, x.HalfWidth), color);
                 break;
-            default: // cone, rect and any other convex contour
-                this.FillConvex(shape.Contour(origin, rotation), color);
+            default: // cone, rect, and boolean combinations — one fill per loop, any of them possibly concave
+                foreach (var loop in shape.Contours(origin, rotation))
+                    this.FillPolygon(loop, color);
                 break;
         }
         this.OutlineShape(shape, origin, rotation, WithAlpha(color, 255), 1.5f);
@@ -91,7 +94,8 @@ public sealed class ImGuiArena : Arena
             this.draw.AddCircle(this.W2S(origin), c.Radius * this.scale, color, 48, thickness);
             return;
         }
-        this.Polyline(shape.Contour(origin, rotation), color, thickness, closed: true);
+        foreach (var loop in shape.Contours(origin, rotation))
+            this.Polyline(loop, color, thickness, closed: true);
     }
 
     public override void AddCircle(WPos center, float radius, uint color, float thickness = 1f)
@@ -106,11 +110,14 @@ public sealed class ImGuiArena : Arena
     public override void ActorMarker(WPos pos, Angle rotation, float radius, uint color)
     {
         var r = MathF.Max(radius, 0.5f);
+        // the ring is the real hitbox, but the facing arrow is only a readability cue — sizing it off the
+        // hitbox too makes a large boss a screen-filling triangle, so cap it and let the ring carry the size
+        var ar = MathF.Min(r, 1.5f);
         var fwd = rotation.ToDirection();
         var side = fwd.OrthoL();
-        var tip = this.W2S(pos + fwd * r);
-        var bl = this.W2S(pos - fwd * r * 0.6f + side * r * 0.7f);
-        var br = this.W2S(pos - fwd * r * 0.6f - side * r * 0.7f);
+        var tip = this.W2S(pos + fwd * ar);
+        var bl = this.W2S(pos - fwd * ar * 0.6f + side * ar * 0.7f);
+        var br = this.W2S(pos - fwd * ar * 0.6f - side * ar * 0.7f);
         this.draw.AddTriangleFilled(tip, bl, br, color);
         this.draw.AddCircle(this.W2S(pos), r * this.scale, WithAlpha(color, 160), 24, 1.5f);
     }
@@ -121,6 +128,39 @@ public sealed class ImGuiArena : Arena
         var inner = this.Bounds.InnerContour(this.Center);
         if (inner != null)
             this.Polyline(inner, Colors.Border, 2f, closed: true); // donut hole
+        foreach (var obstacle in this.Bounds.Obstacles(this.Center))
+            this.Polyline(obstacle, Colors.Border, 2f, closed: true); // boulders/pillars cut out of the field
+    }
+
+    // world directions, in Minerva's (X = east, Z = south) frame
+    private static readonly (string Label, WDir Dir)[] Cardinals =
+    [
+        ("N", new WDir(0f, -1f)),
+        ("E", new WDir(1f, 0f)),
+        ("S", new WDir(0f, 1f)),
+        ("W", new WDir(-1f, 0f)),
+    ];
+
+    /// <summary>
+    /// Cardinal letters just outside the boundary. They go through <see cref="W2S"/> like everything else,
+    /// so they follow the radar's rotation rather than being painted at fixed screen corners — which is
+    /// what keeps a camera-aligned radar readable instead of disorienting.
+    /// </summary>
+    public void DrawCompass()
+    {
+        var radius = this.Bounds.Radius;
+        if (radius <= 0f)
+            return;
+
+        foreach (var (label, dir) in Cardinals)
+        {
+            var at = this.W2S(this.Center + dir * radius);
+            var outward = at - this.screenCenter;
+            var len = outward.Length();
+            if (len > 0.01f)
+                at += outward / len * 8f; // clear the boundary stroke; Begin() reserves the margin for this
+            this.draw.AddText(at - ImGui.CalcTextSize(label) * 0.5f, Colors.Border, label);
+        }
     }
 
     /// <summary>
@@ -134,6 +174,11 @@ public sealed class ImGuiArena : Arena
     public void ClipOutsideArena(uint background)
     {
         const float k = 4f; // radial blow-up factor; boundary sits at ~half-canvas so 4x always clears the corners
+        // The mask is emitted after any widgets the host window already submitted, so without a clip rect it
+        // paints straight over them — a playback toolbar disappears under the very mask meant to tidy the
+        // field. Confine it to the drawing canvas; the blow-up can then be as generous as it likes.
+        this.draw.PushClipRect(this.canvasTopLeft, this.canvasTopLeft + this.canvasSize, true);
+        var aa = this.SuspendAntiAliasedFill();
         var contour = this.Bounds.Contour(this.Center);
         if (contour.Count >= 3)
         {
@@ -151,22 +196,59 @@ public sealed class ImGuiArena : Arena
         var inner = this.Bounds.InnerContour(this.Center);
         if (inner != null)
             this.FillConvex(inner, background); // mask the donut hole too
+        foreach (var obstacle in this.Bounds.Obstacles(this.Center))
+            this.FillConvex(obstacle, background); // and each interior obstacle
+        this.draw.Flags = aa;
+        this.draw.PopClipRect();
     }
 
     // --- helpers ---
+
+    /// <summary>
+    /// Turns anti-aliased fill off for a run of triangles that tile one surface, returning the previous
+    /// flags to restore. ImGui's AA fill insets each triangle by half a pixel and feathers the edge, so
+    /// two triangles sharing an edge never reach full opacity along it and whatever is underneath bleeds
+    /// through as a hairline. Fanning a polygon or extruding a contour therefore paints itself with seams:
+    /// on the arena mask that reads as a sunburst of spokes, and on an AOE fill as a crease across it.
+    /// </summary>
+    private ImDrawListFlags SuspendAntiAliasedFill()
+    {
+        var saved = this.draw.Flags;
+        this.draw.Flags = saved & ~ImDrawListFlags.AntiAliasedFill;
+        return saved;
+    }
+
+    /// <summary>
+    /// Fill a closed loop that may be concave. A boulder's shadow is an annular sector, and the convex fan
+    /// used elsewhere would paint straight across its hollow — turning "stand behind the rock" into a solid
+    /// wedge that covers the rock itself.
+    /// </summary>
+    private void FillPolygon(IReadOnlyList<WPos> contour, uint color)
+    {
+        if (contour.Count < 3)
+            return;
+        var aa = this.SuspendAntiAliasedFill();
+        foreach (var (a, b, c) in EarClip.Triangulate(contour))
+            this.draw.AddTriangleFilled(this.W2S(contour[a]), this.W2S(contour[b]), this.W2S(contour[c]), color);
+        this.draw.Flags = aa;
+    }
+
     private void FillConvex(IReadOnlyList<WPos> contour, uint color)
     {
         if (contour.Count < 3)
             return;
+        var aa = this.SuspendAntiAliasedFill();
         var p0 = this.W2S(contour[0]);
         for (var i = 1; i < contour.Count - 1; ++i)
             this.draw.AddTriangleFilled(p0, this.W2S(contour[i]), this.W2S(contour[i + 1]), color);
+        this.draw.Flags = aa;
     }
 
     private void FillDonut(WPos center, float inner, float outer, uint color)
     {
         const int seg = 48;
         var step = Angle.TwoPI / seg;
+        var aa = this.SuspendAntiAliasedFill();
         for (var i = 0; i < seg; ++i)
         {
             var a0 = new Angle(step * i).ToDirection();
@@ -178,6 +260,8 @@ public sealed class ImGuiArena : Arena
             this.draw.AddTriangleFilled(o0, o1, i1, color);
             this.draw.AddTriangleFilled(o0, i1, i0, color);
         }
+
+        this.draw.Flags = aa;
     }
 
     private void Polyline(IReadOnlyList<WPos> contour, uint color, float thickness, bool closed)

@@ -53,6 +53,16 @@ public class Gaze(ModuleBase module, uint aid) : ModuleComponent(module)
             }
         }
     }
+
+    /// <summary>Same forbidden arc as <see cref="GenericGaze"/>, for the simple source-based form.</summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var id in this.Sources)
+        {
+            if (this.World.Actors.Find(id) is { } a)
+                hints.ForbiddenDirections.Add((Angle.FromDirection(a.Position - actor.Position), 45f.Degrees(), default));
+        }
+    }
 }
 
 /// <summary>
@@ -89,6 +99,30 @@ public abstract class GenericGaze(ModuleBase module, uint aid = default) : CastC
                 hints.Add(eye.Inverted ? "Face the eye!" : "Turn away from gaze!");
                 break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Publish which way it is unsafe to face, so something other than the player's eyes can act on it.
+    /// <para>A gaze is the one mechanic where position is irrelevant and facing is everything, so a text
+    /// warning is the whole of the guidance unless the direction is machine-readable. Recorded as a
+    /// forbidden arc: a normal eye forbids the 45 degrees either side of looking at it; an inverted eye
+    /// forbids the 135 degrees either side of looking away, which is the same statement inverted — only
+    /// facing it is allowed.</para>
+    /// <para>Minerva does not turn the character itself, but a rotation plugin that auto-faces its target
+    /// will happily turn you into a gaze, and this is what lets it know not to.</para>
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var eyes = this.ActiveEyes(slot, actor);
+        foreach (ref readonly var eye in eyes)
+        {
+            if (!actor.Position.InCircle(eye.Position, eye.Range))
+                continue;
+            var toward = eye.Inverted
+                ? Angle.FromDirection(actor.Position - eye.Position) - eye.Forward
+                : Angle.FromDirection(eye.Position - actor.Position) - eye.Forward;
+            hints.ForbiddenDirections.Add((toward, eye.Inverted ? 135f.Degrees() : 45f.Degrees(), eye.Activation));
         }
     }
 
@@ -173,5 +207,89 @@ public class CastGazes(ModuleBase module, uint[] aids, bool inverted = false, fl
     {
         if (Array.IndexOf(this.AIDs, spell.Action.ID) >= 0)
             ++this.NumCasts;
+    }
+}
+
+/// <summary>
+/// Cast weakpoint: a status marks which of your sides is exposed, and you must turn that side toward the
+/// caster of the AOE you're standing in. Modelled as an inverted eye (face it) offset by the weak side.
+/// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class CastWeakpoint(ModuleBase module, uint aid, AOEShape shape, uint statusForward, uint statusBackward, uint statusLeft, uint statusRight) : GenericGaze(module, aid)
+{
+    public CastWeakpoint(ModuleBase module, uint aid, float radius, uint statusForward, uint statusBackward, uint statusLeft, uint statusRight)
+        : this(module, aid, new AOEShapeCircle(radius), statusForward, statusBackward, statusLeft, statusRight) { }
+
+    public AOEShape Shape = shape;
+
+    /// <summary>Quarter-turn order: forward, left, backward, right.</summary>
+    public readonly uint[] Statuses = [statusForward, statusLeft, statusBackward, statusRight];
+
+    protected readonly List<Actor> Casters = [];
+    private readonly Dictionary<ulong, Angle> playerWeakpoints = [];
+    private readonly Eye[] one = new Eye[1];
+    protected float FallbackTime;
+
+    public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
+    {
+        // among the casts covering this player, the one resolving first is the one to face
+        Actor? caster = null;
+        var minRemainingTime = float.MaxValue;
+        foreach (var a in this.Casters)
+        {
+            if (!this.Shape.Check(actor.Position, a.Position, a.CastInfo?.Rotation ?? a.Rotation))
+                continue;
+            var remaining = a.CastInfo?.RemainingTime ?? this.FallbackTime;
+            if (remaining < minRemainingTime)
+            {
+                caster = a;
+                minRemainingTime = remaining;
+            }
+        }
+
+        if (caster == null || !this.playerWeakpoints.TryGetValue(actor.InstanceID, out var angle))
+            return [];
+        // a caster without a live cast falls back to the configured lead time (matching the selection above)
+        var activation = caster.CastInfo != null ? this.Module.CastFinishAt(caster.CastInfo) : this.World.FutureTime(this.FallbackTime);
+        this.one[0] = new Eye(caster.Position, activation, angle, inverted: true);
+        return this.one;
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID == this.WatchedAction)
+            this.Casters.Add(caster);
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID == this.WatchedAction)
+            this.Casters.Remove(caster);
+    }
+
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        var kind = Array.IndexOf(this.Statuses, status.ID);
+        if (kind >= 0)
+            this.playerWeakpoints[actor.InstanceID] = kind * 90f.Degrees();
+    }
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status)
+    {
+        if (Array.IndexOf(this.Statuses, status.ID) >= 0)
+            this.playerWeakpoints.Remove(actor.InstanceID);
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints)
+    {
+        var eyes = this.ActiveEyes(slot, actor);
+        for (var i = 0; i < eyes.Length; ++i)
+        {
+            if (!HitByEye(actor, in eyes[i]))
+            {
+                hints.Add("Face open weakpoint to eye!");
+                return;
+            }
+        }
     }
 }

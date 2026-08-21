@@ -20,4 +20,6 @@ public static class Colors
     public static readonly uint Enemy = RGBA(255, 0, 255, 255);   // primary/boss actor
     public static readonly uint Object = RGBA(255, 210, 0, 255);  // helpers/objects
     public static readonly uint Text = RGBA(255, 255, 255, 255);
+    public static readonly uint Vulnerable = RGBA(255, 128, 0, 255); // BMR palette slot: "this will hurt you" outline
+    public static readonly uint Other1 = RGBA(0, 190, 190, 255);  // BMR palette slot: call-out highlight (dispel targets, ...)
 }

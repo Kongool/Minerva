@@ -13,6 +13,9 @@ public interface IMovementController
 {
     void MoveTo(WPos target);
     void Stop();
+
+    /// <summary>Turn the character to face a world direction. Used for gazes, where facing is the mechanic.</summary>
+    void Face(Angle direction);
 }
 
 /// <summary>No-op controller: computes and displays the dodge, but never moves the character.</summary>
@@ -20,4 +23,5 @@ public sealed class NullMovementController : IMovementController
 {
     public void MoveTo(WPos target) { }
     public void Stop() { }
+    public void Face(Angle direction) { }
 }

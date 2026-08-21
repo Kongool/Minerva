@@ -23,6 +23,7 @@ public sealed class ReplayAnalysis
     private const float KnockbackMinDistance = 3f; // players must be shoved at least this far to count
     private const float ConcentricOriginEps = 1f;  // same-origin tolerance for a concentric bullseye
     private const double ConcentricMaxGap = 2.5d;  // max seconds between rings of one bullseye
+    private const float MinPlausibleHalfExtent = 5f; // below this the samples describe a spot, not a field
     private const double ArenaMarkerMinTime = 5d;    // an environment object appearing after this may mark an arena change
     private const double MapEffectPhaseMinTime = 5d; // ignore map effects during fight setup (decorations)
     private const double PhaseCoincidenceWindow = 3d; // a map effect this close to a targetable/HP boundary is the same phase
@@ -58,6 +59,11 @@ public sealed class ReplayAnalysis
             ? MathF.Sqrt((this.LocMaxX - this.LocMinX) * (this.LocMaxX - this.LocMinX) + (this.LocMaxZ - this.LocMinZ) * (this.LocMaxZ - this.LocMinZ))
             : 0f;
 
+        // measured at resolution from the server's own target list (CST!), when the recording has one
+        public int Resolutions;         // how many times we saw this action actually land
+        public int MinPlayersHit = int.MaxValue;
+        public int MaxPlayersHit;
+
         // correlated at resolution (cast finish): stack clustering, gaze facing, knockback push
         public int MaxCluster;          // most other players piled on the target at any resolution (stack signal)
         public int GazeVotes;           // resolutions where most players faced away from the caster
@@ -89,9 +95,20 @@ public sealed class ReplayAnalysis
     // deferred knockback measurements: snapshot player distances at resolution, compare a beat later
     private readonly List<(uint aid, WPos origin, double due, Dictionary<ulong, float> before)> knockbackChecks = [];
 
-    private float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
-    private double sumX, sumZ;
-    private int posSamples;
+    // Position samples are kept per caster OID, not pooled. The estimate has to describe the arena the boss
+    // fights in, and a recording sees the whole zone: patrolling trash and adds from the *next* pull cast
+    // while in capture range, and pooling them inflates the field far past anything the player can stand on
+    // (a ~20y Mistwake arena came out as 88y). Attribution has to survive until the boss is known, which is
+    // only decided once every actor has been seen.
+    private readonly Dictionary<uint, PosSamples> posByOID = [];
+
+    private sealed class PosSamples
+    {
+        public float MinX = float.MaxValue, MaxX = float.MinValue, MinZ = float.MaxValue, MaxZ = float.MinValue;
+        public double SumX, SumZ;
+        public int Count;
+    }
+
     private DateTime firstTime, lastTime;
 
     public static ReplayAnalysis Attach(WorldState ws) => new(ws);
@@ -104,6 +121,8 @@ public sealed class ReplayAnalysis
         ws.Actors.IsTargetableChanged.Subscribe(this.OnTargetable);
         ws.Actors.CastStarted.Subscribe(this.OnCastStarted);
         ws.Actors.CastFinished.Subscribe(this.OnCastFinished);
+        ws.Actors.CastEvent.Subscribe(this.OnCastResolved);
+        ws.Actors.Moved.Subscribe(this.OnMoved);
         ws.Actors.StatusGain.Subscribe((a, i) => this.statuses.Add(a.Statuses[i].ID));
         ws.Actors.Tethered.Subscribe(this.OnTethered);
         ws.Actors.IconAppeared.Subscribe(this.OnIcon);
@@ -216,8 +235,10 @@ public sealed class ReplayAnalysis
         if (cast == null || cast.Action.ID == 0)
             return;
         // ignore other players' (and their pets') own abilities — in open-field content they flood the
-        // action list; we only want enemy/helper mechanics
-        if (caster.Type is ActorType.Player or ActorType.Pet or ActorType.Chocobo)
+        // action list; we only want enemy/helper mechanics. Buddy covers Duty Support NPCs, which are the
+        // same noise wearing a different type: a Trust run of a dungeon adds 40+ ally casts that read as
+        // hostile and have to be stripped from the draft by hand.
+        if (caster.Type is ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy)
             return;
         var aid = cast.Action.ID;
         var now = this.Now;
@@ -259,11 +280,39 @@ public sealed class ReplayAnalysis
         if (this.objects.TryGetValue(caster.OID, out var obj))
             obj.Casts++;
 
-        this.Sample(cast.LocXZ != default ? cast.LocXZ : caster.Position);
+        this.Sample(caster.OID, cast.LocXZ != default ? cast.LocXZ : caster.Position);
     }
 
     // at resolution, correlate the things you can only see when players have committed: whether the party
     // piled on the target (stack), turned away from the caster (gaze), or was about to be shoved (knockback)
+    /// <summary>
+    /// The server's own account of a landed action: exactly who it hit. Everything else here is inference —
+    /// counting who stood near whom, guessing a gaze from facings — and this is measurement, so it decides
+    /// stack-versus-spread and tankbuster outright where it is present.
+    /// <para>What it cannot tell you is whether an action is a real mechanic: a cone that hits nobody was
+    /// dodged, not decorative, so a zero-hit resolution must never be read as "this is only a visual".</para>
+    /// </summary>
+    private void OnCastResolved(Actor caster, ActorCastEvent ev)
+    {
+        if (caster.Type is ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy)
+            return;
+        if (!this.actions.TryGetValue(ev.Action.ID, out var info))
+            return;
+        if (ev.Targets.Count == 0 && info.Resolutions == 0)
+            return; // recordings made before target capture carry no list at all — do not read that as a miss
+
+        // Buddy covers Duty Support NPCs, who occupy real party slots: without them a Trust run reports a
+        // 4-target raidwide as "hit 1" and the stack/spread test never fires
+        var players = 0;
+        for (var i = 0; i < ev.Targets.Count; ++i)
+            if (this.ws.Actors.Find(ev.Targets[i].ID) is { Type: ActorType.Player or ActorType.Buddy })
+                players++;
+
+        info.Resolutions++;
+        info.MinPlayersHit = Math.Min(info.MinPlayersHit, players);
+        info.MaxPlayersHit = Math.Max(info.MaxPlayersHit, players);
+    }
+
     private void OnCastFinished(Actor caster, ActorCastInfo cast)
     {
         var aid = cast.Action.ID;
@@ -335,20 +384,77 @@ public sealed class ReplayAnalysis
         if (cast.TargetID == caster.InstanceID || cast.TargetID == 0)
             return cast.LocXZ != default ? TargetKind.Location : TargetKind.Self;
         var target = this.ws.Actors.Find(cast.TargetID);
-        if (target != null && target.Type == ActorType.Player)
+        // Buddy is a Duty Support NPC filling a real party slot: a spread that lands on one is still a spread,
+        // and treating it as "some other actor" loses the mechanic classification entirely in Trust runs
+        if (target != null && target.Type is ActorType.Player or ActorType.Buddy)
             return TargetKind.Player;
         return TargetKind.Target;
     }
 
-    private void Sample(WPos p)
+    /// <summary>
+    /// Where the fight is actually taking place. Cast origins alone are a poor guide to the floor: a boss
+    /// that holds the centre and helpers that cast from a parking spot describe a point, not an arena (Treno
+    /// came out as 1y). Combatants' own movement is the real signal — players in particular visit the edges,
+    /// which is exactly the extent a module needs. Restricted to actors in combat so the walk in doesn't
+    /// count, and keyed by OID so the boss/helper scoping still applies.
+    /// </summary>
+    private void OnMoved(Actor a)
     {
-        this.minX = MathF.Min(this.minX, p.X);
-        this.maxX = MathF.Max(this.maxX, p.X);
-        this.minZ = MathF.Min(this.minZ, p.Z);
-        this.maxZ = MathF.Max(this.maxZ, p.Z);
-        this.sumX += p.X;
-        this.sumZ += p.Z;
-        this.posSamples++;
+        if (a.InCombat && a.Type is ActorType.Enemy or ActorType.Helper or ActorType.Player or ActorType.Buddy)
+            this.Sample(a.OID, a.Position);
+    }
+
+    private void Sample(uint oid, WPos p)
+    {
+        if (!this.posByOID.TryGetValue(oid, out var s))
+            this.posByOID[oid] = s = new PosSamples();
+        s.MinX = MathF.Min(s.MinX, p.X);
+        s.MaxX = MathF.Max(s.MaxX, p.X);
+        s.MinZ = MathF.Min(s.MinZ, p.Z);
+        s.MaxZ = MathF.Max(s.MaxZ, p.Z);
+        s.SumX += p.X;
+        s.SumZ += p.Z;
+        s.Count++;
+    }
+
+    /// <summary>
+    /// Arena extent from the fight's own participants: the boss, plus the helper actors that place its
+    /// mechanics. Helpers are the strongest signal available — they exist only to put a mechanic somewhere
+    /// the boss can reach, so their spread is the playable floor. Anything else that happened to cast nearby
+    /// is ignored, which is what stops patrolling trash inflating a 20y field to 88y.
+    /// </summary>
+    private ArenaEstimate EstimateArena(uint bossOID)
+    {
+        var scoped = this.Accumulate(bossOID, fightOnly: true);
+        // A boss that never moves, whose helpers all cast from one parking spot, yields a point rather than a
+        // field. That is absent information, not a tiny arena — emitting it as bounds would generate a module
+        // the player cannot stand up in, so take the wider reading instead of asserting something absurd.
+        return scoped.HalfExtent >= MinPlausibleHalfExtent ? scoped : this.Accumulate(bossOID, fightOnly: false);
+    }
+
+    private ArenaEstimate Accumulate(uint bossOID, bool fightOnly)
+    {
+        float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+        double sumX = 0d, sumZ = 0d;
+        var count = 0;
+
+        foreach (var (oid, s) in this.posByOID)
+        {
+            if (fightOnly && oid != bossOID
+                && !(this.objects.TryGetValue(oid, out var o) && o.Type is ActorType.Helper or ActorType.Player or ActorType.Buddy))
+                continue;
+            minX = MathF.Min(minX, s.MinX);
+            maxX = MathF.Max(maxX, s.MaxX);
+            minZ = MathF.Min(minZ, s.MinZ);
+            maxZ = MathF.Max(maxZ, s.MaxZ);
+            sumX += s.SumX;
+            sumZ += s.SumZ;
+            count += s.Count;
+        }
+
+        return count == 0
+            ? new ArenaEstimate(default, 0f, 0f, 0f, 0f)
+            : new ArenaEstimate(new WPos((float)(sumX / count), (float)(sumZ / count)), minX, maxX, minZ, maxZ);
     }
 
     public int ActionCount => this.actions.Count;
@@ -445,13 +551,11 @@ public sealed class ReplayAnalysis
             var gaze = info.Target != TargetKind.Player && info.GazeVotes > 0;
             acts.Add(new ActionFact(aid, info.CasterOID, info.CasterName, info.Target, info.CastTime, info.Count,
                 info.PlayerTargets.Count, maxSim, mech, info.PrecedingIcon, info.PrecedingTether, PhaseOf(info.FirstSeen),
-                exaflare, info.Concentric, gaze, info.KnockbackDistance));
+                exaflare, info.Concentric, gaze, info.KnockbackDistance,
+                info.Resolutions, info.Resolutions > 0 ? info.MinPlayersHit : 0, info.MaxPlayersHit));
         }
 
-        var center = this.posSamples > 0 ? new WPos((float)(this.sumX / this.posSamples), (float)(this.sumZ / this.posSamples)) : default;
-        var arena = new ArenaEstimate(center,
-            this.posSamples > 0 ? this.minX : 0f, this.posSamples > 0 ? this.maxX : 0f,
-            this.posSamples > 0 ? this.minZ : 0f, this.posSamples > 0 ? this.maxZ : 0f);
+        var arena = this.EstimateArena(bossOID);
 
         var phases = new List<PhaseFact>();
         for (var i = 0; i < boundaries.Count; ++i)
@@ -494,6 +598,21 @@ public sealed class ReplayAnalysis
             return PlayerMechanic.None;
         if (info.PrecedingTether != 0)
             return PlayerMechanic.Bait;
+
+        // Where the recording saw the action land, the server's target list settles stack-versus-spread
+        // outright: a stack is one cast that damages several people, a spread is one that damages one. That
+        // beats counting who happened to be standing nearby, which cannot tell a real stack from a spread
+        // the party simply had not finished separating for.
+        if (info.Resolutions > 0 && info.MaxPlayersHit > 0)
+        {
+            if (info.MaxPlayersHit >= StackClusterMin)
+                return PlayerMechanic.Stack;
+            if (info.MaxPlayersHit == 1 && info.PlayerTargets.Count == 1 && info.Count >= 2)
+                return PlayerMechanic.Tankbuster;         // one victim per cast, always the same person
+            if (info.MaxPlayersHit == 1)
+                return PlayerMechanic.Spread;
+        }
+
         if (info.MaxCluster >= StackClusterMin)
             return PlayerMechanic.Stack;                  // party piled onto the marked player
         if (maxSimultaneous >= 2)
@@ -524,11 +643,16 @@ public sealed class ReplayAnalysis
             var tag = a.PlayerMechanic != PlayerMechanic.None ? $" {a.PlayerMechanic}" : "";
             var icon = a.PrecedingIcon != 0 ? $" icon:{a.PrecedingIcon}" : "";
             var teth = a.PrecedingTether != 0 ? $" tether:{a.PrecedingTether}" : "";
-            b.AppendLine($"  {a.AID} {a.CasterName}->{a.Target}{tag} {a.CastTime.ToString("f1", inv)}s x{a.Count} P{a.Phase + 1}{icon}{teth}");
+            // who it actually damaged, straight from the server. "hit 0" means everyone dodged it, NOT that
+            // it is decorative — the difference matters when deciding whether a cast needs a component.
+            var hit = a.Measured
+                ? $" hit {(a.MinPlayersHit == a.MaxPlayersHit ? a.MinPlayersHit.ToString(inv) : $"{a.MinPlayersHit}-{a.MaxPlayersHit}")}"
+                : "";
+            b.AppendLine($"  {a.AID} {a.CasterName}->{a.Target}{tag} {a.CastTime.ToString("f1", inv)}s x{a.Count} P{a.Phase + 1}{icon}{teth}{hit}");
         }
         b.AppendLine();
 
-        if (this.posSamples > 0)
+        if (this.posByOID.Count > 0)
             b.AppendLine($"Arena: center ~[{input.Arena.Center.X.ToString("f1", inv)}, {input.Arena.Center.Z.ToString("f1", inv)}]  halfExtent {input.Arena.HalfExtent.ToString("f1", inv)}  {(input.Arena.LooksSquare ? "square" : "circle")}");
         if (this.statuses.Count > 0)
             b.AppendLine("Statuses (SID): " + string.Join(", ", this.statuses));

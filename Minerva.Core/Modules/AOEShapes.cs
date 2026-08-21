@@ -5,15 +5,27 @@ namespace Minerva;
 /// hit-tests a point, and <see cref="Contour"/> returns an outline polygon the renderer draws. No
 /// coupling to ImGui — the plugin's radar turns contours into pixels.
 /// </summary>
-public abstract class AOEShape
+public abstract class AOEShape(bool invertForbiddenZone = false)
 {
     /// <summary>Angular resolution for tessellating arcs into line segments.</summary>
     protected const int ArcSegments = 40;
+
+    /// <summary>When set, the shape marks the SAFE ground and everything outside it is forbidden.</summary>
+    public bool InvertForbiddenZone = invertForbiddenZone;
 
     public abstract bool Check(WPos position, WPos origin, Angle rotation);
 
     /// <summary>Closed outline of the shape in world space (for filled/outlined rendering).</summary>
     public abstract IReadOnlyList<WPos> Contour(WPos origin, Angle rotation);
+
+    /// <summary>
+    /// Every closed loop this shape is made of. Almost all shapes are one loop, but a boolean combination is
+    /// a *set* of them — a line-of-sight safe zone is one shadow per blocker — and a single-contour accessor
+    /// silently reduces thirteen safe wedges to one. Anything drawing a shape should walk this, not
+    /// <see cref="Contour"/>.
+    /// </summary>
+    public virtual IReadOnlyList<IReadOnlyList<WPos>> Contours(WPos origin, Angle rotation)
+        => [this.Contour(origin, rotation)];
 
     public bool Check(WPos position, Actor? origin) => origin != null && this.Check(position, origin.Position, origin.Rotation);
     public IReadOnlyList<WPos> Contour(Actor origin) => this.Contour(origin.Position, origin.Rotation);
@@ -54,6 +66,9 @@ public sealed class AOEShapeCircle(float radius) : AOEShape
         return pts;
     }
 
+    public override ShapeDistance Distance(WPos origin, Angle rotation) => new SDCircle(origin, this.Radius);
+    public override ShapeDistance InvertedDistance(WPos origin, Angle rotation) => new SDInvertedCircle(origin, this.Radius);
+
     public override string ToString() => $"Circle r={this.Radius:f1}";
 }
 
@@ -72,6 +87,9 @@ public sealed class AOEShapeDonut(float innerRadius, float outerRadius) : AOESha
         AddArc(pts, origin, this.InnerRadius, new Angle(Angle.TwoPI), default, ArcSegments);
         return pts;
     }
+
+    public override ShapeDistance Distance(WPos origin, Angle rotation) => new SDDonut(origin, this.InnerRadius, this.OuterRadius);
+    public override ShapeDistance InvertedDistance(WPos origin, Angle rotation) => new SDInvertedDonut(origin, this.InnerRadius, this.OuterRadius);
 
     public override string ToString() => $"Donut {this.InnerRadius:f1}-{this.OuterRadius:f1}";
 }
@@ -94,6 +112,12 @@ public sealed class AOEShapeCone(float radius, Angle halfAngle, Angle directionO
         AddArc(pts, origin, this.Radius, dir - this.HalfAngle, dir + this.HalfAngle, segs);
         return pts;
     }
+
+    public override ShapeDistance Distance(WPos origin, Angle rotation)
+        => new SDCone(origin, this.Radius, rotation + this.DirectionOffset, this.HalfAngle);
+
+    public override ShapeDistance InvertedDistance(WPos origin, Angle rotation)
+        => new SDInvertedCone(origin, this.Radius, rotation + this.DirectionOffset, this.HalfAngle);
 
     public override string ToString() => $"Cone r={this.Radius:f1} halfAngle={this.HalfAngle}";
 }
@@ -133,16 +157,18 @@ public sealed class AOEShapeDonutSector(float innerRadius, float outerRadius, An
         return pts;
     }
 
+    public override ShapeDistance Distance(WPos origin, Angle rotation)
+        => new SDDonutSector(origin, this.InnerRadius, this.OuterRadius, rotation + this.DirectionOffset, this.HalfAngle);
+
     public override string ToString() => $"DonutSector {this.InnerRadius:f1}/{this.OuterRadius:f1}";
 }
 
-public sealed class AOEShapeRect(float lenFront, float halfWidth, float lenBack = 0f, Angle directionOffset = default, bool invertForbiddenZone = false) : AOEShape
+public sealed class AOEShapeRect(float lenFront, float halfWidth, float lenBack = 0f, Angle directionOffset = default, bool invertForbiddenZone = false) : AOEShape(invertForbiddenZone)
 {
     public readonly float LenFront = lenFront;
     public readonly float HalfWidth = halfWidth;
     public readonly float LenBack = lenBack;
     public readonly Angle DirectionOffset = directionOffset;
-    public readonly bool InvertForbiddenZone = invertForbiddenZone;
 
     public override bool Check(WPos position, WPos origin, Angle rotation)
         => position.InRect(origin, rotation + this.DirectionOffset, this.LenFront, this.LenBack, this.HalfWidth) ^ this.InvertForbiddenZone;
@@ -158,6 +184,14 @@ public sealed class AOEShapeRect(float lenFront, float halfWidth, float lenBack 
             origin - fwd * this.LenBack - side * this.HalfWidth,
             origin - fwd * this.LenBack + side * this.HalfWidth,
         ];
+    }
+
+    public override ShapeDistance Distance(WPos origin, Angle rotation)
+    {
+        var dir = rotation + this.DirectionOffset;
+        return this.InvertForbiddenZone
+            ? new SDInvertedRect(origin, dir, this.LenFront, this.LenBack, this.HalfWidth)
+            : new SDRect(origin, dir, this.LenFront, this.LenBack, this.HalfWidth);
     }
 
     public override string ToString() => $"Rect {this.LenFront:f1}x{this.HalfWidth * 2f:f1}";
@@ -190,6 +224,15 @@ public sealed class AOEShapeCross(float length, float halfWidth) : AOEShape
         ];
     }
 
+    /// <summary>Two crossed bars. Outside the cross the union is exact; within the overlap at the centre it
+    /// reports the nearer bar's edge, which understates the depth — the safe direction to be wrong in.</summary>
+    public override ShapeDistance Distance(WPos origin, Angle rotation)
+        => new SDUnion(
+        [
+            new SDRect(origin, rotation, this.Length, this.Length, this.HalfWidth),
+            new SDRect(origin, rotation + 90f.Degrees(), this.Length, this.Length, this.HalfWidth),
+        ]);
+
     public override string ToString() => $"Cross {this.Length:f1}/{this.HalfWidth:f1}";
 }
 
@@ -204,6 +247,7 @@ public sealed class AOEShapeTriCone(float sideLength, Angle halfAngle, Angle dir
 
     public override bool Check(WPos position, WPos origin, Angle rotation) => this.Cone.Check(position, origin, rotation);
     public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation) => this.Cone.Contour(origin, rotation);
+    public override ShapeDistance Distance(WPos origin, Angle rotation) => this.Cone.Distance(origin, rotation);
     public override string ToString() => $"TriCone {this.SideLength:f1}";
 }
 
@@ -237,6 +281,9 @@ public sealed class AOEShapeCapsule(float radius, float length, Angle directionO
         return pts;
     }
 
+    public override ShapeDistance Distance(WPos origin, Angle rotation)
+        => new SDCapsule(origin, rotation + this.DirectionOffset, this.Length, this.Radius);
+
     public override string ToString() => $"Capsule {this.Radius:f1}x{this.Length:f1}";
 }
 
@@ -254,7 +301,14 @@ public sealed class AOEShapeCustom : AOEShape
     private readonly IReadOnlyList<Shape> difference;
     private readonly IReadOnlyList<Shape> shapes2;
     private readonly OperandType operand;
-    private readonly bool invert;
+
+    /// <summary>
+    /// BMR-shaped overload taking the arena centre first. BMR uses it to build its clipped polygon in
+    /// arena-relative space; Minerva evaluates the shapes directly in world space, so the centre is
+    /// accepted for source compatibility and otherwise unused.
+    /// </summary>
+    public AOEShapeCustom(WPos arenaCenter, IReadOnlyList<Shape> shapes1, IReadOnlyList<Shape>? differenceShapes = null, IReadOnlyList<Shape>? shapes2 = null, OperandType operand = OperandType.Union, bool invertForbiddenZone = false)
+        : this(shapes1, differenceShapes, shapes2, operand, arenaCenter, invertForbiddenZone) { }
 
     public AOEShapeCustom(IReadOnlyList<Shape> shapes1, IReadOnlyList<Shape>? differenceShapes = null, IReadOnlyList<Shape>? shapes2 = null, OperandType operand = OperandType.Union, WPos origin = default, bool invertForbiddenZone = false)
     {
@@ -262,7 +316,7 @@ public sealed class AOEShapeCustom : AOEShape
         this.difference = differenceShapes ?? [];
         this.shapes2 = shapes2 ?? [];
         this.operand = operand;
-        this.invert = invertForbiddenZone;
+        this.InvertForbiddenZone = invertForbiddenZone;
     }
 
     private static bool AnyContains(IReadOnlyList<Shape> shapes, WPos p)
@@ -298,11 +352,36 @@ public sealed class AOEShapeCustom : AOEShape
         if (inside && this.difference.Count > 0 && AnyContains(this.difference, p))
             inside = false;
 
-        return this.invert ? !inside : inside;
+        return this.InvertForbiddenZone ? !inside : inside;
     }
 
     public override IReadOnlyList<WPos> Contour(WPos origin, Angle rotation)
         => this.shapes1.Count > 0 ? this.shapes1[0].ContourWorld() : [];
+
+    /// <summary>
+    /// One loop per union operand. <see cref="Check"/> has always evaluated all of them, so the module knew
+    /// the right answer while the drawing showed a single operand — on Treno's line-of-sight cast that meant
+    /// one of thirteen boulder shadows was painted as the safe ground.
+    /// </summary>
+    public override IReadOnlyList<IReadOnlyList<WPos>> Contours(WPos origin, Angle rotation)
+    {
+        var n = this.shapes1.Count;
+        if (n == 0)
+            return [];
+        var loops = new IReadOnlyList<WPos>[n];
+        for (var i = 0; i < n; ++i)
+            loops[i] = this.shapes1[i].ContourWorld();
+        return loops;
+    }
+
+    /// <summary>
+    /// Analytic field rather than the ±1 boolean fallback, so the dodge can see which way the nearest safe
+    /// ground lies. Only the union/difference form is exact here; an intersection or xor still falls back.
+    /// </summary>
+    public override ShapeDistance Distance(WPos origin, Angle rotation)
+        => this.operand == OperandType.Union && this.shapes2.Count == 0
+            ? new SDShapeSet(this.shapes1, this.difference, this.InvertForbiddenZone)
+            : base.Distance(origin, rotation);
 
     public override string ToString() => $"CustomAOE u={this.shapes1.Count} d={this.difference.Count}";
 }

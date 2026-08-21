@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Dalamud.Bindings.ImGui;
 using Minerva.Radar;
 
 namespace Minerva.Replay;
@@ -27,6 +28,7 @@ public sealed class ReplayPlayer : IDisposable
 {
     private readonly ReplayTimeline timeline;
     private readonly ModuleRegistry registry;
+    private readonly Configuration config;
     private readonly ImGuiArena arena = new();
 
     private readonly AIHints aiHints = new();
@@ -44,10 +46,11 @@ public sealed class ReplayPlayer : IDisposable
     public bool Playing { get; private set; }
     public float Speed = 1f;
 
-    public ReplayPlayer(ReplayTimeline timeline, ModuleRegistry registry)
+    public ReplayPlayer(ReplayTimeline timeline, ModuleRegistry registry, Configuration config)
     {
         this.timeline = timeline;
         this.registry = registry;
+        this.config = config;
         this.world = new WorldState(timeline.QPF, timeline.GameVersion);
         this.cursor = timeline.StartTicks;
         this.ApplyUpTo(this.cursor); // apply the opening snapshot so the first frame is visible paused
@@ -167,6 +170,7 @@ public sealed class ReplayPlayer : IDisposable
             this.arena.Begin(canvasTopLeft, canvasSize);
             this.module.Arena = this.arena;
             this.module.DrawArena(0, pc ?? this.module.PrimaryActor); // boundary + enemies + live AOEs
+            this.ClipAndFrame();
 
             foreach (var a in this.world.Actors)
                 if (a.Type == ActorType.Player && !a.IsDeadOrDestroyed)
@@ -195,6 +199,26 @@ public sealed class ReplayPlayer : IDisposable
             else if (a.Type == ActorType.Player)
                 this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
         }
+
+        this.ClipAndFrame();
+    }
+
+    /// <summary>
+    /// Mask everything drawn outside the boundary, then restate the frame on top, so a 40-yalm rect cast from
+    /// the arena edge stops at the border instead of painting across the view. Follows the same
+    /// <see cref="Configuration.ClipToArena"/> switch as the live radar. The mask is confined to the drawing
+    /// canvas by <see cref="ImGuiArena.ClipOutsideArena"/>, which is what keeps it off the playback toolbar.
+    /// The compass draws either way — it costs nothing and orients you.
+    /// </summary>
+    private void ClipAndFrame()
+    {
+        if (this.config.ClipToArena)
+        {
+            this.arena.ClipOutsideArena(ImGui.GetColorU32(ImGuiCol.WindowBg) | 0xFF000000u);
+            this.arena.DrawBoundary();
+        }
+
+        this.arena.DrawCompass();
     }
 
     // without an authored module we don't know AOE shapes, but we can still show a cast is happening and
@@ -257,6 +281,8 @@ public sealed class ReplayPlayer : IDisposable
             else if (a.Type == ActorType.Player)
                 this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
         }
+
+        this.ClipAndFrame();
     }
 
     // a tether-driven AOE lands on the tethered target(s); if the tether already resolved, it erupts on the caster

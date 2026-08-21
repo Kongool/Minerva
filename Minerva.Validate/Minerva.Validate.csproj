@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>minerva-validate</AssemblyName>
+    <RootNamespace>Minerva.Validate</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Core only. The boss modules live in the plugin assembly, which is loaded by PATH at run time
+         (Assembly.LoadFrom) rather than referenced, so this tool never needs Dalamud installed. -->
+    <ProjectReference Include="..\Minerva.Core\Minerva.Core.csproj" />
+
+    <!-- Reads the game's Excel sheets straight off the install, so module generation no longer needs a
+         running game. Same version the Dalamud SDK ships, so the two readings cannot drift. -->
+    <PackageReference Include="Lumina" Version="7.6.1" />
+    <PackageReference Include="Lumina.Excel" Version="7.5.0" />
+  </ItemGroup>
+
+</Project>

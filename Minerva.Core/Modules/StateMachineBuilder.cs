@@ -24,6 +24,7 @@ public abstract class StateMachineBuilder(ModuleBase module)
     protected bool AllDeadOrDestroyed(uint oid) => this.Module.AllDeadOrDestroyed(oid);
     protected bool AllDeadOrDestroyed(uint[] oids) => this.Module.AllDeadOrDestroyed(oids);
     protected bool AllDeadOrDestroyedInBounds(uint oid) => this.Module.AllDeadOrDestroyedInBounds(oid);
+    protected bool AllDeadOrDestroyedInBounds(uint[] oids) => this.Module.AllDeadOrDestroyedInBounds(oids);
 
     /// <summary>Begin a named phase; chain <c>ActivateOnEnter</c>/<c>TransitionOn*</c> to define it.</summary>
     protected PhaseDef Phase(string name)

@@ -124,6 +124,6 @@ sealed class D131EyeOfTheScorpionStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1011u, NameID = 14716u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "HerStolenLight (ported from BMR)")]
+[ModuleInfo(CFCID = 1011u, NameID = 14716u, PrimaryActorOID = (uint)OID.EyeOfTheScorpion, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "HerStolenLight (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class D131EyeOfTheScorpion(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(-615f, 575f), new ArenaBoundsSquare(20f));

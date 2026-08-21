@@ -85,6 +85,12 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
         this.UpdateLegacyMode();
     }
 
+    /// <summary>
+    /// Turn to face a direction, via the game's own auto-face routine. Unlike <see cref="MoveTo"/> this
+    /// needs no movement hook — it is the same call the game makes when an ability faces its target.
+    /// </summary>
+    public void Face(Angle direction) => GameData.TryFace(direction.Rad);
+
     public void MoveTo(WPos target)
     {
         this.target = target;

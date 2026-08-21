@@ -67,7 +67,9 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
 
     public GenerationResult Generate(GenerationInput input)
     {
-        var className = $"D{input.CFCID}";
+        // named after the boss rather than the duty: several bosses share one CFC, and two drafts that
+        // agree on class name and namespace cannot be compiled together at all
+        var className = input.DraftIdentifier();
         var ns = $"Minerva.Generated.{className}";
 
         var aidNames = new NameAllocator();
@@ -165,6 +167,17 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
     {
         var aidRef = $"(uint)AID.{name}";
         var hint = this.shapes.Resolve(act.AID);
+
+        // A charge cannot be emitted as a shape at all: its length is how far the caster travels, which is
+        // known only at cast time. The author has to write a small GenericAOEs that measures it, so say so
+        // rather than emit a plausible-looking rect of the wrong length.
+        if (hint.Kind == ShapeKind.Charge)
+        {
+            var w = hint.HalfWidth > 0f ? F(hint.HalfWidth) : "?";
+            return ($"sealed class {name}(ModuleBase module) : Components.CastHint(module, {aidRef}, \"{name}: charge\");"
+                + $" // TODO: charge/dash — half-width {w}y, but length is the travel distance. Write a GenericAOEs"
+                + " that builds AOEShapeRect((target - caster).Length(), halfWidth) at the caster on cast.", "stub", true);
+        }
 
         // player-targeted mechanics classified from correlation
         if (act.Target == TargetKind.Player)
@@ -323,7 +336,11 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
                 : $"new ArenaBoundsCircle({MathF.Ceiling(half).ToString("0", Inv)}f)";
 
         return $$"""
-        [ModuleInfo(CFCID = {{input.CFCID}}u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor")]
+        // PrimaryActorOID is what tells the registry WHICH boss of this duty this module is for. Without
+        // it the registry falls back to reading OID.Boss, which works only while that member keeps its
+        // name — and in a duty where every boss shares a CFC, getting it wrong means the wrong module
+        // activates, or none does.
+        [ModuleInfo(CFCID = {{input.CFCID}}u, PrimaryActorOID = 0x{{input.BossOID:X}}u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor")]
         public sealed class {{className}}(WorldState ws, Actor primary)
             : ModuleBase(ws, primary, {{center}}, {{bounds}});
         """;
