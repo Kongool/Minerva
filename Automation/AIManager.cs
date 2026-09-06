@@ -593,10 +593,54 @@ public sealed class AIManager
     private Actor? UptimeTarget(ModuleBase? module, Actor pc)
     {
         var target = this.hints.ForcedTarget is { IsDeadOrDestroyed: false } forced ? forced
-            : module?.PrimaryActor is { IsDeadOrDestroyed: false } boss ? boss
+            : this.PrioritisedTarget(pc)
+            ?? (module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.Forbidden(boss) ? boss
             : this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } t ? t
-            : null;
+            : null);
         return target != null && InTheFight(module, pc, target) ? target : null;
+    }
+
+    /// <summary>
+    /// The enemy the module's priorities say to be on: among the highest-priority legal ones, the player's
+    /// own target if it is one (Daedalus applies the same list), else the nearest. Null when nothing is
+    /// raised above the default, so an ordinary boss fight still keys on the primary actor.
+    /// <para>Alexander, 2026-09-06: Perfect Defense made the boss invincible and four adds priority 1;
+    /// Daedalus switched to the adds, and the walk-back kept the character at the boss, so the adds got
+    /// three Tomahawks in forty seconds.</para>
+    /// </summary>
+    private Actor? PrioritisedTarget(Actor pc)
+    {
+        var top = int.MinValue;
+        foreach (var e in this.hints.PotentialTargets)
+            if (e.Priority > AIHints.Enemy.PriorityInvincible && !e.Actor.IsDeadOrDestroyed)
+                top = Math.Max(top, e.Priority);
+        if (top <= 0)
+            return null;
+        Actor? best = null;
+        var bestDist = float.MaxValue;
+        foreach (var e in this.hints.PotentialTargets)
+        {
+            if (e.Priority != top || e.Actor.IsDeadOrDestroyed)
+                continue;
+            if (e.Actor.InstanceID == pc.TargetID)
+                return e.Actor;
+            var d = (e.Actor.Position - pc.Position).LengthSq();
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = e.Actor;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>The module says not to attack this one (invincible, or forbidden outright): no uptime to regain on it.</summary>
+    private bool Forbidden(Actor a)
+    {
+        foreach (var e in this.hints.PotentialTargets)
+            if (e.Actor == a)
+                return e.Priority <= AIHints.Enemy.PriorityInvincible;
+        return false;
     }
 
     /// <summary>

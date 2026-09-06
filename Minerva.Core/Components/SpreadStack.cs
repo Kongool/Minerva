@@ -147,28 +147,78 @@ public abstract class GenericStackSpread(ModuleBase module, bool raidwideOnResol
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        var spreads = this.ActiveSpreads;
+        var stacks = this.ActiveStacks;
+        if (spreads.Count == 0 && stacks.Count == 0)
+            return;
+        var party = this.Raid.WithSlot(this.IncludeDeadTargets);
+        if (party.Length < 2)
+            return; // nobody to keep apart from, nobody to stack with
+
         // Spreads cut both ways. Staying clear of everyone else's marker is only half of it: while *you* carry
         // one, your own circle is the danger to anybody standing near you, so keep off unmarked teammates too.
         // Other spread targets are exempt — they are already being pushed away from you by the same rule, and
         // forbidding each other's ground as well would leave two markers with nowhere legal to stand.
-        foreach (var s in this.ActiveSpreads)
+        var isSpreadTarget = false;
+        foreach (var s in spreads)
         {
             if (s.Target != actor)
             {
                 hints.AddForbiddenZone(new AOEShapeCircle(s.Radius + this.ExtraAISpreadThreshold), s.Target.Position, default, s.Activation);
                 continue;
             }
-
-            foreach (var (_, mate) in this.Raid.WithSlot(this.IncludeDeadTargets))
+            isSpreadTarget = true;
+            foreach (var (_, mate) in party)
             {
                 if (mate == actor || this.IsSpreadTarget(mate))
                     continue;
                 hints.AddForbiddenZone(new AOEShapeCircle(s.Radius + this.ExtraAISpreadThreshold), mate.Position, default, s.Activation);
             }
         }
-        foreach (var s in this.ActiveStacks)
-            if (s.Target != actor && s.ForbiddenPlayers[slot])
-                hints.AddForbiddenZone(new AOEShapeCircle(s.Radius), s.Target.Position, default, s.Activation);
+
+        // Stacks pull, BossmodReborn's way. Carrying the marker: be near at least one teammate who carries
+        // nothing (everything outside every clean teammate's half-radius circle is forbidden). Not carrying
+        // it: get inside a stack that still has room, unless barred from it or spreading; a stack that is
+        // full or barred is forbidden ground instead, twice its radius for a fellow carrier so two markers
+        // never overlap. Alexander 2026-09-06: eight toons ignored every Mega Holy because the port only
+        // kept players *out* of stacks they were barred from and never pulled anyone in.
+        var isStackTarget = false;
+        foreach (var s in stacks)
+        {
+            if (s.Target != actor)
+                continue;
+            isStackTarget = true;
+            var near = new List<ShapeDistance>();
+            foreach (var (mateSlot, mate) in party)
+            {
+                if (mate == actor || s.ForbiddenPlayers[mateSlot] || this.IsSpreadTarget(mate) || this.IsStackTarget(mate))
+                    continue;
+                near.Add(new SDInvertedCircle(mate.Position, s.Radius * 0.5f));
+            }
+            if (near.Count > 0)
+                hints.AddForbiddenZone(new SDIntersection([.. near]), s.Activation);
+        }
+        var join = new List<ShapeDistance>();
+        foreach (var s in stacks)
+        {
+            if (s.Target == actor)
+                continue;
+            if (!s.ForbiddenPlayers[slot])
+            {
+                var numInside = s.NumInside(this.Module);
+                var isInside = s.IsInside(actor);
+                if (!isSpreadTarget && (!isInside && numInside < s.MaxSize || isInside && numInside <= s.MaxSize))
+                {
+                    join.Add(new SDInvertedCircle(s.Target.Position, s.Radius));
+                    continue;
+                }
+            }
+            hints.AddForbiddenZone(new AOEShapeCircle(isStackTarget ? 2f * s.Radius : s.Radius), s.Target.Position, default, s.Activation);
+        }
+        if (join.Count == 1)
+            hints.AddForbiddenZone(join[0], stacks[0].Activation);
+        else if (join.Count > 1)
+            hints.AddForbiddenZone(new SDOutsideOfUnion([.. join]), stacks[0].Activation);
     }
 }
 

@@ -109,12 +109,16 @@ sealed class Petrifaction(ModuleBase module) : Components.CastGaze(module, (uint
 
 sealed class AlZahbiTrash(ModuleBase module) : Components.AddsMulti(module, A31AlZahbi.AlZahbiMobs);
 
+// a helper's five-second cast on Alxaal, the NPC ally, once at the start: not a player mechanic (2026-09-06 recording)
+sealed class AlxaalHelperCast(ModuleBase module) : Components.IgnoredCasts(module, [(uint)AID.Unk1], "helper cast on Alxaal, the NPC ally");
+
 sealed class A31AlZahbiStates : StateMachineBuilder
 {
     public A31AlZahbiStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
             .ActivateOnEnter<AlZahbiTrash>()
+            .ActivateOnEnter<AlxaalHelperCast>()
             .ActivateOnEnter<Earthshatter>()
             .ActivateOnEnter<TranscendentShot>()
             .ActivateOnEnter<LeapingCleave>()

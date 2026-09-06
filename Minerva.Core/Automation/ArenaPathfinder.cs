@@ -243,7 +243,30 @@ public static class ArenaPathfinder
         if (safetyMargin > 0f && TryNearestSafe(hints, deadline, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize);
 
+        // Nothing is safe from everything inside the horizon. Before giving up, ask the same question with
+        // a nearer deadline: the latest activation for which some reachable cell is clear of all that lands
+        // by then. Alexander's Divine Arrow (2026-09-06): two waves of lines two seconds apart covered the
+        // whole floor within the five-second horizon, and the dodge stood in the first wave for three
+        // seconds reporting "no safe spot" while a cell four yalms away was clear of it. Every frame
+        // re-solves, so the second wave is dodged from wherever the first was dodged to, as a person does.
+        foreach (var earlier in ActivationsBefore(hints, deadline, solveNow))
+            if (TryNearestSafe(hints, earlier, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
+                return Settle(hints, earlier, player, spot, cellSize);
+
         return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
+    }
+
+    /// <summary>Distinct activation instants inside the horizon, latest first: each is a candidate deadline
+    /// for a dodge that clears what lands by then and leaves the rest to the next frames.</summary>
+    private static List<DateTime> ActivationsBefore(AIHints hints, DateTime deadline, DateTime now)
+    {
+        var times = new List<DateTime>();
+        foreach (var z in hints.ForbiddenZones)
+            if (z.Activation > now && z.Activation < deadline && !times.Contains(z.Activation))
+                times.Add(z.Activation);
+        times.Sort();
+        times.Reverse();
+        return times;
     }
 
     /// <summary>

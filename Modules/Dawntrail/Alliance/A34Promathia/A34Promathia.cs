@@ -13,59 +13,63 @@ sealed class EmptySalvation(ModuleBase module) : Components.RaidwideCast(module,
 
 sealed class Explosion(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Explosion, 16f);
 
+// Wheel of Impregnability: a 13-yalm circle on the boss that fires 12.7s after the boss's cast starts
+// (2026-09-06 recording, four instances of it and the donut: 12.68, 12.66, 12.58, 12.72). The port computed
+// the activation as "10.5s from now" on every frame, so the dodge never saw it as urgent and never moved.
 sealed class WheelofImpregnability(ModuleBase module) : Components.GenericAOEs(module, (uint)AID.WheelOfImpregnabilityFire)
 {
-    private bool _on = false;
+    private DateTime _activation;
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
-        if (!_on)
-        {
+        if (_activation == default)
             return [];
-        }
-        AOEInstance[]? _aoes = [new(new AOEShapeCircle(13f), Module.PrimaryActor.Position, default, World.FutureTime(10.5d))];
-        return _aoes;
+        return new AOEInstance[] { new(new AOEShapeCircle(13f), Module.PrimaryActor.Position, default, _activation) };
     }
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.WheelOfImpregnabilityCast)
-        {
-            _on = true;
-        }
+            _activation = World.FutureTime(12.7d);
     }
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID == (uint)AID.WheelOfImpregnabilityFire)
         {
-            _on = false;
+            ++NumCasts;
+            _activation = default;
         }
     }
 }
 
-sealed class BastionOfTwilight(ModuleBase module) : Components.GenericAOEs(module, (uint)AID.WheelOfImpregnabilityFire)
+// Bastion of Twilight: an 8-50 donut on the boss, on the same 12.7s clock. While an Explosion is being cast
+// the donut's hole sits under the explosions, so the donut is drawn but not forbidden (Veyn's rule): the
+// dodge clears the explosions first, then has the six seconds after they land to get into the hole. The
+// port also watched the Wheel's action here, a copy-paste slip.
+sealed class BastionOfTwilight(ModuleBase module) : Components.GenericAOEs(module, (uint)AID.BastionOfTwilightFire)
 {
-    private bool _on = false;
+    private DateTime _activation;
+    private bool _risky = true;
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
-        if (!_on)
-        {
+        if (_activation == default)
             return [];
-        }
-        AOEInstance[]? _aoes = [new(new AOEShapeDonut(8f, 50f), Module.PrimaryActor.Position, default, World.FutureTime(10.5d))];
-        return _aoes;
+        return new AOEInstance[] { new(new AOEShapeDonut(8f, 50f), Module.PrimaryActor.Position, default, _activation, risky: _risky) };
     }
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.BastionOfTwilightCast)
-        {
-            _on = true;
-        }
+            _activation = World.FutureTime(12.7d);
+        else if (spell.Action.ID == (uint)AID.Explosion)
+            _risky = false;
     }
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID == (uint)AID.BastionOfTwilightFire)
         {
-            _on = false;
+            ++NumCasts;
+            _activation = default;
         }
+        else if (spell.Action.ID == (uint)AID.Explosion)
+            _risky = true;
     }
 }
 
@@ -259,6 +263,46 @@ sealed class InfernalDeliveranceAOE(ModuleBase module) : Components.SimpleAOEs(m
 sealed class Meteor(ModuleBase module) : Components.SpreadFromIcon(module, (uint)IconID.Meteor, (uint)AID.Meteor2, 6f, 5f);  // this is the regular spreads only, Tankbuster is handled in Comet.
 
 sealed class DeadlyRebirth(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.DeadlyRebirth);
+
+// The raidwide also shoves everyone 20 yalms along the boss's facing (2026-09-06 recording: 16 yalms in
+// 0.3s, Down for the Count on landing). Forbid the ground the shove would carry off the arena, Veyn's way:
+// stay inside the arena's circle shifted 20 yalms against the push.
+sealed class DeadlyRebirthKnockback(ModuleBase module) : Components.GenericKnockback(module, (uint)AID.DeadlyRebirth1)
+{
+    private DateTime _activation;
+    private Angle _direction;
+
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor)
+    {
+        if (_activation == default)
+            return [];
+        return new Knockback[] { new(Module.PrimaryActor.Position, 20f, _activation, direction: _direction, kind: Kind.DirForward) };
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (_activation != default)
+            hints.AddForbiddenZone(new SDInvertedCircle(Module.Center - _direction.ToDirection() * 20f, Module.Bounds.Radius), _activation);
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.DeadlyRebirth)
+        {
+            _activation = Module.CastFinishAt(spell, 2d);
+            _direction = spell.Rotation;
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.DeadlyRebirth1)
+        {
+            ++NumCasts;
+            _activation = default;
+        }
+    }
+}
 
 [ModuleInfo(Group = ModuleGroup.CFC, GroupID = 1117u, CFCID = 1117u, NameID = 14779u, PrimaryActorOID = (uint)OID.Promathia, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team, HerStolenLight (ported from BMR)")]
 

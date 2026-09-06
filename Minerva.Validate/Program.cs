@@ -28,6 +28,7 @@ if (args_.Length == 0 || args_.Contains("--help") || args_.Contains("-h"))
           --quiet            one summary line per recording instead of the full report
           --strict           also fail on uncovered boss-visual casts, not just helper casts
           --pov <name|hex>   judge the hits for another player in the pull (their name, or instance id)
+          --aoes <s[,s..]>   print what the module drew at those seconds, and what the solver would do with it
 
         minerva-validate --compare-bmr <recording.log> [--html <out.html>]
           run Minerva's and BMR's module over one recording and report AOE disagreements;
@@ -77,6 +78,15 @@ if (args_[0] == "--bmr-bridge")
 var target = args_[0];
 var quiet = args_.Contains("--quiet");
 var povArg = ArgValue("--pov");
+List<double>? dumpAt = null;
+if (ArgValue("--aoes") is { } aoesArg)
+{
+    dumpAt = [];
+    foreach (var part in aoesArg.Split(','))
+        if (double.TryParse(part, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var secs))
+            dumpAt.Add(secs);
+    dumpAt.Sort();
+}
 var strict = args_.Contains("--strict");
 var modulesPath = ArgValue("--modules") ?? FindPluginAssembly();
 
@@ -149,7 +159,7 @@ foreach (var file in files)
             if (povId == 0)
                 Console.WriteLine($"!! {Path.GetFileName(file)}: no player named {povArg} in this recording; judging the recorder instead");
         }
-        result = ReplayValidator.Validate(timeline, registry, povId);
+        result = ReplayValidator.Validate(timeline, registry, povId, dumpAt);
     }
     catch (Exception ex)
     {

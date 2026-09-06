@@ -141,4 +141,6 @@ sealed class DivineArrowCircles(ModuleBase module) : Components.SimpleAOEGroups(
     }
 }
 
-sealed class DivineArrowLines(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.DivineArrowLines, (uint)AID.DivineArrowLines2], new AOEShapeRect(60f, 5f), 6, 6);
+// Ten lines start together in two waves of five, two seconds apart, and the two waves cover the whole
+// floor between them (2026-09-06 recording). Show one wave: the dodge clears it, the next wave appears.
+sealed class DivineArrowLines(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.DivineArrowLines, (uint)AID.DivineArrowLines2], new AOEShapeRect(60f, 5f), 5, 5);

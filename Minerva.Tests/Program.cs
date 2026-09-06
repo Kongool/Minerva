@@ -338,6 +338,19 @@ t.Section("Replay round-trip");
         new DodgeDecision(false, false, default, DodgeReason.None, DodgeBlocker.None, false) { Known = true }.Explain(true, 0f).Contains("margin"));
     t.True("a drawn hit in a recording without decisions says so instead of guessing",
         default(DodgeDecision).Explain(true, 0f).Contains("predates"));
+    // the hits report's own wordings for mechanics meant to land (Shantotto, 2026-09-06: a self-spread and a
+    // proximity AOE were both reported as dodge failures)
+    var safeDecision = new DodgeDecision(false, false, default, DodgeReason.None, DodgeBlocker.None, false) { Known = true };
+    ReplayValidator.Hit hit(bool drawn, bool inside, int hitCount, bool spread = false, bool stack = false, bool mine = false, string owner = "", bool proximity = false)
+        => new(1.0, 1u, "boss", drawn, safeDecision, 0f, false, 0u, 180f, false) { Inside = inside, TargetsHit = hitCount, Spread = spread, Stack = stack, Mine = mine, Owner = owner, Proximity = proximity };
+    t.True("your own spread landing alone is the mechanic done right", hit(true, true, 1, spread: true, mine: true).Why.Contains("alone"));
+    t.True("your own spread catching others says so", hit(true, true, 2, spread: true, mine: true).Why.Contains("1 other player"));
+    t.True("someone else's spread names them", hit(true, true, 2, spread: true, owner: "Rosa Discord").Why.StartsWith("Rosa Discord's spread"));
+    t.True("a shared stack is expected damage", hit(true, true, 3, stack: true).Why.Contains("shared by 3"));
+    t.True("a stack taken alone says nobody gathered", hit(true, true, 1, stack: true).Why.Contains("alone"));
+    t.True("outside the drawn core with many hit is a proximity AOE", hit(true, false, 16, proximity: true).Why.Contains("proximity"));
+    t.True("outside everything drawn with few hit is a shape too small", hit(true, false, 2).Why.Contains("smaller than the real one"));
+    t.True("inside the drawn zone still asks the decision", hit(true, true, 2).Why.Contains("margin"));
 
     // analyzer mined the cast + objects
     t.NotNull("analysis attached", analysis);
@@ -548,6 +561,15 @@ t.Section("Auto-dodge pathfinding");
     var stay = ArenaPathfinder.Solve(hints, now);
     t.True("no danger -> no need to move", !stay.NeedToMove);
 
+    // two waves two seconds apart that together cover the whole floor inside the horizon (Alexander's Divine
+    // Arrow lines, 2026-09-06): dodge the first wave now rather than freeze on "no safe spot"
+    var waves = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = center };
+    waves.AddForbiddenZone(new AOEShapeCircle(30f), center - new WDir(15f, 0f), default, now.AddSeconds(2));
+    waves.AddForbiddenZone(new AOEShapeCircle(30f), center + new WDir(15f, 0f), default, now.AddSeconds(4));
+    var staged = ArenaPathfinder.Solve(waves, now, horizonSeconds: 5f);
+    t.True("two waves covering everything: still moves", staged.NeedToMove && staged.Found);
+    t.True("two waves covering everything: clears the first wave", staged.Found && (staged.Target - (center - new WDir(15f, 0f))).Length() > 30f);
+
     // a big circle AOE lands right on the player -> must dodge out of it
     hints.AddForbiddenZone(new AOEShapeCircle(8f), center, default, now.AddSeconds(2));
     hints.PlayerPosition = center;
@@ -748,6 +770,19 @@ t.Section("Component library");
     var st = new ModuleComponent.TextHints();
     stack.AddHints(0, ws.Actors.Find(p2)!, st);
     t.True("stack tells a far player to stack", st.Count > 0 && st[0].text == "Stack!");
+
+    // The AI side of it: a stack on P1 pulls P2 in (everything outside P1's circle is forbidden) and sends P1
+    // toward a clean teammate. Alexander 2026-09-06: eight toons ignored every Mega Holy because this hint
+    // did not exist -- the port only kept players out of stacks they were barred from.
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xA1, p1)));
+    ws.Execute(new PartyState.OpModify(1, new PartyState.Member(0xA2, p2)));
+    var stackHints = new AIHints { Center = module.Center, Bounds = module.Bounds, PlayerPosition = actorP2.Position };
+    stack.AddAIHints(1, actorP2, PartyRolesConfig.Assignment.Unassigned, stackHints);
+    t.True("a stack on someone else forbids the ground outside it", stackHints.ForbiddenZones.Count == 1 && stackHints.InImminentDanger(new WPos(115f, 105f), DateTime.MaxValue));
+    t.True("inside the stack circle is allowed", !stackHints.InImminentDanger(new WPos(101f, 105f), DateTime.MaxValue));
+    var carrierHints = new AIHints { Center = module.Center, Bounds = module.Bounds, PlayerPosition = actorP1.Position };
+    stack.AddAIHints(0, actorP1, PartyRolesConfig.Assignment.Unassigned, carrierHints);
+    t.True("the carrier is sent toward a clean teammate", carrierHints.ForbiddenZones.Count == 1 && !carrierHints.InImminentDanger(new WPos(114f, 105f), DateTime.MaxValue) && carrierHints.InImminentDanger(new WPos(100f, 105f), DateTime.MaxValue));
 
     // Voidzone: a puddle actor exists -> forbidden zone + hint when standing in it
     ws.Execute(new ActorState.OpCreate(puddle, 0x9999, 0, "Puddle", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 1f, default, true, false, 0));

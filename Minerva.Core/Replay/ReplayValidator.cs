@@ -31,6 +31,9 @@ public sealed class ReplayValidator
         /// <summary>Whose hits these are: "you" for the recorder, else the player named with --pov.</summary>
         public string PovName { get; init; } = "you";
 
+        /// <summary>What the module drew and what the solver would do with it, at each second asked for with --aoes.</summary>
+        public IReadOnlyList<string> Dumps { get; init; } = [];
+
         public int Uncovered => this.UncoveredMechanics.Count + this.UncoveredVisuals.Count;
 
         public string Render(INameResolver? names = null)
@@ -66,6 +69,8 @@ public sealed class ReplayValidator
                     b.AppendLine($"    {h.Seconds,6:0.0}s  {name} from {h.Caster}: {h.Why}");
                 }
             }
+            foreach (var d in this.Dumps)
+                b.Append(d);
             return b.ToString();
         }
     }
@@ -90,11 +95,61 @@ public sealed class ReplayValidator
         /// <summary>The same action hit every player present within half a second: a raidwide, whatever the module calls it.</summary>
         public bool PartyWide { get; init; }
 
+        /// <summary>The POV stood in a drawn zone within the last three quarters of a second before the hit: in it
+        /// when it resolved, not merely near one earlier. Zones vanish a frame before the damage event.</summary>
+        public bool Inside { get; init; }
+
+        /// <summary>How many players the event resolved on.</summary>
+        public int TargetsHit { get; init; }
+
+        /// <summary>It hit at least four players and at least half of everyone present: a proximity AOE or a
+        /// raidwide with a drawn core, either way meant to land on people standing outside the drawing.</summary>
+        public bool Proximity { get; init; }
+
+        /// <summary>A spread the module drew: the cast targets one player and hits everyone in the circle.</summary>
+        public bool Spread { get; init; }
+
+        /// <summary>A stack the module drew.</summary>
+        public bool Stack { get; init; }
+
+        /// <summary>The spread or stack was on the POV: the cast's main target.</summary>
+        public bool Mine { get; init; }
+
+        /// <summary>Whose spread or stack it was, when not the POV's.</summary>
+        public string Owner { get; init; } = "";
+
+        /// <summary>A knockback component watches this action: the shove is the mechanic, and the ground it
+        /// forbids is what the dodge planned around.</summary>
+        public bool Knockback { get; init; }
+
         public string Why
         {
             get
             {
                 var gave = this.StatusID != 0 ? $" It gave you status {this.StatusID}." : "";
+                var (you, your, them) = this.Foreign ? ("they", "their", "them") : ("you", "your", "you");
+                // a spread or stack is meant to land on its people; the question is only who shared it
+                if (this.Spread)
+                {
+                    var others = this.TargetsHit - 1;
+                    if (this.Mine)
+                        return (others <= 0
+                            ? $"{your} own spread, and it landed on {them} alone: the mechanic done right, expected damage."
+                            : $"{your} own spread, and it also caught {others} other player{(others == 1 ? "" : "s")}: the spot chosen was inside their reach, or they walked into it.") + gave;
+                    return $"{this.Owner}'s spread caught {them} ({this.TargetsHit} players in it); the circle moves with them, so a late step by either side does this. "
+                        + (this.Foreign ? "" : this.Decision.Explain(true, this.Distance)) + gave;
+                }
+                if (this.Knockback)
+                    return $"a knockback the module plans for: the shove itself is expected damage, and {you} {(this.Foreign ? "were" : "were")} still on the arena afterwards or this would be a death, not a hit." + gave;
+                if (this.Stack)
+                    return (this.TargetsHit >= 2
+                        ? $"a stack the module drew, shared by {this.TargetsHit} players: expected damage."
+                        : $"a stack the module drew that {you} took alone: nobody else gathered on it.") + gave;
+                // drawn, but the POV was not in the drawing when it resolved: the drawing is a core, or is too small
+                var outside = !this.Drawn || this.Inside || this.StatusID != 0 ? null
+                    : this.Proximity
+                        ? $"a proximity AOE: it hit {this.TargetsHit} players at once, at strength falling with distance, and {you} were outside the drawn core when it landed. Expected damage; farther is less."
+                        : $"{you} were outside everything the module drew for it when it landed and still took damage: the drawn shape is smaller than the real one, or the hit is a zone the module never drew (module gap).";
                 if (this.PartyWide && !this.Gaze && this.StatusID == 0)
                     return "hit everyone in the party at once: a raidwide, expected damage whatever the module calls it.";
                 var everyone = this.PartyWide ? " It hit everyone at once and gave everyone a status: a mechanic the whole party failed, not a raidwide." : "";
@@ -104,6 +159,8 @@ public sealed class ReplayValidator
                         return $"a gaze; they were facing it {this.FacingDeg.ToString("0", CultureInfo.InvariantCulture)} degrees off. Their own decisions are on their box's recording.{gave}";
                     if (!this.Drawn)
                         return "Minerva drew nothing for this: the module has no component for it, so no dodge was possible on any box (module gap)." + gave;
+                    if (outside != null)
+                        return outside;
                     return "the module drew it and they were inside it when it landed. Why their dodge did not move them is on their box's recording, not this one." + gave + this.RootedBy;
                 }
                 if (this.Gaze)
@@ -120,6 +177,8 @@ public sealed class ReplayValidator
                     return this.StatusID != 0
                         ? $"the module watches this as a non-AOE (raidwide, tankbuster, knockback) and draws no zone for it, yet it gave you status {this.StatusID}: if that is a vulnerability, the zone is missing (module gap)."
                         : "a raidwide or tankbuster the module watches: expected damage, not a dodge miss.";
+                if (outside != null)
+                    return outside + everyone + this.RootedBy;
                 return this.Decision.Explain(this.Drawn, this.Distance) + gave + everyone + this.RootedBy;
             }
         }
@@ -145,7 +204,7 @@ public sealed class ReplayValidator
     /// player in the same pull. The module's zones are the same for everyone, so "did it draw what they
     /// stood in" is answerable here; their dodge's decisions are not, and the wording says so.
     /// </summary>
-    public static Result Validate(ReplayTimeline timeline, ModuleRegistry registry, ulong povOverride)
+    public static Result Validate(ReplayTimeline timeline, ModuleRegistry registry, ulong povOverride, IReadOnlyList<double>? dumpAt = null)
     {
         var world = new WorldState(timeline.QPF, timeline.GameVersion);
         // without this the whole validation runs against the wrong character (see ReplayTimeline.PlayerInstanceID)
@@ -173,9 +232,13 @@ public sealed class ReplayValidator
         }
         var start = timeline.StartTicks;
         var hits = new List<Hit>();
-        var lastInsideDrawnTicks = long.MinValue; // when the POV was last inside something the module drew
+        var dumps = new List<string>();
+        var nextDump = 0;
+        long lastSpreadOnMeTicks = 0, lastStackOnMeTicks = 0; // when the POV last carried a spread / stack marker
+        var lastInsideDrawnTicks = 0L; // when the POV was last inside something the module drew (0, not MinValue: a subtraction from MinValue wraps and called every early hit "drawn")
         var autos = new HashSet<uint> { 7u, 8u, 870u, 871u, 872u, 873u }; // the generic auto-attacks; the module adds its own
         var gazes = new HashSet<uint>(); // actions a gaze component watches: a status from one is judged by facing, not by zones
+        var knockbacks = new HashSet<uint>(); // actions a knockback component watches: the shove is the mechanic
         var myActions = new List<(long Ticks, uint Action)>(); // the POV's own resolved actions, for the rooting look-back
         var myCasts = new List<(long Start, long End, uint Action, float Total)>(); // the POV's own hardcasts
         var enemyEvents = new List<(long Ticks, uint Action, HashSet<ulong> Players)>(); // who each enemy event hit, for the raidwide test
@@ -212,6 +275,22 @@ public sealed class ReplayValidator
                 // in the two seconds before the hit (zones drawn ahead of the cast, from a marker or a tether,
                 // never "rise" at cast start -- Pallmagia's Esoteric Instruction). Neither alone is right.
                 var drawnRecently = drawn.Contains(ev.Action.ID) || ticks - lastInsideDrawnTicks <= 2 * TimeSpan.TicksPerSecond;
+                // in the zone when it resolved (Shantotto 2026-09-06: two Large Specimen hits from 15 and 19 yalms
+                // off 13-yalm cores read as "the AOE was larger than drawn" until the report could say "outside")
+                var inside = ticks - lastInsideDrawnTicks <= 3 * TimeSpan.TicksPerSecond / 4;
+                var playersHit = 0;
+                foreach (var tgt in ev.Targets)
+                    if (playersSeen.Contains(tgt.ID))
+                        ++playersHit;
+                var (isSpread, isStack) = StackSpreadKind(module, ev.Action.ID);
+                // an icon-driven spread or stack resolves under an id the component never names: the marker on
+                // the POV a moment ago, and the cast being aimed at the POV, say what this was
+                var onMe = ev.MainTargetID == pov;
+                if (onMe && ticks - lastSpreadOnMeTicks <= 3 * TimeSpan.TicksPerSecond / 4)
+                    isSpread = true;
+                if (ticks - lastStackOnMeTicks <= 3 * TimeSpan.TicksPerSecond / 4)
+                    isStack = true;
+                var owner = onMe ? "" : world.Actors.Find(ev.MainTargetID)?.Name ?? $"0x{ev.MainTargetID:X}";
                 var facingDeg = 180f;
                 if (me != null && (src.Position - me.Position).LengthSq() > 0.01f)
                 {
@@ -241,7 +320,13 @@ public sealed class ReplayValidator
                         break;
                     }
                 }
-                hits.Add(new Hit((ticks - start) / (double)TimeSpan.TicksPerSecond, ev.Action.ID, src.Name, drawnRecently, d, dist, watched.Contains(ev.Action.ID) && !drawn.Contains(ev.Action.ID), statusID, facingDeg, gazes.Contains(ev.Action.ID)) { RootedBy = rooted, Foreign = foreign, CasterID = cev.InstanceID });
+                hits.Add(new Hit((ticks - start) / (double)TimeSpan.TicksPerSecond, ev.Action.ID, src.Name, drawnRecently, d, dist, watched.Contains(ev.Action.ID) && !drawn.Contains(ev.Action.ID) && !inside, statusID, facingDeg, gazes.Contains(ev.Action.ID))
+                {
+                    RootedBy = rooted, Foreign = foreign, CasterID = cev.InstanceID,
+                    Inside = inside, TargetsHit = playersHit, Proximity = playersHit >= Math.Max(4, (playersSeen.Count + 1) / 2),
+                    Spread = isSpread, Stack = isStack, Mine = onMe, Owner = owner,
+                    Knockback = knockbacks.Contains(ev.Action.ID),
+                });
             }
             // detect the start of an enemy/helper cast (players are ignored — their skills aren't mechanics)
             uint enemyCastAid = 0;
@@ -283,14 +368,31 @@ public sealed class ReplayValidator
                     initialBounds = module.Bounds;
                     autos.UnionWith(AutoAttackIds(module));
                     foreach (var c in module.Components)
+                    {
                         if (c is Components.GenericGaze g && g.WatchedAction != 0)
                             gazes.Add(g.WatchedAction);
+                        if (c is Components.GenericKnockback k && k.WatchedAction != 0)
+                            knockbacks.Add(k.WatchedAction);
+                    }
                 }
             }
             module?.Update();
             DrawCounts(module, countsAfter);
-            if (pov != 0 && module != null && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcNow && InsideAnyAoe(module, pcNow))
-                lastInsideDrawnTicks = ticks;
+            if (pov != 0 && module != null && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcNow)
+            {
+                if (InsideAnyAoe(module, pcNow))
+                    lastInsideDrawnTicks = ticks;
+                var (onSpread, onStack) = MarkedOn(module, pcNow);
+                if (onSpread)
+                    lastSpreadOnMeTicks = ticks;
+                if (onStack)
+                    lastStackOnMeTicks = ticks;
+            }
+            if (dumpAt != null && nextDump < dumpAt.Count && module != null && op is WorldState.OpFrameStart && ticks - start >= (long)(dumpAt[nextDump] * TimeSpan.TicksPerSecond))
+            {
+                dumps.Add(DescribeFrame(module, world, pov, (ticks - start) / (double)TimeSpan.TicksPerSecond));
+                ++nextDump;
+            }
 
             if (module != null)
             {
@@ -300,8 +402,11 @@ public sealed class ReplayValidator
                 // thirteen times. Bounds are immutable, so a reassignment is the change.
                 if (!ReferenceEquals(module.Bounds, initialBounds))
                     boundsChanged = true;
-                if (op is ActorState.OpCreate created && created.Type == ActorType.EventObj)
-                    arenaMarkerSpawned = true; // an environment object appeared mid-fight (likely an arena change)
+                // an environment object appeared mid-fight near the arena (likely an arena change); the exit
+                // portal and the lore memo a hundred yalms off are not one (Acrolith, 2026-09-06)
+                if (op is ActorState.OpCreate created && created.Type == ActorType.EventObj
+                    && (new WPos(created.PosRot.X, created.PosRot.Z) - module.Center).LengthSq() <= (module.Bounds.Radius + 15f) * (module.Bounds.Radius + 15f))
+                    arenaMarkerSpawned = true;
             }
 
             if (enemyCastAid != 0)
@@ -364,7 +469,7 @@ public sealed class ReplayValidator
                 hits[i] = h with { PartyWide = true };
         }
 
-        return new Result(module?.GetType().Name ?? "(no module activated)", castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName };
+        return new Result(module?.GetType().Name ?? "(no module activated)", castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps };
     }
 
     private static ModuleBase? TryActivate(WorldState world, ModuleRegistry registry, HashSet<uint> watched)
@@ -398,8 +503,8 @@ public sealed class ReplayValidator
         if (aid is not { IsEnum: true })
             yield break;
         foreach (var name in Enum.GetNames(aid))
-            if (name.StartsWith("AutoAttack", StringComparison.OrdinalIgnoreCase))
-                yield return Convert.ToUInt32(Enum.Parse(aid, name));
+            if (name.StartsWith("AutoAttack", StringComparison.OrdinalIgnoreCase) || name.EndsWith("Auto", StringComparison.Ordinal))
+                yield return Convert.ToUInt32(Enum.Parse(aid, name)); // AutoAttack, or an add's like AwzdeiAuto (Aw'aern, 2026-09-06: six "module gap" hits that were the tank tanking)
     }
 
     // a damaging effect on the POV among the event's resolved targets -- or a status applied to it (a gaze
@@ -431,14 +536,99 @@ public sealed class ReplayValidator
         return false;
     }
 
+    // What the module drew and what the solver would do with it at one instant: the offline half of "why did
+    // it stand there" (Alexander 2026-09-06: three seconds of "no safe spot" under ten Divine Arrow lines).
+    // The solve runs with the live AI's defaults (5s horizon, 1y margin, 1s lead, unsprinted speed, no uptime goal).
+    private static string DescribeFrame(ModuleBase module, WorldState world, ulong pov, double seconds)
+    {
+        var b = new StringBuilder();
+        var me = world.Actors.Find(pov);
+        var d = world.LastDodge;
+        var dist = me != null && d.Found ? (d.Target - me.Position).Length() : 0f;
+        b.AppendLine($"  --- drawn at {seconds.ToString("0.00", CultureInfo.InvariantCulture)}s: POV at {(me != null ? Fmt(me.Position) : "?")}; recorded decision: {(d.Known ? d.Describe(dist) : "none yet")} ---");
+        if (me == null)
+            return b.ToString();
+        var slot = Math.Max(0, world.Party.FindSlot(pov));
+        foreach (var c in module.Components)
+        {
+            if (c is Components.GenericAOEs g)
+            {
+                foreach (ref readonly var a in g.ActiveAOEs(slot, me))
+                {
+                    var inIt = a.Shape.Check(me.Position, a.Origin, a.Rotation);
+                    b.AppendLine($"    {c.GetType().Name}: {a.Shape} at {Fmt(a.Origin)} rot {a.Rotation.Deg.ToString("0", CultureInfo.InvariantCulture)} in {(a.Activation - world.CurrentTime).TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)}s{(a.Risky ? "" : " (not risky)")}{(inIt ? "  <- you are in it" : "")}");
+                }
+            }
+            else if (c is Components.GenericStackSpread ss && ss.Active)
+                b.AppendLine($"    {c.GetType().Name}: {ss.ActiveStacks.Count} stack(s), {ss.ActiveSpreads.Count} spread(s)");
+            else if (c is Components.GenericKnockback k && k.ActiveKnockbacks(slot, me).Length > 0)
+                b.AppendLine($"    {c.GetType().Name}: {k.ActiveKnockbacks(slot, me).Length} knockback source(s)");
+        }
+        var hints = new AIHints();
+        module.BuildAIHints(slot, me, hints);
+        var soonest = double.MaxValue;
+        foreach (var z in hints.ForbiddenZones)
+            soonest = Math.Min(soonest, (z.Activation - world.CurrentTime).TotalSeconds);
+        var spot = ArenaPathfinder.Solve(hints, world.CurrentTime, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        var verdict = !spot.NeedToMove ? "safe, stay" : spot.Found ? $"move to {Fmt(spot.Target)}, {(spot.Target - me.Position).Length().ToString("0.0", CultureInfo.InvariantCulture)}y away" : "wants to move, no safe spot";
+        b.AppendLine($"    solver sees {hints.ForbiddenZones.Count} forbidden zone(s){(hints.ForbiddenZones.Count > 0 ? ", soonest in " + Math.Max(soonest, 0).ToString("0.0", CultureInfo.InvariantCulture) + "s" : "")}; offline solve: {verdict}");
+        return b.ToString();
+    }
+
+    private static string Fmt(WPos p) => $"({p.X.ToString("0.0", CultureInfo.InvariantCulture)}, {p.Z.ToString("0.0", CultureInfo.InvariantCulture)})";
+
+    // a stack or spread component that owns this action: the hit is the mechanic resolving, judged by who shared it
+    private static (bool Spread, bool Stack) StackSpreadKind(ModuleBase? module, uint aid)
+    {
+        bool spread = false, stack = false;
+        if (module != null)
+            foreach (var c in module.Components)
+                if (c is Components.GenericStackSpread s)
+                {
+                    var type = s.GetType();
+                    if (type.GetField("SpreadAction")?.GetValue(s) is uint sa && sa == aid)
+                        spread = true;
+                    if (type.GetField("StackAction")?.GetValue(s) is uint ta && ta == aid)
+                        stack = true;
+                }
+        return (spread, stack);
+    }
+
     private static bool InsideAnyAoe(ModuleBase module, Actor me)
     {
         foreach (var c in module.Components)
+        {
             if (c is Components.GenericAOEs g)
+            {
                 foreach (ref readonly var aoe in g.ActiveAOEs(0, me))
                     if (aoe.Shape.Check(me.Position, aoe.Origin, aoe.Rotation))
                         return true;
+            }
+            else if (c is Components.GenericStackSpread ss)
+            {
+                // a spread or stack circle is drawn ground as much as a cast's zone (Promathia's Comet on the tank)
+                foreach (var sp in ss.ActiveSpreads)
+                    if (me.Position.InCircle(sp.Target.Position, sp.Radius))
+                        return true;
+                foreach (var st in ss.ActiveStacks)
+                    if (me.Position.InCircle(st.Target.Position, st.Radius))
+                        return true;
+            }
+        }
         return false;
+    }
+
+    /// <summary>Is the POV the marked target of an active spread or stack right now (icon-driven ones have no cast id to match).</summary>
+    private static (bool Spread, bool Stack) MarkedOn(ModuleBase module, Actor me)
+    {
+        bool spread = false, stack = false;
+        foreach (var c in module.Components)
+            if (c is Components.GenericStackSpread ss)
+            {
+                spread |= ss.IsSpreadTarget(me);
+                stack |= ss.IsStackTarget(me);
+            }
+        return (spread, stack);
     }
 
     private static void DrawCounts(ModuleBase? module, List<int> into)

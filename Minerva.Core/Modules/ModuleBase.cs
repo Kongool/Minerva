@@ -480,11 +480,13 @@ public abstract class ModuleBase : IDisposable
     }
 
     // --- helpers used by components/modules ---
-    public DateTime CastFinishAt(ActorCastInfo cast, double extraDelay = 0d) => this.World.FutureTime(cast.RemainingTime + (float)extraDelay);
-
-    /// <summary>As above, but <paramref name="fallback"/> when there is no cast to time from.</summary>
-    public DateTime CastFinishAt(ActorCastInfo? cast, double extraDelay, DateTime fallback)
-        => cast != null ? this.CastFinishAt(cast, extraDelay) : fallback;
+    /// <summary>When a cast lands; <paramref name="fallback"/> (default, which reads as "already active")
+    /// when there is no cast to time from. Null-tolerant like BossmodReborn's: 28 ported components hand
+    /// over an actor's <c>CastInfo</c> straight from a caster list, and the actor keeps its place in that
+    /// list for a moment after its cast ends. Shinryu Paradox, 2026-09-06: that moment was a null here,
+    /// which took the radar draw and the whole AI tick down for the rest of the fight.</summary>
+    public DateTime CastFinishAt(ActorCastInfo? cast, double extraDelay = 0d, DateTime fallback = default)
+        => cast != null ? this.World.FutureTime(cast.RemainingTime + (float)extraDelay) : fallback;
 
     // returns a List (matching BMR) so callers can use .Count / indexing
     // Enemy lists handed out by Enemies(), kept current for the module's lifetime. Modules follow BMR's
