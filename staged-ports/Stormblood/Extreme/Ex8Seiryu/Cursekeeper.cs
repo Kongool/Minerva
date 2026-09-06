@@ -1,0 +1,75 @@
+// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt). Auto-ported by tools/port_bmr_module.py;
+// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Minerva;
+
+namespace Minerva.Stormblood.Extreme.Ex8Seiryu;
+
+sealed class Cursekeeper(ModuleBase module) : Components.GenericBaitAway(module, centerAtTarget: true, tankbuster: true)
+{
+    private static readonly AOEShapeCircle circle = new(4f);
+    private ulong prevTarget;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.Cursekeeper)
+        {
+            prevTarget = spell.TargetID;
+            if (World.Actors.Find(prevTarget) is Actor t)
+            {
+                CurrentBaits.Add(new(Module.PrimaryActor, t, circle, Module.CastFinishAt(spell, 3.1d)));
+            }
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.InfirmSoul)
+        {
+            ++NumCasts;
+        }
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints)
+    {
+        if (actor.Role == Role.Tank && Module.PrimaryActor.TargetID == prevTarget)
+        {
+            hints.Add(prevTarget != actor.InstanceID ? "Provoke!" : "Pass aggro!");
+        }
+        base.AddHints(slot, actor, hints);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (actor.Role == Role.Tank && actor.InstanceID is var id && prevTarget != id && Module.PrimaryActor.TargetID != id)
+        {
+            hints.ActionsToExecute.Push(ActionID.MakeSpell(ClassShared.AID.Provoke), actor, ActionQueue.Priority.High);
+        }
+        base.AddAIHints(slot, actor, assignment, hints);
+    }
+
+    public override void Update()
+    {
+        if (CurrentBaits.Count != 0 && World.Actors.Find(Module.PrimaryActor.TargetID) is Actor t)
+        {
+            CurrentBaits.Ref(0).Target = t;
+        }
+    }
+}
+
+sealed class KarmicCurse(ModuleBase module) : Components.RaidwideInstant(module, (uint)AID.KarmicCurse, 4d)
+{
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        base.OnEventCast(caster, spell);
+
+        if (spell.Action.ID == (uint)AID.InfirmSoul)
+        {
+            Activation = World.FutureTime(Delay);
+        }
+    }
+}

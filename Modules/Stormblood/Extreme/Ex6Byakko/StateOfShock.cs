@@ -1,0 +1,56 @@
+// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt). Auto-ported by tools/port_bmr_module.py;
+// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Minerva;
+
+namespace Minerva.Stormblood.Extreme.Ex6Byakko;
+
+class StateOfShock(ModuleBase module) : Components.CastCounter(module, (uint)AID.StateOfShockSecond)
+{
+    public int NumStuns;
+
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == (uint)SID.Stun)
+            ++NumStuns;
+    }
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == (uint)SID.Stun)
+            --NumStuns;
+    }
+}
+
+class HighestStakes(ModuleBase module) : Components.GenericTowers(module, (uint)AID.HighestStakesAOE)
+{
+    private BitMask _forbidden;
+
+    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
+    {
+        if (iconID == (uint)IconID.HighestStakes)
+        {
+            Towers.Add(new(actor.Position.Quantized(), 6f, 3, 3, _forbidden, World.FutureTime(6.1d)));
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+        {
+            ++NumCasts;
+            Towers.Clear();
+            var targets = CollectionsMarshal.AsSpan(spell.Targets);
+            var len = targets.Length;
+            for (var i = 0; i < len; ++i)
+            {
+                ref readonly var targ = ref targets[i];
+                _forbidden.Set(Raid.FindSlot(targ.ID));
+            }
+        }
+    }
+}

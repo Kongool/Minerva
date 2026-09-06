@@ -9,6 +9,11 @@ public enum ShapeKind
     Donut,
     Cross,
     SingleTarget, // no ground shape (tankbuster / gaze / etc.)
+
+    /// <summary>A charge/dash: a rectangle whose WIDTH the sheet gives and whose LENGTH it cannot, because
+    /// the length is how far the caster travels. Deliberately not <see cref="Rect"/> — emitting it as one
+    /// would produce a fixed-length rect that is wrong every time the dash is any other distance.</summary>
+    Charge,
 }
 
 /// <summary>

@@ -96,9 +96,9 @@ sealed class EvilEmission(ModuleBase module) : Components.SpreadFromIcon(module,
 sealed class ProfanePressure(ModuleBase module) : Components.StackWithCastTargets(module, (uint)AID.ProfanePressure1, 6f, 4);
 
 [SkipLocalsInit]
-sealed class D132ChortStates : StateMachineBuilder
+sealed class ChortStates : StateMachineBuilder
 {
-    public D132ChortStates(ModuleBase module) : base(module)
+    public ChortStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
             .ActivateOnEnter<MortifyingFlesh>()

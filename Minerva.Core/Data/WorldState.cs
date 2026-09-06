@@ -20,6 +20,10 @@ public sealed class WorldState
     public readonly ActorState Actors = new();
     public readonly PartyState Party;
 
+    /// <summary>The local client's own state — see <see cref="ClientState"/>. Filled by the game sync;
+    /// stays at its defaults headless, so a replay reports no duty actions rather than wrong ones.</summary>
+    public readonly ClientState Client = new();
+
     public DateTime CurrentTime => this.Frame.Timestamp;
     public DateTime FutureTime(double deltaSeconds) => this.Frame.Timestamp.AddSeconds(deltaSeconds);
 
@@ -31,6 +35,13 @@ public sealed class WorldState
     }
 
     // --- modification ---
+    /// <summary>
+    /// The dodge engine's latest decision, as carried in the op stream by <see cref="OpDodgeDecision"/>.
+    /// Default (<c>Known</c> false) until one has been applied. Kept here so a replay carries what Minerva
+    /// chose beside what the world did.
+    /// </summary>
+    public DodgeDecision LastDodge;
+
     public readonly Event<Operation> Modified = new();
 
     /// <summary>A single, self-applying, self-serializing change to the world state.</summary>
@@ -74,6 +85,11 @@ public sealed class WorldState
             ops.Add(new OpZoneChange(this.CurrentZone, this.CurrentCFCID));
         foreach (var (k, v) in this.RSVEntries)
             ops.Add(new OpRSVData(k, v));
+        foreach (var (k, v) in this.MapEffectStates)
+            ops.Add(new OpMapEffect(k, v));
+        if (this.ActiveFate.Radius > 0f)
+            ops.Add(new OpActiveFate(this.ActiveFate));
+        ops.AddRange(this.Waymarks.CompareToInitial());
         ops.AddRange(this.Actors.CompareToInitial());
         ops.AddRange(this.Party.CompareToInitial());
         return ops;
@@ -115,13 +131,57 @@ public sealed class WorldState
     /// <paramref name="State"/>. Transient — many mechanics key off these (moving walls, tile
     /// hazards, arena reshaping). Event-only.
     /// </summary>
+    /// <summary>
+    /// Last state seen for each map-effect index — the floor's current shape, essentially.
+    /// <para>Map effects are events, and a recording that starts after one has fired never learns it
+    /// happened. Thundergust Griffin shrinks its arena from 29.5 to 20 yalms on the first raidwide; a
+    /// recording begun after that replays the entire fight against a floor thirty percent bigger than the
+    /// one that exists, and nothing in the replay can tell. Retaining the state lets a recording open with
+    /// the world as it stands rather than as it started.</para>
+    /// </summary>
+    /// <summary>
+    /// The FATE the player is standing in — its real centre and radius, straight from the game.
+    /// <para>An open-world FATE has no sealed arena, so a module must invent one, and an invented circle
+    /// is wrong in both directions: too small and it refuses safe ground, too large and the dodge walks
+    /// the character clean out of the FATE, which drops participation. BossmodReborn does not bound its
+    /// open-world modules at all and that is exactly what happens. The game states the boundary; there is
+    /// no need to guess it.</para>
+    /// <para>Radius 0 means not in one.</para>
+    /// </summary>
+    public FateState ActiveFate;
+
+    /// <summary>The party's field markers — see <see cref="WaymarkState"/>.</summary>
+    public readonly WaymarkState Waymarks = new();
+
+    public readonly Dictionary<byte, uint> MapEffectStates = [];
+
+    public readonly Event<OpActiveFate> ActiveFateChanged = new();
+    public sealed class OpActiveFate(FateState fate) : Operation
+    {
+        public readonly FateState Fate = fate;
+
+        protected override void Exec(WorldState ws)
+        {
+            ws.ActiveFate = this.Fate;
+            ws.ActiveFateChanged.Fire(this);
+        }
+
+        public override void Write(OperationOutput o)
+            => o.Tag("FATE").Emit(this.Fate.ID).Emit(this.Fate.Center.X).Emit(this.Fate.Center.Z).Emit(this.Fate.Radius);
+    }
+
     public readonly Event<OpMapEffect> MapEffect = new();
     public sealed class OpMapEffect(byte index, uint state) : Operation
     {
         public readonly byte Index = index;
         public readonly uint State = state;
 
-        protected override void Exec(WorldState ws) => ws.MapEffect.Fire(this);
+        protected override void Exec(WorldState ws)
+        {
+            ws.MapEffectStates[this.Index] = this.State;
+            ws.MapEffect.Fire(this);
+        }
+
         public override void Write(OperationOutput o) => o.Tag("ENVC").Emit((uint)this.Index, "X2").Emit(this.State, "X8");
     }
 

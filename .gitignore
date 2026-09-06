@@ -5,8 +5,12 @@ obj/
 *.user
 *.suo
 
-# Local, machine-specific Claude settings (keep the rest of .claude tracked)
-.claude/settings.local.json
+# Generated tooling artifacts (reproducible from game data)
+tools/__pycache__/
+tools/action_names.tsv
+
+# Session-local Claude agent config (settings, skills, local replays) — not part of the plugin
+.claude/
 
 # Local reference docs (IPC specs, integration notes) — not part of the shipped plugin
 docs/

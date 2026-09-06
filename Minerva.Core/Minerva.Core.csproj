@@ -19,6 +19,16 @@
   <ItemGroup>
     <Using Include="System.Numerics" />
     <Using Include="System.Collections" />
+    <!--
+      Required by the vendored Clipper2 under ThirdParty/, which is written against the global usings its
+      own project provides. Adding them here keeps that code byte-identical to upstream, which is what makes
+      it updatable; the alternative is editing 8,000 lines of third-party source to add using directives.
+    -->
+    <Using Include="System.Runtime.CompilerServices" />
+    <Using Include="System.Runtime.InteropServices" />
+    <Using Include="System.Collections.Immutable" />
+    <Using Include="System.Linq" />
+    <Using Include="System.Text" />
   </ItemGroup>
 
 </Project>

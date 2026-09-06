@@ -40,3 +40,31 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+Clipper2
+--------
+
+Minerva vendors the Clipper2 polygon-clipping library, unmodified, under
+Minerva.Core/ThirdParty/Clipper2/. It is used to compose arena shapes and AOEs
+from boolean operations (union, intersection, difference).
+
+    Author    : Angus Johnson
+    Copyright : Angus Johnson 2010-2025
+    Website   : https://www.angusj.com
+    License   : Boost Software License 1.0
+                https://www.boost.org/LICENSE_1_0.txt
+
+The source is kept byte-identical to upstream so it can be updated by replacing
+the files; the global usings it expects are supplied by Minerva.Core.csproj
+rather than by editing the source.
+
+The wrappers around it under Minerva.Core/Geometry/Polygon/ (PolygonClipper,
+RelSimplifiedComplexPolygon, RelPolygonWithHoles, EarCut, PolygonBoundaryIndex2D,
+SpatialIndex, Triangle, PolygonUtil) are ported from BossmodReborn (BSD-3) and
+are covered by the BossmodReborn notice above.
+
+Veyn's bossmod (ffxiv_bossmod)
+https://github.com/awgil/ffxiv_bossmod
+BSD 3-Clause License. Copyright (c) 2022-2026 awgil and contributors.
+Minerva ports individual boss modules from this project where BossmodReborn has none (marked in each file header).

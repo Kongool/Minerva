@@ -25,14 +25,29 @@ internal sealed class NavmeshIPC
     // and we must not pay an exception on every input sample.
     private static readonly TimeSpan ProbeInterval = TimeSpan.FromSeconds(1);
 
-    // one navmesh provider: a readiness test plus the two path gates we drive it with.
+    // one navmesh provider: a readiness test, the two path gates we drive it with, and two optional
+    // extras. The extras are Ariadne-only -- vnavmesh has no equivalent -- so they are nullable and every
+    // use falls back to the plain behaviour rather than feature-gating the whole backend.
     private sealed class Backend(string name, Func<bool> ready,
-        ICallGateSubscriber<List<Vector3>, bool, object> moveTo, ICallGateSubscriber<object> stop)
+        ICallGateSubscriber<List<Vector3>, bool, object> moveTo, ICallGateSubscriber<object> stop,
+        ICallGateSubscriber<List<Vector3>, bool, float, object>? moveToWithTolerance = null,
+        ICallGateSubscriber<int>? stallCount = null,
+        ICallGateSubscriber<Vector3, object>? steerTo = null)
     {
         public string Name => name;
         public Func<bool> Ready => ready;
         public ICallGateSubscriber<List<Vector3>, bool, object> MoveTo => moveTo;
         public ICallGateSubscriber<object> Stop => stop;
+
+        /// <summary>Per-path waypoint tolerance, leaving the user's global setting alone. Null when unsupported.</summary>
+        public ICallGateSubscriber<List<Vector3>, bool, float, object>? MoveToWithTolerance => moveToWithTolerance;
+
+        /// <summary>Stalls on the CURRENT path, reset on every Move/Stop. Null when unsupported.</summary>
+        public ICallGateSubscriber<int>? StallCount => stallCount;
+
+        /// <summary>Steer straight at a point through the backend's own input hook, re-issued per
+        /// tick. Null when unsupported.</summary>
+        public ICallGateSubscriber<Vector3, object>? SteerTo => steerTo;
     }
 
     private readonly Backend[] backends;
@@ -53,9 +68,18 @@ internal sealed class NavmeshIPC
         this.backends =
         [
             new Backend("Ariadne",
-                () => ariConnected.InvokeFunc() && ariZone.InvokeFunc() is 2 or 3,
+                // Presence, not mesh state. Path.MoveTo and Path.SteerTo follow points we supply and do
+                // no pathfinding, so neither needs a mesh -- only Nav.Pathfind* does, and we never call it.
+                // Gating driving on the mesh meant standing down through a build, which is exactly when a
+                // fight starts. The shared-data tag exists for as long as the plugin is loaded, so its
+                // presence answers "can it drive" without an IPC call or an exception; its value answers
+                // "is there a mesh", which we do not need.
+                () => Service.PluginInterface.TryGetData<bool[]>("ariadne.NavReady", out _),
                 pi.GetIpcSubscriber<List<Vector3>, bool, object>("Ariadne.Path.MoveTo"),
-                pi.GetIpcSubscriber<object>("Ariadne.Path.Stop")),
+                pi.GetIpcSubscriber<object>("Ariadne.Path.Stop"),
+                pi.GetIpcSubscriber<List<Vector3>, bool, float, object>("Ariadne.Path.MoveToWithTolerance"),
+                pi.GetIpcSubscriber<int>("Ariadne.Path.StallCount"),
+                pi.GetIpcSubscriber<Vector3, object>("Ariadne.Path.SteerTo")),
             new Backend("vnavmesh",
                 () => vnavReady.InvokeFunc(),
                 pi.GetIpcSubscriber<List<Vector3>, bool, object>("vnavmesh.Path.MoveTo"),
@@ -113,13 +137,77 @@ internal sealed class NavmeshIPC
     }
 
     /// <summary>Follow a straight one-waypoint path to <paramref name="dest"/> (walk). No-op if no backend is ready.</summary>
-    public void MoveTo(Vector3 dest)
+    public void MoveTo(Vector3 dest) => this.MoveTo([dest]);
+
+    /// <summary>
+    /// Walk <paramref name="path"/> in order. No-op if no backend is ready or the path is empty.
+    ///
+    /// <para>Both backends follow the points they are given literally — <c>Path.MoveTo</c> does no
+    /// pathfinding of its own (that is <c>Nav.Pathfind*</c>). So a one-point path means "walk the straight
+    /// line to here", which is why handing over only the destination walked the character through whatever
+    /// the dodge was routing around. Sending the corners makes the follower take our path.</para>
+    /// </summary>
+    public void MoveTo(List<Vector3> path) => this.MoveTo(path, null);
+
+    /// <summary>
+    /// Walk <paramref name="path"/> in order, asking for <paramref name="tolerance"/> yards of
+    /// waypoint-pass slack when the backend supports a per-path value.
+    ///
+    /// <para>Tolerance matters more for a dodge than for travel: it is how close the follower has to get
+    /// to a corner before heading for the next one, so a loose value cuts the corner -- and on a route
+    /// whose corners exist to go around an AOE, cutting one means clipping the thing it was avoiding.
+    /// Asking per-path leaves the user's global travel setting untouched.</para>
+    /// </summary>
+    public void MoveTo(List<Vector3> path, float? tolerance)
     {
         var b = this.Resolve();
-        if (b == null)
+        if (b == null || path.Count == 0)
             return;
-        try { b.MoveTo.InvokeAction([dest], false); this.driving = b; }
+        try
+        {
+            if (tolerance is { } tol && b.MoveToWithTolerance != null)
+                b.MoveToWithTolerance.InvokeAction(path, false, tol);
+            else
+                b.MoveTo.InvokeAction(path, false);
+            this.driving = b;
+        }
         catch { /* backend unloaded mid-flight — ignore */ }
+    }
+
+    /// <summary>Can the active backend steer directly, without a path? (Ariadne only.)</summary>
+    public bool CanSteer => (this.driving ?? this.Resolve())?.SteerTo != null;
+
+    /// <summary>
+    /// Steer straight at <paramref name="dest"/> through the backend's own input hook. Re-issue every
+    /// tick; the backend stops itself on arrival.
+    ///
+    /// <para>This is what our own <c>RMIWalk</c> hook does, done by the plugin that maintains that hook
+    /// against upstream. It is the right shape for a dodge: a straight move to a point our solver already
+    /// re-picks every frame, with no waypoint list, no tolerance and no stall recovery in between.</para>
+    /// </summary>
+    public void Steer(Vector3 dest)
+    {
+        var b = this.Resolve();
+        if (b?.SteerTo == null)
+            return;
+        try { b.SteerTo.InvokeAction(dest); this.driving = b; }
+        catch { /* backend unloaded mid-flight — ignore */ }
+    }
+
+    /// <summary>
+    /// Stalls the follower has seen on the path it is walking now, or 0 when the backend cannot say.
+    /// <para>Recovery for an externally-supplied path is deliberately ours: the follower keeps walking our
+    /// corners rather than re-pathing round them through the mesh, and tells us it is stuck instead. Note
+    /// that a knockback or stun ticks this too -- the detector cannot tell "held" from "wedged" -- so a
+    /// single stall is not evidence the route is wrong.</para>
+    /// </summary>
+    public int StallCount()
+    {
+        var b = this.driving ?? this.Resolve();
+        if (b?.StallCount == null)
+            return 0;
+        try { return b.StallCount.InvokeFunc(); }
+        catch { return 0; }
     }
 
     /// <summary>Drop the path on whichever backend we last drove. No-op if none.</summary>

@@ -1,0 +1,43 @@
+// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt). Auto-ported by tools/port_bmr_module.py;
+// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Minerva;
+
+namespace Minerva.Stormblood.Ultimate.UWU;
+
+// TODO :implement hints...
+class P1Mesohigh(ModuleBase module) : Components.CastCounter(module, (uint)AID.Mesohigh)
+{
+    private readonly List<Actor> _sisters = module.Enemies((uint)OID.GarudaSister);
+    private const float _radius = 3;
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc)
+    {
+        foreach (var s in EnumerateTetherSources())
+        {
+            var tetherTarget = World.Actors.Find(s.Tether.Target);
+            if (tetherTarget != null)
+            {
+                Arena.AddLine(s.Position, tetherTarget.Position, Colors.Danger);
+                Arena.ZoneCircleOutline(tetherTarget.Position, _radius, Colors.Danger);
+            }
+        }
+    }
+
+    public override PlayerPriority CalcPriority(int pcSlot, Actor pc, int playerSlot, Actor player, ref uint customColor)
+    {
+        return _sisters.Any(s => s.Tether.Target == player.InstanceID) ? PlayerPriority.Danger : PlayerPriority.Normal;
+    }
+
+    private IEnumerable<Actor> EnumerateTetherSources()
+    {
+        foreach (var s in _sisters.Tethered(TetherID.Mesohigh))
+            yield return s;
+        if (Module.PrimaryActor.Tether.ID == (uint)TetherID.Mesohigh)
+            yield return Module.PrimaryActor;
+    }
+}

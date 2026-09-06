@@ -9,7 +9,7 @@ namespace Minerva.Components;
 /// about to resolve is treated as dangerous (safe rings are hidden); pass <paramref name="showAll"/>
 /// to preview the whole set with only the next ring flagged risky.
 /// </summary>
-public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll = false) : GenericAOEs(module, warningText: "Wrong ring — move!")
+public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll = false, double riskyWithSecondsLeft = default) : GenericAOEs(module, warningText: "Wrong ring — move!")
 {
     /// <summary>One in-flight bullseye: where it's centred and how many of its rings have resolved.</summary>
     public sealed class Sequence(WPos origin, Angle rotation = default, DateTime nextActivation = default)
@@ -18,7 +18,14 @@ public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll =
         public Angle Rotation = rotation;
         public DateTime NextActivation = nextActivation;
         public int Done; // rings already resolved -> index of the next shape to go off
+
+        /// <summary>BossmodReborn's name for <see cref="Done"/>; its modules read it by this name.</summary>
+        public int NumCastsDone { get => this.Done; set => this.Done = value; }
     }
+
+    /// <summary>Hold off calling a ring risky until this many seconds remain, so the dodge does not leave
+    /// early on a sequence where the safe ring is the one you are already standing in.</summary>
+    public readonly double RiskyWithSecondsLeft = riskyWithSecondsLeft;
 
     public readonly AOEShape[] Shapes = shapes;
     public readonly bool ShowAll = showAll;
@@ -36,6 +43,30 @@ public class ConcentricAOEs(ModuleBase module, AOEShape[] shapes, bool showAll =
     /// next; the sequence is dropped once its last ring has gone off. Returns false if no sequence
     /// matched (so a caller can tell an unexpected cast from an expected advance).
     /// </summary>
+    /// <summary>
+    /// Order-aware advance: only matches a sequence that has resolved exactly <paramref name="order"/>
+    /// rings so far (and, when given, is turned to <paramref name="rotation"/>). Use this when several
+    /// bullseyes overlap and the ring index is what disambiguates them. A negative order is a no-op that
+    /// reports success, matching BMR. Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+    /// </summary>
+    public bool AdvanceSequence(int order, WPos origin, DateTime nextActivation = default, Angle rotation = default)
+    {
+        if (order < 0)
+            return true;
+
+        foreach (var s in this.Sequences)
+        {
+            if (s.Done == order && s.Origin.AlmostEqual(origin, 1f) && s.Rotation.AlmostEqual(rotation, 0.05f))
+            {
+                s.NextActivation = nextActivation;
+                if (++s.Done >= this.Shapes.Length)
+                    this.Sequences.Remove(s);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public bool AdvanceSequence(WPos origin, DateTime nextActivation = default)
     {
         foreach (var s in this.Sequences)

@@ -147,10 +147,25 @@ public abstract class GenericStackSpread(ModuleBase module, bool raidwideOnResol
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        // keep away from spread markers other players carry, and from forbidden stacks
+        // Spreads cut both ways. Staying clear of everyone else's marker is only half of it: while *you* carry
+        // one, your own circle is the danger to anybody standing near you, so keep off unmarked teammates too.
+        // Other spread targets are exempt — they are already being pushed away from you by the same rule, and
+        // forbidding each other's ground as well would leave two markers with nowhere legal to stand.
         foreach (var s in this.ActiveSpreads)
+        {
             if (s.Target != actor)
+            {
                 hints.AddForbiddenZone(new AOEShapeCircle(s.Radius + this.ExtraAISpreadThreshold), s.Target.Position, default, s.Activation);
+                continue;
+            }
+
+            foreach (var (_, mate) in this.Raid.WithSlot(this.IncludeDeadTargets))
+            {
+                if (mate == actor || this.IsSpreadTarget(mate))
+                    continue;
+                hints.AddForbiddenZone(new AOEShapeCircle(s.Radius + this.ExtraAISpreadThreshold), mate.Position, default, s.Activation);
+            }
+        }
         foreach (var s in this.ActiveStacks)
             if (s.Target != actor && s.ForbiddenPlayers[slot])
                 hints.AddForbiddenZone(new AOEShapeCircle(s.Radius), s.Target.Position, default, s.Activation);
@@ -324,4 +339,94 @@ public class StackWithIcon(ModuleBase module, uint icon, uint aid, float radius,
 {
     // convenience overload matching Minerva's extractor emission (module, icon, radius)
     public StackWithIcon(ModuleBase module, uint icon, float radius, double activationDelay = 5d) : this(module, icon, default, radius, activationDelay) { }
+}
+
+/// <summary>
+/// A donut centred on each marked player — the danger is the ring, so the party solves it by stacking
+/// tightly on top of the targets (everyone inside everyone else's inner circle). Regular stack
+/// components don't fit because the AOE is self-targeted. Ported from BossmodReborn (BSD-3; see
+/// THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class DonutStack(ModuleBase module, uint aid, uint icon, float innerRadius, float outerRadius, double activationDelay, int minStackSize = 2, int maxStackSize = int.MaxValue)
+    : UniformStackSpread(module, innerRadius / 3f, default, minStackSize, maxStackSize)
+{
+    public readonly AOEShapeDonut Donut = new(innerRadius, outerRadius);
+    public readonly double ActivationDelay = activationDelay;
+    public readonly uint Icon = icon;
+    public readonly uint Aid = aid;
+
+    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
+    {
+        if (iconID == this.Icon)
+            this.AddStack(actor, this.World.FutureTime(this.ActivationDelay));
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent cast)
+    {
+        if (cast.Action.ID != this.Aid)
+            return;
+        var t = cast.MainTargetID;
+        for (var i = 0; i < this.Stacks.Count; ++i)
+        {
+            if (this.Stacks[i].Target.InstanceID == t)
+            {
+                this.Stacks.RemoveAt(i);
+                return;
+            }
+        }
+        this.Stacks.Clear(); // no match: the donut was self-targeted rather than player-targeted, so clear all
+    }
+
+    public override void Update()
+    {
+        for (var i = this.Stacks.Count - 1; i >= 0; --i)
+            if (this.Stacks[i].Target.IsDead)
+                this.Stacks.RemoveAt(i);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (this.Stacks.Count == 0)
+            return;
+        // stay inside every *other* target's inner circle at once — the intersection is the safe huddle
+        var forbidden = new List<ShapeDistance>(this.Stacks.Count);
+        var radius = this.Donut.InnerRadius * 0.25f;
+        foreach (var s in this.Stacks)
+            if (s.Target != actor)
+                forbidden.Add(new SDInvertedCircle(s.Target.Position, radius));
+        if (forbidden.Count != 0)
+            hints.AddForbiddenZone(new SDIntersection([.. forbidden]), this.Stacks[0].Activation);
+    }
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    {
+        foreach (var s in this.Stacks)
+            this.Arena.ZoneShape(this.Donut, s.Target.Position, default, Colors.AOE);
+    }
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc) { }
+}
+
+/// <summary>
+/// Stack/spread driven by statuses that resolve on expiry rather than by casts or icons. Ported from
+/// BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class StatusStackSpread(ModuleBase module, uint stackSid, uint spreadSid, float stackRadius, float spreadRadius, int minStackSize = 2, int maxStackSize = int.MaxValue, bool raidwideOnResolve = true, bool includeDeadTargets = false)
+    : UniformStackSpread(module, stackRadius, spreadRadius, minStackSize, maxStackSize, raidwideOnResolve, includeDeadTargets)
+{
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == stackSid)
+            this.AddStack(actor, status.ExpireAt);
+        else if (status.ID == spreadSid)
+            this.AddSpread(actor, status.ExpireAt);
+    }
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == stackSid)
+            this.Stacks.Clear();
+        else if (status.ID == spreadSid)
+            this.Spreads.Clear();
+    }
 }

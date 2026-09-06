@@ -2,4 +2,5 @@
   <Project Path="Minerva.Core/Minerva.Core.csproj" />
   <Project Path="Minerva.csproj" />
   <Project Path="Minerva.Tests/Minerva.Tests.csproj" />
+  <Project Path="Minerva.Validate/Minerva.Validate.csproj" />
 </Solution>

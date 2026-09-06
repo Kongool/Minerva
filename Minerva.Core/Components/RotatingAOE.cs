@@ -27,6 +27,11 @@ public class GenericRotatingAOE(ModuleBase module) : GenericAOEs(module)
     public uint ImminentColor = Colors.AOEImminent;
     public uint FutureColor = Colors.AOE;
     protected readonly List<AOEInstance> Aoes = [];
+
+#pragma warning disable SA1300, IDE1006 // BossmodReborn member spelling, deliberate
+    /// <summary>BossmodReborn's spelling of <see cref="Aoes"/> — the same list, not a copy.</summary>
+    protected List<AOEInstance> _aoes => this.Aoes;
+#pragma warning restore SA1300, IDE1006
     protected int lastVersion, lastCount;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.Aoes);
@@ -89,6 +94,25 @@ public class GenericRotatingAOE(ModuleBase module) : GenericAOEs(module)
                 return true;
             }
         }
+        return false;
+    }
+
+    /// <summary>
+    /// Advance the sequence whose origin, rotation AND caster all match — the form a fight needs when two
+    /// sequences share a spot, where position alone would advance the wrong one.
+    /// </summary>
+    public bool AdvanceSequence(WPos origin, Angle rotation, ulong instanceID, DateTime currentTime, bool removeWhenFinished = true)
+    {
+        for (var i = 0; i < this.Sequences.Count; ++i)
+        {
+            var s = this.Sequences[i];
+            if (s.Origin.AlmostEqual(origin, 1f) && s.Rotation.AlmostEqual(rotation, 0.05f) && s.ActorID == instanceID)
+            {
+                this.AdvanceSequence(i, currentTime, removeWhenFinished);
+                return true;
+            }
+        }
+
         return false;
     }
 

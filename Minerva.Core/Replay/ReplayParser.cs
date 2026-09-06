@@ -15,6 +15,11 @@ public sealed class ReplayTimeline
     public required string GameVersion { get; init; }
     public required IReadOnlyList<(long Ticks, WorldState.Operation Op)> Ops { get; init; }
 
+    /// <summary>Instance ID of the character the recording was made from, or 0 for a log written
+    /// before the POV was recorded. Seed <see cref="PartyState.PlayerInstanceID"/> with it, or
+    /// <c>Raid.Player()</c> resolves to whoever is first in the party list instead.</summary>
+    public ulong PlayerInstanceID { get; init; }
+
     public long StartTicks => this.Ops.Count > 0 ? this.Ops[0].Ticks : 0;
     public long EndTicks => this.Ops.Count > 0 ? this.Ops[^1].Ticks : 0;
     public long DurationTicks => System.Math.Max(0, this.EndTicks - this.StartTicks);
@@ -36,8 +41,9 @@ public sealed class ReplayParser
     public static ReplayParser Replay(TextReader reader, Action<WorldState>? onCreated = null)
     {
         var header = reader.ReadLine() ?? throw new InvalidDataException("empty replay");
-        var (qpf, gameVersion) = ParseHeader(header);
+        var (qpf, gameVersion, format, pov) = ParseHeader(header);
         var ws = new WorldState(qpf, gameVersion);
+        ws.Party.PlayerInstanceID = pov;
         var parser = new ReplayParser(ws);
         onCreated?.Invoke(ws); // let observers subscribe before playback
 
@@ -46,7 +52,7 @@ public sealed class ReplayParser
         {
             if (line.Length == 0)
                 continue;
-            var op = ParseLine(line);
+            var op = ParseLine(line, format);
             if (op != null)
                 ws.Execute(op);
         }
@@ -60,7 +66,7 @@ public sealed class ReplayParser
     public static ReplayTimeline ParseTimeline(TextReader reader)
     {
         var header = reader.ReadLine() ?? throw new InvalidDataException("empty replay");
-        var (qpf, gameVersion) = ParseHeader(header);
+        var (qpf, gameVersion, format, pov) = ParseHeader(header);
 
         var ops = new List<(long, WorldState.Operation)>();
         var frameTicks = 0L; // real time of the frame currently being read
@@ -75,29 +81,40 @@ public sealed class ReplayParser
             var r = new OpTokenReader(line, sp + 1);
             var fourCC = r.FourCC;
             r.SkipTag();
-            var op = Build(fourCC, r);
+            var op = Build(fourCC, r, format);
             if (op == null)
                 continue;
             if (op is WorldState.OpFrameStart fs && fs.Frame.Timestamp.Ticks != 0)
                 frameTicks = fs.Frame.Timestamp.Ticks; // frames define the clock; other ops inherit it
             ops.Add((frameTicks, op));
         }
-        return new ReplayTimeline { QPF = qpf, GameVersion = gameVersion, Ops = ops };
+        return new ReplayTimeline { QPF = qpf, GameVersion = gameVersion, Ops = ops, PlayerInstanceID = pov };
     }
 
-    private static (ulong qpf, string version) ParseHeader(string header)
+    private static (ulong qpf, string version, int format, ulong pov) ParseHeader(string header)
     {
         var r = new OpTokenReader(header);
         if (r.FourCC != ReplayRecorder.Magic)
             throw new InvalidDataException($"not a Minerva replay (got '{r.FourCC}')");
         r.SkipTag();
-        _ = r.NextInt();          // format version
+        var format = r.NextInt();
         var qpf = r.NextU64();
         var version = r.HasMore ? r.NextString() : "unknown";
-        return (qpf, version);
+        var pov = r.HasMore ? r.NextHex64() : 0uL;   // absent in logs written before the POV was recorded
+        return (qpf, version, format, pov);
     }
 
-    private static WorldState.Operation? ParseLine(string line)
+    /// <summary>
+    /// Reorder a version-1 EAnim state into the current ordering.
+    /// <para>Version 1 packed it <c>p1 | (p2 &lt;&lt; 16)</c>; version 2 packs it <c>(p1 &lt;&lt; 16) | p2</c> to
+    /// match BossmodReborn, which is what every ported module's state constant is written against. Old logs
+    /// are rewritten on read rather than left to decode into states no module recognises — a recording that
+    /// silently stops triggering a mechanic is worse than one that fails loudly.</para>
+    /// </summary>
+    private static uint FixEAnimOrder(uint state, int format)
+        => format >= 2 ? state : ((state & 0xFFFFu) << 16) | (state >> 16);
+
+    private static WorldState.Operation? ParseLine(string line, int format)
     {
         var sp = line.IndexOf(' ');
         if (sp < 0)
@@ -106,14 +123,16 @@ public sealed class ReplayParser
         var r = new OpTokenReader(line, sp + 1);
         var fourCC = r.FourCC;
         r.SkipTag();
-        return Build(fourCC, r);
+        return Build(fourCC, r, format);
     }
 
-    private static WorldState.Operation? Build(string tag, OpTokenReader r) => tag switch
+    private static WorldState.Operation? Build(string tag, OpTokenReader r, int format) => tag switch
     {
         "FRAM" => BuildFrame(r),
         "ZONE" => new WorldState.OpZoneChange((ushort)r.NextU32(), (ushort)r.NextU32()),
         "ENVC" => new WorldState.OpMapEffect((byte)r.NextHex32(), r.NextHex32()),
+        "WAY+" => new WaymarkState.OpWaymarkChange((Waymark)r.NextU32(), new Vector3(r.NextFloat(), r.NextFloat(), r.NextFloat())),
+        "WAY-" => new WaymarkState.OpWaymarkChange((Waymark)r.NextU32(), null),
         "DIRU" => new WorldState.OpDirectorUpdate(r.NextHex32(), r.NextHex32(), r.NextHex32(), r.NextHex32(), r.NextHex32(), r.NextHex32()),
         "RSV " or "RSV" => new WorldState.OpRSVData(r.NextString(), r.NextString()),
         "PAR " or "PAR" => new PartyState.OpModify(r.NextInt(), new PartyState.Member(r.NextHex64(), r.NextHex64())),
@@ -132,7 +151,8 @@ public sealed class ReplayParser
         "ESTA" => new ActorState.OpEventState(r.NextHex64(), (byte)r.NextU32()),
         "RFLG" => new ActorState.OpRenderflags(r.NextHex64(), (int)r.NextHex32()),
         "EOBS" => new ActorState.OpActorEState(r.NextHex64(), (ushort)r.NextU32()),
-        "EOBA" => new ActorState.OpActorEAnim(r.NextHex64(), r.NextHex32()),
+        "EOBA" => new ActorState.OpActorEAnim(r.NextHex64(), FixEAnimOrder(r.NextHex32(), format)),
+        "FRAY" => new ActorState.OpForayInfo(r.NextHex64(), new ActorForayInfo((byte)r.NextU32(), (byte)r.NextU32())),
         "DIE+" => new ActorState.OpDead(r.NextHex64(), true),
         "DIE-" => new ActorState.OpDead(r.NextHex64(), false),
         "COM+" => new ActorState.OpCombat(r.NextHex64(), true),
@@ -142,10 +162,12 @@ public sealed class ReplayParser
         "CST+" => BuildCastInfo(r),
         "CST-" => new ActorState.OpCastInfo(r.NextHex64(), null),
         "CST!" => BuildCastEvent(r),
+        "IEFF" => BuildIncomingEffect(r),
         "STA+" => BuildStatusGain(r),
         "STA-" => BuildStatusLose(r),
         "ICON" => new ActorState.OpIcon(r.NextHex64(), r.NextU32(), r.NextHex64()),
         "VFX " or "VFX" => new ActorState.OpVFX(r.NextHex64(), r.NextU32(), r.NextHex64()),
+        "DODG" => OpDodgeDecision.Read(r),
         _ => null, // unknown/ignored op
     };
 
@@ -187,6 +209,13 @@ public sealed class ReplayParser
             ElapsedTime = r.NextFloat(),
             TotalTime = r.NextFloat(),
         };
+        // optional: recordings made before the cast location was captured simply end here
+        if (r.HasMore)
+        {
+            var loc = r.NextVec4();
+            cast.Location = new Vector3(loc.X, loc.Y, loc.Z);
+        }
+
         return new ActorState.OpCastInfo(id, cast);
     }
 
@@ -197,7 +226,35 @@ public sealed class ReplayParser
         var target = r.NextHex64();
         var rotation = r.NextAngleDeg();
         var seq = r.NextU32();
-        return new ActorState.OpCastEvent(id, new ActorCastEvent(action, target, rotation, default, seq));
+        var ev = new ActorCastEvent(action, target, rotation, default, seq);
+        // targets are optional: recordings made before they were captured simply end here
+        if (r.HasMore)
+        {
+            var count = r.NextInt();
+            for (var i = 0; i < count && r.HasMore; ++i)
+            {
+                var targetID = r.NextHex64();
+                var effects = new ulong[ActorCastEvent.Target.MaxEffects];
+                for (var j = 0; j < effects.Length && r.HasMore; ++j)
+                    effects[j] = r.NextHex64();
+                ev.Targets.Add(new ActorCastEvent.Target(targetID, effects));
+            }
+        }
+        return new ActorState.OpCastEvent(id, ev);
+    }
+
+    private static WorldState.Operation BuildIncomingEffect(OpTokenReader r)
+    {
+        var id = r.NextHex64();
+        var index = r.NextInt();
+        var seq = r.NextU32();
+        var targetIndex = r.NextInt();
+        var source = r.NextHex64();
+        var action = ActionID.MakeSpell(r.NextHex32());
+        var effects = new ulong[ActorCastEvent.Target.MaxEffects];
+        for (var i = 0; i < effects.Length && r.HasMore; ++i)
+            effects[i] = r.NextHex64();
+        return new ActorState.OpIncomingEffect(id, index, new ActorIncomingEffect(seq, targetIndex, source, action, effects));
     }
 
     private static WorldState.Operation BuildStatusGain(OpTokenReader r)

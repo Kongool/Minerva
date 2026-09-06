@@ -144,7 +144,7 @@ sealed class Stonecarver(ModuleBase module) : Components.GenericAOEs(module)
         base.AddAIHints(slot, actor, assignment, hints);
         if (AOEs.Count != 0)
         {
-            hints.AddForbiddenZone(new SDInvertedRect(Arena.Center, new WDir(1f, default), 1.5f, 1.5f, 40f), _kb!.Casters.Count != 0 ? _kb.Casters.Ref(0).Activation : AOEs.Ref(0).Activation);
+            hints.AddForbiddenZone(new SDInvertedRect(Center, new WDir(1f, default), 1.5f, 1.5f, 40f), _kb!.Casters.Count != 0 ? _kb.Casters.Ref(0).Activation : AOEs.Ref(0).Activation);
         }
     }
 }
@@ -205,7 +205,7 @@ abstract class Impact(ModuleBase module, uint aid, float distance) : Components.
             var dist = Distance;
 
             // square intentionally slightly smaller to prevent sus knockback
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, c.Origin, dist, halfWidth), c.Activation);
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Center, c.Origin, dist, halfWidth), c.Activation);
         }
     }
 }
@@ -216,7 +216,7 @@ sealed class Impact2(ModuleBase module) : Impact(module, (uint)AID.Impact2, 18f)
 {
     private readonly Stonecarver _aoe = module.FindComponent<Stonecarver>()!;
 
-    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos) => _aoe.AOEs.Count != 0 && _aoe.AOEs.Ref(0).Check(pos) || !Arena.InBounds(pos);
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos) => _aoe.AOEs.Count != 0 && _aoe.AOEs.Ref(0).Check(pos) || !InBounds(pos);
 }
 
 sealed class Impact3(ModuleBase module) : Impact(module, (uint)AID.Impact3, 20f)

@@ -119,3 +119,17 @@ public class SimpleAOEs(ModuleBase module, uint aid, AOEShape shape, int maxCast
             this.Casters.RemoveAll(c => c.ActorID == caster.InstanceID);
     }
 }
+
+/// <summary>
+/// A <see cref="SimpleAOEs"/> that also records the hit as predicted raidwide damage (a proximity AOE
+/// nobody fully escapes). Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class ProximityAOEs(ModuleBase module, uint aid, float radius) : SimpleAOEs(module, aid, radius)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        if (this.Casters.Count != 0)
+            hints.AddPredictedDamage(this.World.Party.WithSlot().Mask(), this.Casters[0].Activation);
+    }
+}

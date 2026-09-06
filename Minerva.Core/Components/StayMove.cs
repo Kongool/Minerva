@@ -46,6 +46,27 @@ public class StayMove(ModuleBase module, double maxTimeToShowHint = 1e3d) : Modu
             this.PlayerStates[slot] = default;
     }
 
+    /// <summary>
+    /// Publish the requirement as a machine-readable special mode, so consumers other than the hint text
+    /// can act on it — the auto-dodge (don't steer into a stand-still punisher) and, via the plugin's IPC,
+    /// a rotation plugin that must stop casting while "stop everything" is up.
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (slot < 0 || slot >= this.PlayerStates.Length)
+            return;
+        ref readonly var state = ref this.PlayerStates[slot];
+        var mode = state.Requirement switch
+        {
+            Requirement.Stay => AIHints.SpecialMode.Pyretic,    // any action OR movement punishes
+            Requirement.Stay2 => AIHints.SpecialMode.NoMovement, // movement punishes, actions are fine
+            Requirement.Move => AIHints.SpecialMode.Freezing,    // standing still punishes
+            _ => AIHints.SpecialMode.Normal,
+        };
+        if (mode != AIHints.SpecialMode.Normal)
+            hints.AddSpecialMode(mode, state.Activation, state.Finish);
+    }
+
     // set a player's requirement, but only if the new priority is at least the current one
     protected void SetState(int slot, in PlayerState state)
     {

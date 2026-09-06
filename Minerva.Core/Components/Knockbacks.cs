@@ -9,8 +9,24 @@ namespace Minerva.Components;
 /// THIRD-PARTY-NOTICES.txt), simplified for Minerva's local-player focus — party-wide status-immunity
 /// tracking and wall-segment ray tests are omitted (Minerva has no party state / ray-bounds helper).
 /// </summary>
-public abstract class GenericKnockback(ModuleBase module, uint aid = default, int maxCasts = int.MaxValue, bool stopAtWall = false) : CastCounter(module, aid)
+public abstract class GenericKnockback(ModuleBase module, uint aid = default, int maxCasts = int.MaxValue, bool stopAtWall = false, bool stopAfterWall = false) : CastCounter(module, aid)
 {
+    /// <summary>
+    /// Draw where a knockback puts someone: a ghost marker at the destination and a line showing the path.
+    /// Static because ported modules call it from components that are not knockbacks themselves, to preview
+    /// a displacement they are reasoning about.
+    /// </summary>
+    public static void DrawKnockback(WPos from, WPos to, Angle rot, Arena arena)
+    {
+        if (from == to)
+            return;
+        arena.ActorProjected(from, to, rot, Colors.Danger);
+        arena.AddLine(from, to);
+    }
+
+    public static void DrawKnockback(Actor actor, WPos adjustedPos, Arena arena)
+        => DrawKnockback(actor.Position, adjustedPos, actor.Rotation, arena);
+
     public enum Kind
     {
         None,
@@ -53,11 +69,42 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
     }
 
     public bool StopAtWall = stopAtWall;   // wall is solid: the push stops at the boundary rather than crossing it
+
+    /// <summary>The push carries you INTO the wall and leaves you there, rather than being stopped by it.
+    /// <para>Different from <see cref="StopAtWall"/> in what it means for safety: stopping at the wall keeps
+    /// you inside the arena, so the destination is fine; ending up in the wall does not, so a destination
+    /// outside the boundary is still a destination -- it just is not a death by falling.</para></summary>
+    public bool StopAfterWall = stopAfterWall;
     public readonly int MaxCasts = maxCasts;
 
-    /// <summary>Whether the player in <paramref name="slot"/> is knockback-immune at <paramref name="time"/>.
-    /// Minerva does not track status immunity, so this is always false (knockbacks are always shown).</summary>
-    public bool IsImmune(int slot, DateTime time) => false;
+    /// <summary>
+    /// Immunity buffs held by each party member. Modules may set an entry directly for an immunity the
+    /// status table cannot see — a duty mechanic that grants it without a status.
+    /// </summary>
+    public readonly PlayerImmuneState[] PlayerImmunes = new PlayerImmuneState[PartyState.MaxSlots];
+
+    /// <summary>
+    /// Whether the player in <paramref name="slot"/> is knockback-immune at <paramref name="time"/>.
+    ///
+    /// <para>This was hardcoded to <c>false</c>, on the reasoning that showing a knockback that cannot
+    /// happen is safer than hiding one that can. True as far as safety goes, but the cost was uptime: a
+    /// dozen landed modules already ask this before forbidding ground, so a player holding Arm's Length was
+    /// still being walked out of a shove that could not move them. Tracking it properly makes those modules
+    /// behave the way they were written to.</para>
+    /// </summary>
+    public bool IsImmune(int slot, DateTime time)
+        => slot >= 0 && slot < PartyState.MaxSlots && this.PlayerImmunes[slot].ImmuneAt(time);
+
+    public override void OnStatusGain(Actor actor, ref ActorStatus status) => this.TrackImmunity(actor, status.ID, status.ExpireAt);
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status) => this.TrackImmunity(actor, status.ID, default);
+
+    private void TrackImmunity(Actor actor, uint sid, DateTime expireAt)
+    {
+        var slot = this.World.Party.FindSlot(actor.InstanceID);
+        if (slot >= 0)
+            ImmunityStatuses.Track(ref this.PlayerImmunes[slot], sid, expireAt);
+    }
 
     public static WPos AwayFromSource(WPos pos, WPos origin, float distance) => pos != origin ? pos + distance * (pos - origin).Normalized() : pos;
     public static WPos AwayFromSource(WPos pos, Actor? source, float distance) => source != null ? AwayFromSource(pos, source.Position, distance) : pos;

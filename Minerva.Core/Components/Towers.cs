@@ -10,13 +10,33 @@ namespace Minerva.Components;
 /// </summary>
 public class GenericTowers(ModuleBase module, uint aid = default, bool prioritizeInsufficient = false) : CastCounter(module, aid)
 {
+    /// <summary>
+    /// Draw one tower: a filled circle when you should be soaking it, an outline when you should not. Static
+    /// because modules with their own tower bookkeeping draw through it rather than through the component.
+    /// </summary>
+    /// <summary>Outline a plain circular tower without needing a <see cref="Tower"/> to hold it.</summary>
+    public static void DrawTower(Arena arena, WPos pos, float radius, bool shouldSoak)
+        => arena.ZoneCircleOutline(pos, radius, shouldSoak ? Colors.Safe : Colors.Danger, 2f);
+
+    public static void DrawTower(Arena arena, ref Tower t, bool shouldSoak)
+    {
+        // Drawn through the tower's own shape rather than as a circle: Minerva's towers carry an AOEShape,
+        // and some fights use rectangles or cones for them.
+        if (shouldSoak)
+            arena.ZoneShape(t.Shape, t.Position, t.Rotation, Colors.SafeFromAOE);
+        else
+            arena.OutlineShape(t.Shape, t.Position, t.Rotation, Colors.Danger);
+    }
+
     public struct Tower
     {
-        public Tower(WPos position, float radius, int minSoakers = 1, int maxSoakers = 1, BitMask forbiddenSoakers = default, DateTime activation = default, ulong actorID = default)
-            : this(position, new AOEShapeCircle(radius), minSoakers, maxSoakers, forbiddenSoakers, activation, default, actorID) { }
+        public Tower(WPos position, float radius, int minSoakers = 1, int maxSoakers = 1, BitMask forbiddenSoakers = default, DateTime activation = default, ulong actorID = default, ShapeDistance? shapeDistance = null, ShapeDistance? invertedShapeDistance = null)
+            : this(position, new AOEShapeCircle(radius), minSoakers, maxSoakers, forbiddenSoakers, activation, default, actorID, shapeDistance, invertedShapeDistance) { }
 
-        public Tower(WPos position, AOEShape shape, int minSoakers = 1, int maxSoakers = 1, BitMask forbiddenSoakers = default, DateTime activation = default, Angle rotation = default, ulong actorID = default)
+        public Tower(WPos position, AOEShape shape, int minSoakers = 1, int maxSoakers = 1, BitMask forbiddenSoakers = default, DateTime activation = default, Angle rotation = default, ulong actorID = default, ShapeDistance? shapeDistance = null, ShapeDistance? invertedShapeDistance = null)
         {
+            this.ShapeDistance = shapeDistance;
+            this.InvertedShapeDistance = invertedShapeDistance;
             this.Position = position;
             this.Shape = shape;
             this.MinSoakers = minSoakers;
@@ -26,6 +46,17 @@ public class GenericTowers(ModuleBase module, uint aid = default, bool prioritiz
             this.Rotation = rotation;
             this.ActorID = actorID;
         }
+
+        /// <summary>
+        /// A precomputed distance field for this tower, when the shape alone cannot express it — a donut
+        /// sector cut by an arena edge, say. Null means "derive it from <see cref="Shape"/>", which is the
+        /// normal case; a module supplies one only when it has already done boolean geometry the shape
+        /// vocabulary has no way to name.
+        /// </summary>
+        public ShapeDistance? ShapeDistance;
+
+        /// <summary>The same field inverted — the "you must be inside this tower" form.</summary>
+        public ShapeDistance? InvertedShapeDistance;
 
         public WPos Position;
         public Angle Rotation;

@@ -1,41 +1,41 @@
-using System;
 using Lumina.Excel;
 using Minerva.Generation;
 using LuminaAction = Lumina.Excel.Sheets.Action;
+using LuminaOmen = Lumina.Excel.Sheets.Omen;
 
 namespace Minerva.Generation;
 
 /// <summary>
-/// Resolves action shapes from the game's Action sheet (CastType/EffectRange/XAxisModifier) via
-/// Lumina. This is what turns the generator's output from "compiling stubs" into real
-/// <c>AOEShape*</c> constructions for the majority of mechanics. Values the sheet doesn't carry —
-/// cone half-angle, donut inner radius (they live in the Omen data) — are filled with sensible
-/// defaults and flagged <see cref="ShapeHint.NeedsReview"/> so the generator emits a TODO.
+/// Reads an action's shape out of the game's Action sheet (CastType/EffectRange/XAxisModifier) via Lumina.
+/// This is what turns the generator's output from "compiling stubs" into real <c>AOEShape*</c>
+/// constructions for the majority of mechanics.
+/// <para>Only the lookup lives here. The CastType table itself is <see cref="CastTypeShapes"/>, in the
+/// game-free core, so it can be tested — it is a copied table with no derivable logic, and two wrong
+/// entries in it produced shapes that silently contained nothing.</para>
+/// <para>The Action sheet does not carry a cone's angle; that lives in the Omen row it points at, whose
+/// VFX path encodes it by name (<c>gl_fan120_1bf</c> = a 120-degree cone), so the path is passed along.</para>
 /// </summary>
 public sealed class LuminaShapeResolver : IShapeResolver
 {
     private readonly ExcelSheet<LuminaAction>? sheet;
+    private readonly ExcelSheet<LuminaOmen>? omens;
 
-    public LuminaShapeResolver() => this.sheet = Service.DataManager.GetExcelSheet<LuminaAction>();
+    public LuminaShapeResolver()
+    {
+        this.sheet = Service.DataManager.GetExcelSheet<LuminaAction>();
+        this.omens = Service.DataManager.GetExcelSheet<LuminaOmen>();
+    }
 
     public ShapeHint Resolve(uint aid)
     {
         if (this.sheet == null || !this.sheet.TryGetRow(aid, out var a))
             return ShapeHint.Unknown;
 
-        float range = a.EffectRange;
-        float halfWidth = a.XAxisModifier / 2f;
+        var omenID = a.Omen.RowId;
+        var omenPath = omenID != 0 && this.omens != null && this.omens.TryGetRow(omenID, out var omen)
+            ? omen.Path.ExtractText()
+            : null;
 
-        // CastType classifies the aim geometry; EffectRange/XAxisModifier size it.
-        return a.CastType switch
-        {
-            2 or 5 or 6 => new ShapeHint(ShapeKind.Circle, Radius: range),
-            3 or 13 => new ShapeHint(ShapeKind.Cone, Radius: range, HalfAngleDeg: 45f, NeedsReview: true), // angle is in the omen, not the sheet
-            4 or 7 or 10 or 12 => new ShapeHint(ShapeKind.Rect, Radius: range, HalfWidth: halfWidth),
-            8 => new ShapeHint(ShapeKind.Donut, Radius: range, InnerRadius: MathF.Round(range * 0.4f), NeedsReview: true),
-            11 => new ShapeHint(ShapeKind.Cross, Radius: range, HalfWidth: halfWidth, NeedsReview: true),
-            1 => new ShapeHint(ShapeKind.SingleTarget),
-            _ => ShapeHint.Unknown,
-        };
+        return CastTypeShapes.Resolve(a.CastType, a.EffectRange, a.XAxisModifier, omenPath);
     }
 }

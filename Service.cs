@@ -21,6 +21,15 @@ internal sealed class Service
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static IDutyState DutyState { get; private set; } = null!;
+    [PluginService] internal static IFateTable FateTable { get; private set; } = null!;
+
+    /// <summary>
+    /// Encounter-specific settings, addressed by node type: <c>Service.Config.Get&lt;FRUConfig&gt;()</c>.
+    /// <para>Spelled the way BossmodReborn spells it so ported modules reach their strategy settings
+    /// unchanged. The root itself lives in Minerva.Core and is always usable — modules read their config in
+    /// their constructors, and the offline validator builds modules with no plugin at all.</para>
+    /// </summary>
+    internal static ConfigRoot Config => ConfigRoot.Instance;
 
     // --- GameSync / radar (declared ahead of Phase 2) ---
     [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
@@ -31,4 +40,5 @@ internal sealed class Service
     [PluginService] internal static IGameInteropProvider GameInterop { get; private set; } = null!;
     [PluginService] internal static IGameConfig GameConfig { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
+    [PluginService] internal static IDtrBar DtrBar { get; private set; } = null!;
 }

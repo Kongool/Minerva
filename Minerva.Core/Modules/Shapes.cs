@@ -1,8 +1,5 @@
 namespace Minerva;
 
-/// <summary>How a secondary shape list is combined with the primary one in <see cref="AOEShapeCustom"/>.</summary>
-public enum OperandType { Union, Intersection, Xor, Difference }
-
 /// <summary>
 /// A geometric operand used to compose custom arenas / AOEs (see <see cref="ArenaBoundsCustom"/> and
 /// <see cref="AOEShapeCustom"/>). Unlike <see cref="AOEShape"/> these carry absolute world positions and
@@ -13,6 +10,14 @@ public enum OperandType { Union, Intersection, Xor, Difference }
 /// </summary>
 public abstract class Shape
 {
+    /// <summary>
+    /// This shape as a polygon relative to <paramref name="center"/>, for boolean composition. The contour
+    /// is already a polygon approximation for curves, so this is exact to the same tessellation the shape
+    /// hit-tests against — a clipped arena cannot disagree with the shape it was built from.
+    /// </summary>
+    public RelSimplifiedComplexPolygon ToPolygon(WPos center)
+        => new([new RelPolygonWithHoles([.. this.Contour(center)])]);
+
     protected const int Segments = 60;
 
     /// <summary>Is the absolute world point inside this shape?</summary>
@@ -20,6 +25,32 @@ public abstract class Shape
 
     /// <summary>Closed outline of this shape in absolute world space (for drawing).</summary>
     public abstract IReadOnlyList<WPos> ContourWorld();
+
+    /// <summary>
+    /// Signed distance to this shape's boundary — negative inside. The auto-dodge samples this once per grid
+    /// cell per forbidden zone, so the default (walking the contour polygon) is a last resort: a donut
+    /// segment's contour is 120 points, and thirteen of them across a 40x40 grid is over two million edge
+    /// tests per solve. Shapes that can answer analytically should override it, and the ones the dodge meets
+    /// most — circles and the ring segments a line-of-sight safe zone is built from — do.
+    /// </summary>
+    public virtual float SignedDistance(WPos p)
+    {
+        var contour = this.ContourWorld();
+        var n = contour.Count;
+        if (n < 2)
+            return float.MaxValue;
+        var best = float.MaxValue;
+        for (int i = 0, j = n - 1; i < n; j = i++)
+        {
+            var a = contour[j];
+            var ab = contour[i] - a;
+            var lenSq = ab.LengthSq();
+            var tt = lenSq > 1e-6f ? Math.Clamp(WDir.Dot(p - a, ab) / lenSq, 0f, 1f) : 0f;
+            best = MathF.Min(best, (p - (a + (ab * tt))).Length());
+        }
+
+        return this.Contains(p) ? -best : best;
+    }
 
     /// <summary>BMR-compatible: outline as offsets from the given center.</summary>
     public List<WDir> Contour(WPos center)
@@ -66,6 +97,7 @@ public sealed class Circle(WPos center, float radius) : Shape
     public readonly WPos Center = center;
     public readonly float Radius = radius;
     public override bool Contains(WPos p) => p.InCircle(this.Center, this.Radius);
+    public override float SignedDistance(WPos p) => (p - this.Center).Length() - this.Radius;
     public override IReadOnlyList<WPos> ContourWorld() => Arc(this.Center, this.Radius, default, Angle.TwoPI.Radians(), Segments);
 }
 
@@ -93,8 +125,20 @@ public sealed class DonutV(WPos center, float innerRadius, float outerRadius, in
 public class Rectangle(WPos center, float halfWidth, float halfHeight, Angle rotation = default) : Shape
 {
     public readonly WPos Center = center;
-    public readonly float HalfWidth = halfWidth;
-    public readonly float HalfHeight = halfHeight;
+
+    /// <summary>
+    /// Half-extents, mutable as BossmodReborn has them: a fight that breaks its floor collapses a tile by
+    /// zeroing these rather than rebuilding the shape list.
+    ///
+    /// <para><see cref="Contains"/> and <see cref="ContourWorld"/> recompute from them every call, so a
+    /// mutation takes effect immediately HERE. Anything that cached a polygon built from this shape —
+    /// <c>ArenaBounds</c> does — must be rebuilt by the caller; the shape cannot tell it to.</para>
+    /// </summary>
+    public float HalfWidth = halfWidth;
+
+    /// <inheritdoc cref="HalfWidth"/>
+    public float HalfHeight = halfHeight;
+
     public readonly Angle Rotation = rotation;
 
     public override bool Contains(WPos p)
@@ -179,6 +223,31 @@ public sealed class PolygonCustom(WPos[] vertices) : Shape
     public override IReadOnlyList<WPos> ContourWorld() => this.Vertices;
 }
 
+/// <summary>
+/// A polygon given as offsets from a centre rather than as world points.
+///
+/// <para>The form a clipped or shadow-cast polygon comes back in — <c>RelSimplifiedComplexPolygon</c>
+/// works in arena-relative space, so anything derived from it (a line-of-sight visibility region, a
+/// carved-out floor) is naturally relative. Converted to world points against <paramref name="origin"/>
+/// on construction so the rest of the shape machinery, which is world-space, needs no special case.</para>
+/// </summary>
+public sealed class PolygonCustomRel : Shape
+{
+    public readonly WDir[] Vertices;
+    private readonly WPos[] world;
+
+    public PolygonCustomRel(WDir[] vertices, WPos origin = default)
+    {
+        this.Vertices = vertices;
+        this.world = new WPos[vertices.Length];
+        for (var i = 0; i < vertices.Length; ++i)
+            this.world[i] = origin + vertices[i];
+    }
+
+    public override bool Contains(WPos p) => InPolygon(this.world, p);
+    public override IReadOnlyList<WPos> ContourWorld() => this.world;
+}
+
 /// <summary>A circular sector from <paramref name="startAngle"/> to <paramref name="endAngle"/>.</summary>
 public class Cone(WPos center, float radius, Angle startAngle, Angle endAngle) : Shape
 {
@@ -246,7 +315,47 @@ public class DonutSegment(WPos center, float innerRadius, float outerRadius, Ang
             pts.Add(inner[i]);
         return pts;
     }
+
+    /// <summary>
+    /// Analytic signed distance. Inside the wedge the nearest boundary is one of the two arcs, so the answer
+    /// is purely radial; outside it, the nearest boundary is one of the two straight edges. Both are O(1),
+    /// which is what keeps a line-of-sight safe zone — thirteen of these unioned — solvable every frame.
+    /// </summary>
+    public override float SignedDistance(WPos p)
+    {
+        var v = p - this.Center;
+        var dist = v.Length();
+        var halfSigned = (this.EndAngle - this.StartAngle).Rad * 0.5f;
+        var half = MathF.Abs(halfSigned);
+        var mid = new Angle(this.StartAngle.Rad + halfSigned);
+        var signedOff = (Angle.FromDirection(v) - mid).Normalized().Rad;
+        var off = MathF.Abs(signedOff);
+        var radial = MathF.Max(this.InnerRadius - dist, dist - this.OuterRadius);
+
+        if (off <= half)
+        {
+            // Inside the wedge every boundary is a candidate, not just the two arcs: near an edge the closest
+            // way out is sideways. Both terms are negative in here, so the nearest boundary is the larger.
+            var toEdge = -dist * MathF.Sin(half - off);
+            return MathF.Max(radial, toEdge);
+        }
+
+        // outside the wedge — measure to the nearer straight edge, clamped to the ring
+        var edge = new Angle(mid.Rad + (half * (signedOff < 0f ? -1f : 1f))).ToDirection();
+        var along = Math.Clamp(WDir.Dot(v, edge), this.InnerRadius, this.OuterRadius);
+        return (v - (edge * along)).Length();
+    }
 }
+
+/// <summary>
+/// A donut segment tessellated with an explicit <paramref name="edges"/> count.
+/// <para>Arenas built from boolean operations use it so the polygon they clip against carries exactly the
+/// vertices the fight's geometry needs. Minerva's <see cref="DonutSegment"/> already tessellates at a fixed
+/// resolution, so <paramref name="edges"/> is currently advisory — a segment asking for more detail than
+/// that gets the default. Worth revisiting if a clipped arena ever visibly cuts a corner.</para>
+/// </summary>
+public sealed class DonutSegmentV(WPos center, float innerRadius, float outerRadius, Angle centerDir, Angle halfAngle, int edges)
+    : DonutSegment(center, innerRadius, outerRadius, centerDir - halfAngle, centerDir + halfAngle);
 
 /// <summary>A ring segment specified by a center direction and half-angle.</summary>
 public sealed class DonutSegmentHA(WPos center, float innerRadius, float outerRadius, Angle centerDir, Angle halfAngle)

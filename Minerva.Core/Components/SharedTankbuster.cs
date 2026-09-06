@@ -75,14 +75,22 @@ public class IconSharedTankbuster(ModuleBase module, uint iconId, uint aid, AOES
 {
     public IconSharedTankbuster(ModuleBase module, uint iconId, uint aid, float radius, double activationDelay = 5.1d) : this(module, iconId, aid, new AOEShapeCircle(radius), activationDelay, true) { }
 
-    public readonly uint IconID = iconId;
+    /// <summary>
+    /// The icon this component waits for.
+    ///
+    /// <para>Spelled <c>IconId</c>, not <c>IconID</c>, and that matters: every ported module declares its
+    /// own <c>IconID</c> enum, and an inherited member of that exact name shadows it inside the subclass —
+    /// <c>(uint)IconID.Foo</c> then resolves to this field and fails to compile. BossmodReborn dodges it by
+    /// having no such member at all.</para>
+    /// </summary>
+    public readonly uint IconId = iconId;
     public readonly double ActivationDelay = activationDelay;
 
     public virtual Actor? BaitSource(Actor target) => this.Module.PrimaryActor;
 
     public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
     {
-        if (iconID == this.IconID)
+        if (iconID == this.IconId)
         {
             this.Source = this.BaitSource(actor);
             this.Target = actor;

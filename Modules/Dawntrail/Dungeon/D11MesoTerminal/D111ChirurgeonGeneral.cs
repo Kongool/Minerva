@@ -42,9 +42,9 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.MedicineField && Arena.Bounds.Radius > 20f)
+        if (spell.Action.ID == (uint)AID.MedicineField && Bounds.Radius > 20f)
         {
-            _aoe = [new(D111ChirurgeonGeneral.Square, Arena.Center, default, Module.CastFinishAt(spell, 0.8d))];
+            _aoe = [new(D111ChirurgeonGeneral.Square, Center, default, Module.CastFinishAt(spell, 0.8d))];
         }
     }
 
@@ -52,7 +52,7 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (index == 0x04 && state == 0x00020001u)
         {
-            Arena.Bounds = new ArenaBoundsSquare(20f);
+            Bounds = new ArenaBoundsSquare(20f);
             _aoe = [];
         }
     }
@@ -135,7 +135,7 @@ sealed class PungentAerosol(ModuleBase module) : Components.SimpleKnockbacks(mod
         if (!IsImmune(slot, act))
         {
             // square intentionally slightly smaller to prevent sus knockback
-            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Arena.Center, c.Origin, 24f, 19f), act);
+            hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Center, c.Origin, 24f, 19f), act);
         }
     }
 
@@ -150,7 +150,7 @@ sealed class PungentAerosol(ModuleBase module) : Components.SimpleKnockbacks(mod
                 return true;
             }
         }
-        return !Arena.InBounds(pos);
+        return !InBounds(pos);
     }
 }
 

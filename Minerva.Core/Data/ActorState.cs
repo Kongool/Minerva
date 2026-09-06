@@ -16,6 +16,66 @@ public sealed class ActorState : IEnumerable<Actor>
 
     public Actor? Find(ulong instanceID) => instanceID is not 0 and not InvalidEntityID ? this.Actors.GetValueOrDefault(instanceID) : null;
 
+    /// <summary>
+    /// Record what a resolved action is about to do, so it is known before the client draws it.
+    ///
+    /// <para>Three seconds of grace, matching BossmodReborn. That is a fallback, not a schedule: the real
+    /// end of a pending effect is the client applying it, and Minerva does not hook the confirmation
+    /// packet, so everything expires on the clock instead. Short enough that a stale entry cannot mislead
+    /// for long, long enough to cover the window the effect actually lives in. Some effects never confirm
+    /// at all — overkill damage, a heal into a full bar, a reapplied buff — so waiting for confirmation
+    /// would leak rather than settle.</para>
+    /// </summary>
+    public void AddPendingEffects(Actor source, ActorCastEvent ev, DateTime timestamp)
+    {
+        var expiration = timestamp.AddSeconds(3d);
+        for (var i = 0; i < ev.Targets.Count; ++i)
+        {
+            var t = ev.Targets[i];
+            var target = t.ID == source.InstanceID ? source : this.Find(t.ID);
+            if (target == null)
+                continue;
+
+            for (var j = 0; j < t.Effects.Length; ++j)
+            {
+                var eff = new ActionEffect(t.Effects[j]);
+                if (eff.Raw == 0uL)
+                    continue;
+
+                // an effect can be aimed back at the caster even on a targeted action (a self-buff)
+                var dst = eff.AtSource ? source : target;
+                var header = new PendingEffect(ev.GlobalSequence, i, source.InstanceID, expiration);
+                switch (eff.Type)
+                {
+                    case ActionEffectType.Damage:
+                    case ActionEffectType.BlockedDamage:
+                    case ActionEffectType.ParriedDamage:
+                        dst.PendingHPDifferences.Add(new(header, -eff.DamageHealValue));
+                        break;
+                    case ActionEffectType.Heal:
+                        dst.PendingHPDifferences.Add(new(header, +eff.DamageHealValue));
+                        break;
+                    case ActionEffectType.ApplyStatusEffectTarget:
+                    case ActionEffectType.ApplyStatusEffectSource:
+                        dst.PendingStatuses.Add(new(header, eff.Value, eff.Param2));
+                        break;
+                    case ActionEffectType.RecoveredFromStatusEffect:
+                    case ActionEffectType.LoseStatusEffectTarget:
+                    case ActionEffectType.LoseStatusEffectSource:
+                        dst.PendingDispels.Add(new(header, eff.Value));
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>Drop pending effects that were never confirmed, for every actor.</summary>
+    public void PruneExpiredPendingEffects(DateTime now)
+    {
+        foreach (var a in this.Actors.Values)
+            a.PruneExpiredPendingEffects(now);
+    }
+
     // --- per-change events ---
     public readonly Event<Actor> Added = new();
     public readonly Event<Actor> Removed = new();
@@ -52,6 +112,7 @@ public sealed class ActorState : IEnumerable<Actor>
             act.PrevPosRot = act.PosRot;
             if (act.CastInfo is { } cast)
                 cast.ElapsedTime = MathF.Min(cast.ElapsedTime + frame.Duration, cast.TotalTime);
+            act.PruneExpiredPendingEffects(frame.Timestamp);
         }
     }
 
@@ -187,32 +248,38 @@ public sealed class ActorState : IEnumerable<Actor>
 
     public sealed class OpTargetable(ulong instanceID, bool value) : Operation(instanceID)
     {
+        public readonly bool Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.IsTargetable = value;
+            actor.IsTargetable = this.Value;
             ws.Actors.IsTargetableChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag(value ? "ATG+" : "ATG-").Emit(this.InstanceID, "X");
+        public override void Write(OperationOutput o) => o.Tag(this.Value ? "ATG+" : "ATG-").Emit(this.InstanceID, "X");
     }
 
     public sealed class OpDead(ulong instanceID, bool value) : Operation(instanceID)
     {
+        public readonly bool Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.IsDead = value;
+            actor.IsDead = this.Value;
             ws.Actors.IsDeadChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag(value ? "DIE+" : "DIE-").Emit(this.InstanceID, "X");
+        public override void Write(OperationOutput o) => o.Tag(this.Value ? "DIE+" : "DIE-").Emit(this.InstanceID, "X");
     }
 
     public sealed class OpCombat(ulong instanceID, bool value) : Operation(instanceID)
     {
+        public readonly bool Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.InCombat = value;
+            actor.InCombat = this.Value;
             ws.Actors.InCombatChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag(value ? "COM+" : "COM-").Emit(this.InstanceID, "X");
+        public override void Write(OperationOutput o) => o.Tag(this.Value ? "COM+" : "COM-").Emit(this.InstanceID, "X");
     }
 
     public sealed class OpClassChange(ulong instanceID, Class cls) : Operation(instanceID)
@@ -229,12 +296,14 @@ public sealed class ActorState : IEnumerable<Actor>
 
     public sealed class OpTarget(ulong instanceID, ulong value) : Operation(instanceID)
     {
+        public readonly ulong Value = value;
+
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.TargetID = value;
+            actor.TargetID = this.Value;
             ws.Actors.TargetChanged.Fire(actor);
         }
-        public override void Write(OperationOutput o) => o.Tag("TARG").Emit(this.InstanceID, "X").Emit(value, "X");
+        public override void Write(OperationOutput o) => o.Tag("TARG").Emit(this.InstanceID, "X").Emit(this.Value, "X");
     }
 
     public sealed class OpTether(ulong instanceID, ActorTetherInfo value) : Operation(instanceID)
@@ -266,18 +335,66 @@ public sealed class ActorState : IEnumerable<Actor>
         public override void Write(OperationOutput o)
         {
             if (this.Value is { } c)
-                o.Tag("CST+").Emit(this.InstanceID, "X").Emit(c.Action.ID, "X").Emit(c.TargetID, "X").Emit(c.Rotation).Emit(c.ElapsedTime).Emit(c.TotalTime);
+                // Location is where a ground-targeted cast actually lands. Without it a replay can only fall
+                // back to the caster's position, which is wrong whenever a helper places a puddle from a
+                // parking spot — the AOE replays at the helper instead of on the floor it hit. Appended last
+                // so recordings written before it still parse (the reader stops when the tokens run out).
+                o.Tag("CST+").Emit(this.InstanceID, "X").Emit(c.Action.ID, "X").Emit(c.TargetID, "X").Emit(c.Rotation).Emit(c.ElapsedTime).Emit(c.TotalTime)
+                 .Emit(new Vector4(c.Location.X, c.Location.Y, c.Location.Z, 0f));
             else
                 o.Tag("CST-").Emit(this.InstanceID, "X");
         }
     }
 
     /// <summary>Cast resolved (snapshot). Event-only — no persistent actor state changes.</summary>
+    /// <summary>
+    /// One slot of an actor's incoming-effect ring changed.
+    ///
+    /// <para>Per slot rather than per actor because that is how the game updates it — a whole-ring op would
+    /// write 32 entries every time one changed, and a recording is mostly these.</para>
+    /// </summary>
+    public sealed class OpIncomingEffect(ulong instanceID, int index, ActorIncomingEffect value) : Operation(instanceID)
+    {
+        public readonly int Index = index;
+        public readonly ActorIncomingEffect Value = value;
+
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            if (this.Index >= 0 && this.Index < Actor.NumIncomingEffects)
+                actor.IncomingEffects[this.Index] = this.Value;
+        }
+
+        public override void Write(OperationOutput o)
+        {
+            o.Tag("IEFF").Emit(this.InstanceID, "X").Emit(this.Index).Emit(this.Value.GlobalSequence)
+             .Emit(this.Value.TargetIndex).Emit(this.Value.SourceInstanceID, "X").Emit(this.Value.Action.ID, "X");
+            for (var i = 0; i < ActorCastEvent.Target.MaxEffects; ++i)
+                o.Emit(i < this.Value.Effects.Length ? this.Value.Effects[i] : 0ul, "X");
+        }
+    }
+
     public sealed class OpCastEvent(ulong instanceID, ActorCastEvent value) : Operation(instanceID)
     {
         public readonly ActorCastEvent Value = value;
-        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.CastEvent.Fire(actor, this.Value);
-        public override void Write(OperationOutput o) => o.Tag("CST!").Emit(this.InstanceID, "X").Emit(this.Value.Action.ID, "X").Emit(this.Value.MainTargetID, "X").Emit(this.Value.Rotation).Emit(this.Value.GlobalSequence);
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            // record what the action is about to do BEFORE components see it, so a component asking
+            // "is this hit lethal" during OnEventCast gets the answer including this hit
+            ws.Actors.AddPendingEffects(actor, this.Value, ws.CurrentTime);
+            ws.Actors.CastEvent.Fire(actor, this.Value);
+        }
+        public override void Write(OperationOutput o)
+        {
+            o.Tag("CST!").Emit(this.InstanceID, "X").Emit(this.Value.Action.ID, "X").Emit(this.Value.MainTargetID, "X")
+             .Emit(this.Value.Rotation).Emit(this.Value.GlobalSequence).Emit(this.Value.Targets.Count);
+            // targets are appended last so a parser that stops early still reads a valid pre-targets event
+            foreach (var t in this.Value.Targets)
+            {
+                o.Emit(t.ID, "X");
+                for (var i = 0; i < ActorCastEvent.Target.MaxEffects; ++i)
+                    o.Emit(i < t.Effects.Length ? t.Effects[i] : 0ul, "X");
+            }
+        }
     }
 
     public sealed class OpStatus(ulong instanceID, int index, ActorStatus value) : Operation(instanceID)
@@ -307,8 +424,11 @@ public sealed class ActorState : IEnumerable<Actor>
     /// <summary>Overhead marker icon appeared on an actor. Event-only.</summary>
     public sealed class OpIcon(ulong instanceID, uint iconID, ulong targetID) : Operation(instanceID)
     {
-        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.IconAppeared.Fire(actor, new ActorIconEvent(iconID, targetID));
-        public override void Write(OperationOutput o) => o.Tag("ICON").Emit(this.InstanceID, "X").Emit(iconID).Emit(targetID, "X");
+        public readonly uint IconID = iconID;
+        public readonly ulong TargetID = targetID;
+
+        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.IconAppeared.Fire(actor, new ActorIconEvent(this.IconID, this.TargetID));
+        public override void Write(OperationOutput o) => o.Tag("ICON").Emit(this.InstanceID, "X").Emit(this.IconID).Emit(this.TargetID, "X");
     }
 
     /// <summary>A targeted VFX played on an actor. Event-only.</summary>
@@ -322,7 +442,11 @@ public sealed class ActorState : IEnumerable<Actor>
     public sealed class OpModelState(ulong instanceID, byte modelState) : Operation(instanceID)
     {
         public readonly byte ModelState = modelState;
-        protected override void ExecActor(WorldState ws, Actor actor) => ws.Actors.ModelStateChanged.Fire(actor, this.ModelState);
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            actor.ModelState = new(this.ModelState);
+            ws.Actors.ModelStateChanged.Fire(actor, this.ModelState);
+        }
         public override void Write(OperationOutput o) => o.Tag("MDLS").Emit(this.InstanceID, "X").Emit(this.ModelState);
     }
 
@@ -367,6 +491,21 @@ public sealed class ActorState : IEnumerable<Actor>
     }
 
     /// <summary>Event-object animation (EObjAnimation). Event-only.</summary>
+    public readonly Event<Actor, ActorForayInfo> ForayInfoChanged = new();
+
+    public sealed class OpForayInfo(ulong instanceID, ActorForayInfo value) : Operation(instanceID)
+    {
+        public readonly ActorForayInfo Value = value;
+
+        protected override void ExecActor(WorldState ws, Actor actor)
+        {
+            actor.ForayInfo = this.Value;
+            ws.Actors.ForayInfoChanged.Fire(actor, this.Value);
+        }
+
+        public override void Write(OperationOutput o) => o.Tag("FRAY").Emit(this.InstanceID, "X").Emit(this.Value.Level).Emit(this.Value.Element);
+    }
+
     public sealed class OpActorEAnim(ulong instanceID, uint state) : Operation(instanceID)
     {
         public readonly uint State = state;

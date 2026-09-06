@@ -1,0 +1,64 @@
+// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt). Auto-ported by tools/port_bmr_module.py;
+// review the MANUAL/MISSING items the porter reported (arena bounds, any unmapped components).
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Minerva;
+
+namespace Minerva.Endwalker.Savage.P5SProtoCarbuncle;
+
+// note: we start showing magic aoe only after double rush resolve
+class RubyGlow2(ModuleBase module) : RubyGlowCommon(module, (uint)AID.DoubleRush)
+{
+    private string _hint = "";
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        // TODO: correct explosion time
+        var stones = MagicStones;
+        var countS = stones.Count;
+        var stone = countS != 0 ? stones[0] : null;
+        var magic = NumCasts > 0 ? stone : null;
+
+        var poison = ActivePoisonAOEs();
+
+        var countSadj = magic != null ? 1 : 0;
+        var len = poison.Length;
+        var aoes = new AOEInstance[countSadj + len];
+        var index = 0;
+        if (magic != null)
+            aoes[index++] = new(ShapeHalf, Center, Angle.FromDirection(QuadrantDir(QuadrantForPosition(magic.Position))));
+        for (var i = 0; i < len; ++i)
+        {
+            aoes[index++] = poison[i];
+        }
+        return aoes;
+    }
+
+    public override void AddGlobalHints(GlobalHints hints)
+    {
+        if (_hint.Length > 0)
+            hints.Add(_hint);
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+        {
+            var stones = MagicStones;
+            var magic = stones.Count != 0 ? MagicStones[0] : null;
+            if (magic != null)
+            {
+                _hint = QuadrantDir(QuadrantForPosition(magic.Position)).Dot(spell.LocXZ - caster.Position) > 0 ? "Stay after charge" : "Swap sides after charge";
+            }
+        }
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+            _hint = "";
+    }
+}

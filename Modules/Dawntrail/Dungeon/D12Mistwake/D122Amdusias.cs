@@ -50,8 +50,28 @@ public enum SID : uint
     Burst = 2536 // none->PoisonCloud, extra=0x21E
 }
 
+// A 300-degree cone leaves only a 60-degree wedge to live in, so which way it points is the whole mechanic.
+// The two ids are NOT interchangeable: measured over 23 casts across seven pulls, ThunderclapConcerto1 never
+// hit a player standing 159-177 degrees off the cast rotation, while ThunderclapConcerto2 hit 9 of 11 in that
+// same arc and missed only the two who stood in front of it. The second cone is aimed the opposite way.
+// (BossmodReborn groups both ids under one shape and inherits the error; this deliberately differs from it.)
 [SkipLocalsInit]
-sealed class ThunderclapConcerto(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.ThunderclapConcerto1, (uint)AID.ThunderclapConcerto2], new AOEShapeCone(40f, 150f.Degrees()));
+sealed class ThunderclapConcerto(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ThunderclapConcerto1, ConcertoShape)
+{
+    public static readonly AOEShapeCone ConcertoShape = new(40f, 150f.Degrees());
+}
+
+[SkipLocalsInit]
+sealed class ThunderclapConcertoReversed(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ThunderclapConcerto2, ThunderclapConcerto.ConcertoShape)
+{
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID != this.WatchedAction)
+            return;
+        var origin = cast.LocXZ != default ? cast.LocXZ : caster.Position;
+        this.Casters.Add(new AOEInstance(this.Shape, origin, cast.Rotation + 180f.Degrees(), this.Module.CastFinishAt(cast), actorID: caster.InstanceID));
+    }
+}
 
 [SkipLocalsInit]
 sealed class ThunderIVBioII(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.ThunderIV, (uint)AID.BioII]);
@@ -188,6 +208,7 @@ sealed class D122AmdusiasStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<ThunderclapConcerto>()
+            .ActivateOnEnter<ThunderclapConcertoReversed>()
             .ActivateOnEnter<ThunderIII>()
             .ActivateOnEnter<ThunderIVBioII>()
             .ActivateOnEnter<Shockbolt>()
@@ -197,7 +218,7 @@ sealed class D122AmdusiasStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1064u, NameID = 14271u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
+[ModuleInfo(CFCID = 1064u, NameID = 14271u, PrimaryActorOID = (uint)OID.Amdusias, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class D122Amdusias : ModuleBase
 {

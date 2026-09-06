@@ -13,7 +13,12 @@ namespace Minerva;
 public sealed class ReplayRecorder : IDisposable
 {
     public const string Magic = "MINERVA-REPLAY";
-    public const int Version = 1;
+    /// <summary>
+    /// Log format version. Bumped to 2 when the EAnim state's two halves were reordered to match
+    /// BossmodReborn (<c>(p1 &lt;&lt; 16) | p2</c>); a version-1 log carries the old ordering and the parser
+    /// swaps it back on read, so recordings made before the fix still replay correctly.
+    /// </summary>
+    public const int Version = 2;
 
     private readonly WorldState ws;
     private readonly TextWriter writer;
@@ -32,8 +37,15 @@ public sealed class ReplayRecorder : IDisposable
         this.excludeOtherPlayers = excludeOtherPlayers;
         this.localPlayerId = localPlayerId;
 
-        // header: magic, version, QPF, game version — lets the parser reconstruct the world shell
-        writer.WriteLine($"{Magic} {Version} {ws.QPF} {Quote(ws.GameVersion)}");
+        // header: magic, version, QPF, game version, POV — lets the parser reconstruct the world shell.
+        //
+        // The POV is last and additive on purpose: a log written before this existed simply ends after the
+        // game version, and the parser treats the missing field as "unknown", so no version bump is needed
+        // and old recordings still load. Without it, nothing downstream can tell WHICH character the
+        // recording was made from -- the party is all there, unlabelled -- and Party.Player() falls back to
+        // the first resolvable member, which is a different person whenever the game's party list is not
+        // ordered self-first.
+        writer.WriteLine($"{Magic} {Version} {ws.QPF} {Quote(ws.GameVersion)} {localPlayerId:X}");
 
         // snapshot current state first, so a mid-fight recording is self-contained
         foreach (var op in ws.CompareToInitial())

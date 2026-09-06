@@ -109,7 +109,7 @@ public sealed class DebugRadarWindow : Window, IDisposable
         {
             this.arena.Center = this.center;
             this.arena.Bounds = bounds;
-            this.arena.Begin(topLeft, size);
+            this.arena.Begin(topLeft, size, clip: false); // coordinate read only, nothing is drawn
             this.player = this.arena.ScreenToWorld(ImGui.GetMousePos());
         }
 
@@ -135,6 +135,8 @@ public sealed class DebugRadarWindow : Window, IDisposable
             this.arena.AddCircleFilled(solve.Target, 0.8f, Colors.Safe);
             this.arena.AddCircle(solve.Target, 0.8f, Colors.PC, 2f);
         }
+
+        this.arena.End(); // release the canvas clip before drawing widgets outside it
 
         // status line
         var status = !solve.NeedToMove ? "SAFE — hold position"

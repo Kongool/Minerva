@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Hooking;
 using Dalamud.Memory;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using Minerva;
 
 namespace Minerva.GameSync;
@@ -48,6 +51,45 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     private delegate void RSVDataDelegate(byte* packet);
     private readonly Hook<RSVDataDelegate>? rsvHook;
 
+    private delegate void ActorCastDelegate(uint casterID, ActorCastPacket* packet);
+    private readonly Hook<ActorCastDelegate>? actorCastHook;
+
+    /// <summary>
+    /// Where each in-flight cast is aimed, straight off the wire. The game only stores a cast's target
+    /// location in memory for *area*-targeted actions, so a boss self-casting — a line-of-sight mechanic, a
+    /// cone, a raidwide — reads back (0,0,0). The packet carries it either way. Keyed by caster, cleared when
+    /// the cast ends, so it never outgrows the actors on screen.
+    /// </summary>
+    private readonly Dictionary<ulong, Vector3> castPositions = [];
+
+    /// <summary>
+    /// The server's ActorCast packet, laid out as the game sends it. Only the trailing position matters here,
+    /// but every preceding field has to be declared for the offsets to land.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct ActorCastPacket
+    {
+        public ushort SpellID;
+        public byte ActionType;
+        public byte BaseCastTime100ms;
+        public uint ActionID;
+        public float CastTime;
+        public uint TargetID;
+        public ushort Rotation;
+        public byte Interruptible;
+        public byte U1;
+        public uint BallistaEntityID;
+        public ushort PosX;
+        public ushort PosY;
+        public ushort PosZ;
+        public ushort U3;
+    }
+
+    // Resolved actions (ActionEffect). This is what turns a cast into a *cast event* — without it
+    // OnEventCast never fires, NumCasts never increments, and every component that resolves on a landed
+    // action stays stuck. Hooked by address from FFXIVClientStructs rather than a signature, matching BMR.
+    private readonly Hook<ActionEffectHandler.Delegates.Receive>? actionEffectHook;
+
     public WorldStateGameSync(WorldState ws)
     {
         this.ws = ws;
@@ -55,6 +97,25 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.actorControlHook = this.TryHook<ActorControlDelegate>("E8 ?? ?? ?? ?? 0F B7 0B 83 E9 64", this.ActorControlDetour, "ActorControl");
         this.mapEffectHook = this.TryHook<MapEffectDelegate>("48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 8B FA 41 0F B7 E8", this.MapEffectDetour, "MapEffect");
         this.rsvHook = this.TryHook<RSVDataDelegate>("44 8B 09 4C 8D 41 34", this.RSVDataDetour, "RSVData");
+        this.actorCastHook = this.TryHook<ActorCastDelegate>("40 53 57 48 81 EC ?? ?? ?? ?? 48 8B FA 8B D1", this.ActorCastDetour, "ActorCast");
+        this.actionEffectHook = this.TryHookAddress<ActionEffectHandler.Delegates.Receive>(
+            ActionEffectHandler.Addresses.Receive.Value, this.ActionEffectDetour, "ActionEffect");
+    }
+
+    /// <summary>Install a hook at a known address (FFXIVClientStructs), guarded like <see cref="TryHook"/>.</summary>
+    private Hook<T>? TryHookAddress<T>(nint address, T detour, string name) where T : Delegate
+    {
+        try
+        {
+            var hook = Service.GameInterop.HookFromAddress(address, detour);
+            hook.Enable();
+            return hook;
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Warning(ex, $"Minerva: failed to install {name} hook. Continuing without it.");
+            return null;
+        }
     }
 
     private Hook<T>? TryHook<T>(string signature, T detour, string name) where T : Delegate
@@ -88,6 +149,75 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.DrainGlobalOps();
         this.UpdateActors();
         this.SyncParty();
+        this.SyncDutyActions();
+        this.UpdateActiveFate();
+        this.UpdateWaymarks();
+    }
+
+    /// <summary>
+    /// Mirror the party's field markers into the world state.
+    /// <para>Markers are how a party writes its plan onto the floor, and several ported modules resolve
+    /// mechanics against them — "the tower on A", "stack on 1". Polled rather than hooked because there is
+    /// no event for a marker moving, and the whole table is eight vectors.</para>
+    /// <para>Only actual changes are emitted, so a recording carries a marker placement once rather than
+    /// once per frame.</para>
+    /// </summary>
+    private void UpdateWaymarks()
+    {
+        var mc = FFXIVClientStructs.FFXIV.Client.Game.UI.MarkingController.Instance();
+        if (mc == null)
+            return;
+
+        for (var i = 0; i < (int)Waymark.Count; ++i)
+        {
+            ref var mark = ref mc->FieldMarkers[i];
+            Vector3? now = mark.Active ? new Vector3(mark.X / 1000f, mark.Y / 1000f, mark.Z / 1000f) : null;
+            var before = this.ws.Waymarks[(Waymark)i];
+            if (before is { } b && now is { } n)
+            {
+                if (b == n)
+                    continue;
+            }
+            else if (before == null && now == null)
+            {
+                continue;
+            }
+
+            this.ws.Execute(new WaymarkState.OpWaymarkChange((Waymark)i, now));
+        }
+    }
+
+    /// <summary>
+    /// Publish the FATE the player is standing in, with the radius the game declares for it.
+    /// <para>The point is the boundary. An open-world FATE is not sealed, so nothing stops the auto-dodge
+    /// walking the character out of it — and out of it means out of the encounter. BossmodReborn does not
+    /// bound its open-world modules and that is exactly what happens. A stated radius is the difference
+    /// between a bound that keeps you in the fight and one that was invented.</para>
+    /// </summary>
+    private void UpdateActiveFate()
+    {
+        var current = this.ws.ActiveFate;
+        var found = default(FateState);
+        if (Service.ObjectTable[0] is { } me)
+        {
+            var p = new WPos(me.Position.X, me.Position.Z);
+            foreach (var f in Service.FateTable)
+            {
+                if (f.Radius <= 0f)
+                    continue;
+
+                // the one being stood in, not merely the nearest: foray zones run several at once
+                var c = new WPos(f.Position.X, f.Position.Z);
+                if ((p - c).LengthSq() <= f.Radius * f.Radius)
+                {
+                    found = new FateState(f.FateId, c, f.Radius);
+                    break;
+                }
+            }
+        }
+
+        if (found.ID != current.ID || MathF.Abs(found.Radius - current.Radius) > 0.5f)
+            this.ws.Execute(new WorldState.OpActiveFate(found));
     }
 
     private void EmitFrameStart(TimeSpan frameDelta)
@@ -186,6 +316,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         var radius = obj.HitboxRadius;
         var targetable = obj.IsTargetable;
 
+        var type = (ActorType)(((int)obj.ObjectKind << 8) + obj.SubKind);
         var hpmp = default(ActorHPMP);
         var inCombat = false;
         var isDead = false;
@@ -197,14 +328,18 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             hpmp = new ActorHPMP(chr.CurrentHp, chr.MaxHp, shield, chr.CurrentMp, chr.MaxMp);
             inCombat = chr.StatusFlags.HasFlag(Dalamud.Game.ClientState.Objects.Enums.StatusFlags.InCombat);
             isDead = chr.IsDead;
-            friendly = !chr.StatusFlags.HasFlag(Dalamud.Game.ClientState.Objects.Enums.StatusFlags.Hostile);
+            // Ally/enemy from the game's own classifier (matches BMR), not the flaky Hostile flag. Helpers are
+            // the boss's invisible casters — never allies — and the game won't classify an untargetable helper
+            // as an enemy, so exclude them explicitly.
+            friendly = type != ActorType.Helper && !GameData.IsClassifiedEnemy(addr);
             target = SanitizeId(chr.TargetObjectId);
         }
+
+        var mountId = GameData.TryMountId(addr, out var mid) ? mid : 0u;
 
         var existing = this.ws.Actors.Find(id);
         if (existing == null)
         {
-            var type = (ActorType)(((int)obj.ObjectKind << 8) + obj.SubKind);
             this.ws.Execute(new ActorState.OpCreate(id, obj.BaseId, index, name, nameID, type, posRot, radius, hpmp, targetable, friendly, SanitizeId(obj.OwnerId)));
             existing = this.ws.Actors.Find(id)!;
         }
@@ -221,6 +356,10 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             if (existing.IsTargetable != targetable)
                 this.ws.Execute(new ActorState.OpTargetable(id, targetable));
         }
+
+        // set straight on the actor rather than through an op: nothing subscribes to a mount change, and
+        // an op per frame for a value that only matters while it is read would be noise in every recording
+        existing.MountId = mountId;
 
         if (existing.IsDead != isDead)
             this.ws.Execute(new ActorState.OpDead(id, isDead));
@@ -242,8 +381,56 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             if (existing.Class != cls)
                 this.ws.Execute(new ActorState.OpClassChange(id, cls));
 
+            // Occult Crescent knowledge level: Forbidden Folios resolves against it, so a module reading a
+            // stale zero would hand every player the same answer regardless of the mechanic.
+            if (GameData.TryForayInfo(addr, out var forayLevel, out var forayElement))
+            {
+                var foray = new ActorForayInfo(forayLevel, forayElement);
+                if (existing.ForayInfo != foray)
+                    this.ws.Execute(new ActorState.OpForayInfo(id, foray));
+            }
+
             this.UpdateCast(existing, chr, addr);
             this.UpdateStatuses(existing, chr, addr);
+            this.UpdateIncomingEffects(existing, addr);
+        }
+    }
+
+    /// <summary>
+    /// Mirror the duty's granted actions.
+    ///
+    /// <para>These appear when a fight changes what you are — Wuk Lamat's kit in a Dawntrail solo duty, a
+    /// Bozja lost action, the one button left while transformed. A module names one because in that fight
+    /// it is the answer, sometimes the only usable thing; nothing about your job says so.</para>
+    ///
+    /// <para>Only the first two slots carry charges — the game added slots 3-5 without extending the
+    /// charge arrays, so reading charges for those would walk off the end. They report 0/0, which reads as
+    /// "no charge information" rather than "no charges left".</para>
+    /// </summary>
+    private unsafe void SyncDutyActions()
+    {
+        var dst = this.ws.Client.DutyActions;
+        var dm = FFXIVClientStructs.FFXIV.Client.Game.DutyActionManager.GetInstanceIfReady();
+        if (dm == null || !dm->ActionActive[0])
+        {
+            Array.Clear(dst);
+            return;
+        }
+
+        for (var i = 0; i < ClientState.NumDutyActions; ++i)
+        {
+            if (i >= dm->NumValidSlots)
+            {
+                dst[i] = default;
+                continue;
+            }
+            byte cur = 0, max = 0;
+            if (i < 2)
+            {
+                cur = dm->CurCharges[i];
+                max = dm->MaxCharges[i];
+            }
+            dst[i] = new ClientState.DutyAction(new ActionID(ActionType.Spell, dm->ActionId[i]), cur, max);
         }
     }
 
@@ -283,12 +470,16 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         // without guarding it, and it's null whenever the actor isn't casting -> NRE inside the getter
         if (GameData.HasCastInfo(addr) && chr.IsCasting && chr.CastActionId != 0)
         {
-            var location = GameData.TryCastLocation(addr, out var loc) ? loc : default;
+            // prefer the packet's aim point; the in-memory field is only filled for area-targeted casts
+            var location = this.castPositions.TryGetValue(act.InstanceID, out var packetLoc) ? packetLoc
+                : GameData.TryCastLocation(addr, out var loc) ? loc
+                : default;
             cur = new ActorCastInfo
             {
                 Action = new ActionID((ActionType)chr.CastActionType, chr.CastActionId),
                 TargetID = SanitizeId(chr.CastTargetObjectId),
-                Rotation = chr.Rotation.Radians(), // TODO: distinct CS CastRotation for precision
+                // The cast's own aim, not the caster's live facing -- see GameData.TryCastRotation.
+                Rotation = (GameData.TryCastRotation(addr, out var castRot) ? castRot : chr.Rotation).Radians(),
                 Location = location,
                 ElapsedTime = chr.CurrentCastTime,
                 TotalTime = chr.TotalCastTime,
@@ -306,7 +497,62 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             return;
         }
 
+        if (cur == null)
+            this.castPositions.Remove(act.InstanceID);
+
         this.ws.Execute(new ActorState.OpCastInfo(act.InstanceID, cur));
+    }
+
+    /// <summary>
+    /// Mirror the game's incoming-effect ring for an actor.
+    ///
+    /// <para>Needed for fights that deliver a MARKER as an action rather than a status — nothing changes on
+    /// the actor, no HP moves, an action id simply arrives against them, and this ring is the only place it
+    /// is visible. Distinct from the pending-effect lists, which reshape the same feed into HP prediction.</para>
+    ///
+    /// <para>An op is emitted only when a slot's (sequence, target index) actually changes, so the volume
+    /// tracks real events rather than frames — the ring is read every frame but is almost always unchanged.
+    /// The slots are copied raw and undecoded, which is what makes an old recording replayable against code
+    /// that later understands more of them than the code that captured it did.</para>
+    /// </summary>
+    private unsafe void UpdateIncomingEffects(Actor act, nint addr)
+    {
+        var chr = (FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)addr;
+        if (chr == null)
+            return;
+
+        var aeh = chr->GetActionEffectHandler();
+        if (aeh == null)
+            return;
+
+        var count = Math.Min(aeh->IncomingEffects.Length, Actor.NumIncomingEffects);
+        for (var i = 0; i < count; ++i)
+        {
+            ref var eff = ref aeh->IncomingEffects[i];
+            ref readonly var prev = ref act.IncomingEffects[i];
+
+            var seq = eff.GlobalSequence;
+            var targetIndex = seq != 0 ? eff.TargetIndex : 0;
+            if (seq == 0)
+            {
+                if (prev.GlobalSequence == 0)
+                    continue;
+            }
+            else if (prev.GlobalSequence == seq && prev.TargetIndex == targetIndex)
+            {
+                continue;
+            }
+
+            // an Effect slot IS the eight raw bytes the game sent; reinterpreted rather than field-copied so
+            // a slot Minerva does not decode yet still round-trips through a recording intact
+            var slots = eff.Effects.Effects;
+            var effects = new ulong[ActorCastEvent.Target.MaxEffects];
+            for (var j = 0; j < effects.Length && j < slots.Length; ++j)
+                effects[j] = System.Runtime.CompilerServices.Unsafe.As<FFXIVClientStructs.FFXIV.Client.Game.Character.ActionEffectHandler.Effect, ulong>(ref slots[j]);
+
+            this.ws.Execute(new ActorState.OpIncomingEffect(act.InstanceID, i,
+                new ActorIncomingEffect(seq, targetIndex, eff.Source, new ActionID((ActionType)eff.ActionType, eff.ActionId), effects)));
+        }
     }
 
     private void UpdateStatuses(Actor act, IBattleChara chr, nint addr)
@@ -352,6 +598,72 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     // ActorControl category ids (from BMR's ServerIPC.ActorControlCategory)
     private const uint CatTargetIcon = 34, CatTether = 35, CatTetherCancel = 47, CatModelState = 63, CatDirectorUpdate = 109, CatTargetVFX = 184, CatPlayActionTimeline = 407, CatEObjSetState = 409, CatEObjAnimation = 413;
 
+    /// <summary>
+    /// A resolved action: the server has told us the cast landed, on whom, and what it did. Emits the
+    /// <see cref="ActorState.OpCastEvent"/> that drives <c>OnEventCast</c> and every cast counter.
+    /// </summary>
+    private void ActionEffectDetour(uint casterID, Character* casterObj, Vector3* targetPos, ActionEffectHandler.Header* header, ActionEffectHandler.TargetEffects* effects, GameObjectId* targets)
+    {
+        this.actionEffectHook!.Original(casterID, casterObj, targetPos, header, effects, targets);
+        try
+        {
+            var ev = new ActorCastEvent(
+                ActionID.MakeSpell(header->ActionId),
+                header->AnimationTargetId,
+                // RotationInt is a ushort over the full turn with its ZERO AT -PI, so the -MathF.PI is not
+                // cosmetic: without it every cast event reports a heading 180 degrees from the cast that
+                // produced it. Measured against a capture of Accept No Imitators -- all 18 Supercell cones,
+                // three casters, both actions, delta exactly +180.00. GenericRotatingAOE matches a resolving
+                // cast back to its sequence on rotation within 0.05 rad, so nothing ever matched, no sequence
+                // ever advanced, and the cones accumulated until the arena had no safe spot left.
+                // BossmodReborn: PacketDecoder.IntToFloatAngle(ushort) => (rot * Inv65kDoublePI - PI).Radians()
+                new Angle(header->RotationInt * (180f / 32768f) * Angle.DegToRad - MathF.PI),
+                *targetPos,
+                header->GlobalSequence);
+
+            var raw = (ulong*)effects;
+            var numTargets = Math.Min((int)header->NumTargets, 16); // defensive: the packet is fixed-size
+            for (var i = 0; i < numTargets; ++i)
+            {
+                var slots = new ulong[ActorCastEvent.Target.MaxEffects];
+                for (var j = 0; j < slots.Length; ++j)
+                    slots[j] = raw[i * 8 + j];
+                ev.Targets.Add(new ActorCastEvent.Target(targets[i], slots));
+            }
+
+            this.QueueActorOp(casterID, new ActorState.OpCastEvent(casterID, ev));
+        }
+        catch (Exception ex)
+        {
+            // never let a decode fault take the game's action pipeline down
+            Service.Log.Error(ex, "Minerva: ActionEffect decode failed.");
+        }
+    }
+
+    /// <summary>
+    /// A cast started: record where it is aimed before handing the packet on. The coordinates arrive as
+    /// unsigned 16-bit fixed point spanning ±1000 yalms, the game's standard position encoding.
+    /// </summary>
+    private void ActorCastDetour(uint casterID, ActorCastPacket* packet)
+    {
+        try
+        {
+            if (packet != null)
+                this.castPositions[casterID] = FixedToWorld(packet->PosX, packet->PosY, packet->PosZ);
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Warning(ex, "Minerva: ActorCast detour failed; continuing without a cast position.");
+        }
+
+        this.actorCastHook!.Original(casterID, packet);
+    }
+
+    private const float FixedToYalms = 2000f / 65535f;
+
+    private static Vector3 FixedToWorld(ushort x, ushort y, ushort z)
+        => new((x * FixedToYalms) - 1000f, (y * FixedToYalms) - 1000f, (z * FixedToYalms) - 1000f);
+
     private void ActorControlDetour(uint actorID, uint category, uint p1, uint p2, uint p3, uint p4, uint p5, uint p6, uint p7, uint p8, ulong targetID, byte replaying)
     {
         this.actorControlHook!.Original(actorID, category, p1, p2, p3, p4, p5, p6, p7, p8, targetID, replaying);
@@ -378,8 +690,13 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             case CatEObjSetState: // p1 = event-object state
                 this.QueueActorOp(actorID, new ActorState.OpActorEState(actorID, (ushort)p1));
                 break;
-            case CatEObjAnimation: // p1, p2 = animation params
-                this.QueueActorOp(actorID, new ActorState.OpActorEAnim(actorID, p1 | (p2 << 16)));
+            case CatEObjAnimation:
+                // (p1 << 16) | p2, matching BossmodReborn's ordering. This was the other way round, which
+                // silently broke every ported module that compares the state against a BMR constant -- 48 of
+                // them, including Pallmagia's Roulette, which tests for 0x00040010/0x00040020 and was seeing
+                // 0x00100004/0x00200004. Nothing errors when the halves are swapped; the mechanic simply
+                // never draws, which is the worst way for it to be wrong.
+                this.QueueActorOp(actorID, new ActorState.OpActorEAnim(actorID, ((uint)p1 << 16) | p2));
                 break;
             case CatDirectorUpdate:
                 this.globalOps.Add(new WorldState.OpDirectorUpdate(p1, p2, p3, p4, p5, p6));

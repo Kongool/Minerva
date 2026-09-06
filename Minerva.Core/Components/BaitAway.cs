@@ -11,6 +11,10 @@ namespace Minerva.Components;
 /// </summary>
 public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysDrawOtherBaits = true, bool centerAtTarget = false, bool tankbuster = false, bool onlyShowOutlines = false) : CastCounter(module, aid)
 {
+    /// <summary>How prominently to draw whoever is carrying the bait. Modules raise it for a bait that
+    /// will kill the party if mishandled.</summary>
+    public PlayerPriority BaiterPriority = PlayerPriority.Interesting;
+
     public struct Bait(Actor source, Actor target, AOEShape shape, DateTime activation = default, BitMask forbidden = default, Angle? customRotation = null, int maxCasts = 1, WDir offset = default)
     {
         public Angle? CustomRotation = customRotation;
@@ -23,6 +27,21 @@ public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysD
         public WDir Offset = offset;
 
         public readonly Angle Rotation => this.CustomRotation ?? (this.Source != this.Target ? Angle.FromDirection(this.Target.Position - this.Source.Position) : this.Source.Rotation);
+
+        /// <summary>
+        /// A bait originating from a bare position rather than an actor — a clone's remembered spot, or a
+        /// snapshot taken before the caster vanished. The position is wrapped in a throwaway actor so
+        /// <see cref="Rotation"/> keeps working; nothing else ever looks at it.
+        /// <para>Argument order matches BossmodReborn's overload, which puts <paramref name="customRotation"/>
+        /// before <paramref name="forbidden"/> — the opposite of the actor form. Ported call sites are
+        /// positional, so the order has to match rather than read consistently.</para>
+        /// </summary>
+        public Bait(WPos source, Actor target, AOEShape shape, DateTime activation = default, Angle? customRotation = null, BitMask forbidden = default, int maxCasts = 1, WDir offset = default)
+            : this(
+                new Actor(default, default, default, string.Empty, default, ActorType.None, new Vector4(source.X, 0f, source.Z, 0f)),
+                target, shape, activation, forbidden, customRotation, maxCasts, offset)
+        {
+        }
     }
 
     public readonly bool AlwaysDrawOtherBaits = alwaysDrawOtherBaits; // draw others' baits even when they aren't clipping the player
@@ -292,5 +311,98 @@ public class BaitAwayIcon(ModuleBase module, AOEShape shape, uint iconID, uint a
         for (var i = this.CurrentBaits.Count - 1; i >= 0; --i)
             if (this.CurrentBaits[i].Target.IsDead)
                 this.CurrentBaits.RemoveAt(i);
+    }
+}
+
+/// <summary>
+/// A bait on every player at once — everyone must spread. Ported from BossmodReborn (BSD-3; see
+/// THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class BaitAwayEveryone : GenericBaitAway
+{
+    public BaitAwayEveryone(ModuleBase module, Actor? source, AOEShape shape, uint aid = default) : base(module, aid)
+    {
+        this.AllowDeadTargets = false;
+        if (source == null)
+            return;
+        foreach (var p in module.World.Party.WithoutSlot(true))
+            this.CurrentBaits.Add(new Bait(source, p, shape));
+    }
+}
+
+/// <summary>
+/// Bait-away driven by a tether: the tethered player carries the AOE away from the group. Supports both
+/// player-to-enemy and enemy-to-player tether directions, and can be restricted to one enemy OID.
+/// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// </summary>
+public class BaitAwayTethers(ModuleBase module, AOEShape shape, uint tetherID, uint aid = default, uint enemyOID = default, double activationDelay = default, bool centerAtTarget = false)
+    : GenericBaitAway(module, aid, centerAtTarget: centerAtTarget, tankbuster: true)
+{
+    public BaitAwayTethers(ModuleBase module, float radius, uint tetherID, uint aid = default, uint enemyOID = default, double activationDelay = default, bool centerAtTarget = true)
+        : this(module, new AOEShapeCircle(radius), tetherID, aid, enemyOID, activationDelay, centerAtTarget) { }
+
+#pragma warning disable SA1300, IDE1006 // BossmodReborn member spelling, deliberate
+    /// <summary>When the current tether set resolves; distinct from each <c>Bait.Activation</c>, which is
+    /// per target. Spelled as BossmodReborn spells it so ported overrides compile.</summary>
+    protected DateTime activation;
+#pragma warning restore SA1300, IDE1006
+
+    public AOEShape Shape = shape;
+    public uint TID = tetherID;
+    public readonly uint EnemyOID = enemyOID;
+    public bool DrawTethers = true;
+    public double ActivationDelay = activationDelay;
+
+    protected DateTime Activation;
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc)
+    {
+        base.DrawArenaForeground(pcSlot, pc);
+        if (!this.DrawTethers)
+            return;
+        foreach (var b in this.ActiveBaits)
+            this.Arena.AddLine(b.Source.Position, b.Target.Position, Colors.Danger);
+    }
+
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
+    {
+        var (player, enemy) = this.DetermineTetherSides(source, tether);
+        if (player == null || enemy == null || (this.EnemyOID != default && enemy.OID != this.EnemyOID))
+            return;
+        // all tethers of one mechanic share a resolution time, set by whichever lands first
+        if (this.Activation == default)
+            this.Activation = this.World.FutureTime(this.ActivationDelay);
+        this.CurrentBaits.Add(new Bait(enemy, player, this.Shape, this.Activation));
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent cast)
+    {
+        base.OnEventCast(caster, cast);
+        if (cast.Action.ID == this.WatchedAction && this.CurrentBaits.Count == 0)
+            this.Activation = default;
+    }
+
+    public override void OnUntethered(Actor source, in ActorTetherInfo tether)
+    {
+        var (player, enemy) = this.DetermineTetherSides(source, tether);
+        if (player == null || enemy == null)
+            return;
+        for (var i = 0; i < this.CurrentBaits.Count; ++i)
+        {
+            var b = this.CurrentBaits[i];
+            if (b.Source.InstanceID == enemy.InstanceID && b.Target.InstanceID == player.InstanceID)
+            {
+                this.CurrentBaits.RemoveAt(i);
+                return;
+            }
+        }
+    }
+
+    /// <summary>Both player-to-enemy and enemy-to-player tether directions are supported.</summary>
+    public (Actor? player, Actor? enemy) DetermineTetherSides(Actor source, ActorTetherInfo tether)
+    {
+        if (tether.ID != this.TID || this.World.Actors.Find(tether.Target) is not { } target)
+            return (null, null);
+        return Array.IndexOf(this.World.Party.WithoutSlot(), source) >= 0 ? (source, target) : (target, source);
     }
 }

@@ -18,12 +18,27 @@
 
     <!-- The plugin project lives at the repo root, so its recursive globs would otherwise
          swallow the sibling projects' sources. Keep those out of this project. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);Minerva.Core\**;Minerva.Tests\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Minerva.Core\**;Minerva.Tests\**;Minerva.Validate\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- The game-free engine spine (WorldState, Actor, Operation pattern, geometry). -->
     <ProjectReference Include="Minerva.Core\Minerva.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ports that need hand-finishing before they compile. Kept in the tree because the mechanical 95%
+         is already done and redoing it is pure waste; excluded from the build because a module that does
+         not compile stops every other one from shipping. See staged-ports/README for what each needs. -->
+    <Compile Remove="staged-ports/**/*.cs" />
+    <None Include="staged-ports/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- BossmodReborn stamps [SkipLocalsInit] on most modules and relies on its own global usings for it.
+         One entry here beats a using line in several hundred ported files. -->
+    <Using Include="System.Numerics" />
+    <Using Include="System.Runtime.CompilerServices" />
   </ItemGroup>
 
 </Project>

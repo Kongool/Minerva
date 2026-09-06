@@ -62,4 +62,18 @@ public static class SortHelpers
 {
     public static void SortAOEByActivation(List<AOEInstance> aoes)
         => aoes.Sort(static (a, b) => a.Activation.CompareTo(b.Activation));
+
+    /// <summary>Stable order by the actor that owns each AOE — for fights where several casters put up the
+    /// same shape and a component needs to pair an AOE back to its caster by position in the list.</summary>
+    public static void SortAOEsByActorID(List<AOEInstance> aoes)
+        => aoes.Sort(static (a, b) => a.ActorID.CompareTo(b.ActorID));
+
+    /// <summary>Actors newest-first. Spawn order is the tiebreak a fight uses when several identical adds
+    /// resolve in sequence.</summary>
+    public static void SortActorsByIDDescending(List<Actor> actors)
+        => actors.Sort(static (a, b) => b.InstanceID.CompareTo(a.InstanceID));
+
+    /// <inheritdoc cref="SortActorsByIDDescending"/>
+    public static void SortActorsByID(List<Actor> actors)
+        => actors.Sort(static (a, b) => a.InstanceID.CompareTo(b.InstanceID));
 }

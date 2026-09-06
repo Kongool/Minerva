@@ -31,39 +31,3 @@ public class TetherAOEs(ModuleBase module, uint tetherID, uint aid, AOEShape sha
             this.aoes.RemoveAll(a => a.ActorID == caster.InstanceID);
     }
 }
-
-/// <summary>
-/// Bait-away tether: whoever is tethered (tether id <c>TetherID</c>) should carry the mechanic away
-/// from the group. Draws the tethered player and reminds them to bait.
-/// </summary>
-public class BaitAwayTethers(ModuleBase module, uint tetherID) : ModuleComponent(module)
-{
-    public readonly uint TetherID = tetherID;
-    protected readonly List<ulong> Baiters = [];
-
-    public override void OnTethered(Actor source, in ActorTetherInfo tether)
-    {
-        if (tether.ID == this.TetherID)
-            this.Baiters.Add(source.InstanceID);
-    }
-
-    public override void OnUntethered(Actor source, in ActorTetherInfo tether) => this.Baiters.Remove(source.InstanceID);
-
-    public bool IsBaiter(Actor actor) => this.Baiters.Contains(actor.InstanceID);
-
-    public override void DrawArenaForeground(int pcSlot, Actor pc)
-    {
-        foreach (var id in this.Baiters)
-        {
-            var a = this.World.Actors.Find(id);
-            if (a != null)
-                this.Arena.AddCircle(a.Position, 2f, Colors.Danger, 2f);
-        }
-    }
-
-    public override void AddHints(int slot, Actor actor, TextHints hints)
-    {
-        if (this.IsBaiter(actor))
-            hints.Add("Bait away!");
-    }
-}

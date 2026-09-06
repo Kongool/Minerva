@@ -20,6 +20,9 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
     private const uint HelperOID = 0x233C;
     private const float RaidwideCircleRadius = 35f;
 
+    /// <summary>Arena half-extent for the fight being generated, so "bigger than the arena" is answerable.</summary>
+    private float arenaHalfExtent;
+
     private readonly IShapeResolver shapes = shapeResolver ?? new NullShapeResolver();
     private readonly INameResolver names = nameResolver ?? new NullNameResolver();
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -67,8 +70,11 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
 
     public GenerationResult Generate(GenerationInput input)
     {
-        var className = $"D{input.CFCID}";
+        // named after the boss rather than the duty: several bosses share one CFC, and two drafts that
+        // agree on class name and namespace cannot be compiled together at all
+        var className = input.DraftIdentifier();
         var ns = $"Minerva.Generated.{className}";
+        this.arenaHalfExtent = input.Arena.HalfExtent;
 
         var aidNames = new NameAllocator();
         var aidMember = new Dictionary<uint, string>();
@@ -166,6 +172,17 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
         var aidRef = $"(uint)AID.{name}";
         var hint = this.shapes.Resolve(act.AID);
 
+        // A charge cannot be emitted as a shape at all: its length is how far the caster travels, which is
+        // known only at cast time. The author has to write a small GenericAOEs that measures it, so say so
+        // rather than emit a plausible-looking rect of the wrong length.
+        if (hint.Kind == ShapeKind.Charge)
+        {
+            var w = hint.HalfWidth > 0f ? F(hint.HalfWidth) : "?";
+            return ($"sealed class {name}(ModuleBase module) : Components.CastHint(module, {aidRef}, \"{name}: charge\");"
+                + $" // TODO: charge/dash — half-width {w}y, but length is the travel distance. Write a GenericAOEs"
+                + " that builds AOEShapeRect((target - caster).Length(), halfWidth) at the caster on cast.", "stub", true);
+        }
+
         // player-targeted mechanics classified from correlation
         if (act.Target == TargetKind.Player)
         {
@@ -196,8 +213,14 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
             }
         }
 
-        // big self-targeted circle => raidwide (don't draw a whole-arena circle)
-        if (hint.Kind == ShapeKind.Circle && act.Target == TargetKind.Self && hint.Radius >= RaidwideCircleRadius)
+        // A circle too big to escape is a raidwide, wherever it is aimed. Requiring it to be self-targeted
+        // was the wrong test: Arch Kelpie's Water IV is a 60 yalm circle aimed at a location, in an arena
+        // 30 yalms across, and it came out as an ordinary avoidable AOE — which tells the dodge every inch
+        // of the floor is lethal and leaves it nowhere to stand. The fixed threshold stays as a floor for
+        // fights whose arena could not be estimated.
+        var unescapable = hint.Radius >= RaidwideCircleRadius
+            || (this.arenaHalfExtent > 0.1f && hint.Radius >= this.arenaHalfExtent);
+        if (hint.Kind == ShapeKind.Circle && unescapable)
             return ($"sealed class {name}(ModuleBase module) : Components.RaidwideCast(module, {aidRef});", "special", false);
 
         var shapeExpr = hint.ToShapeExpression();
@@ -323,7 +346,11 @@ public sealed class ModuleGenerator(IShapeResolver? shapeResolver = null, INameR
                 : $"new ArenaBoundsCircle({MathF.Ceiling(half).ToString("0", Inv)}f)";
 
         return $$"""
-        [ModuleInfo(CFCID = {{input.CFCID}}u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor")]
+        // PrimaryActorOID is what tells the registry WHICH boss of this duty this module is for. Without
+        // it the registry falls back to reading OID.Boss, which works only while that member keeps its
+        // name — and in a duty where every boss shares a CFC, getting it wrong means the wrong module
+        // activates, or none does.
+        [ModuleInfo(CFCID = {{input.CFCID}}u, PrimaryActorOID = 0x{{input.BossOID:X}}u, NameID = 0u, Maturity = ModuleMaturity.WIP, Contributors = "Minerva extractor")]
         public sealed class {{className}}(WorldState ws, Actor primary)
             : ModuleBase(ws, primary, {{center}}, {{bounds}});
         """;

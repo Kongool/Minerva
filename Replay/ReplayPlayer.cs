@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Dalamud.Bindings.ImGui;
 using Minerva.Radar;
 
 namespace Minerva.Replay;
@@ -21,12 +22,13 @@ public readonly record struct PreviewCast(AOEShape Shape, PreviewKind Kind, uint
 /// private <see cref="WorldState"/> on a real-time cursor (play/pause/speed/seek), activating the
 /// matching boss module against that world so real AOE shapes and boundaries replay exactly as they
 /// did live. Seeking rebuilds from the start to the target (ops are cheap and forward-only). The
-/// <see cref="ReplayWindow"/> renders it; this class owns the world, module, cursor, and arena.
+/// <see cref="Minerva.Windows.ReplayTab"/> renders it; this class owns the world, module, cursor, and arena.
 /// </summary>
 public sealed class ReplayPlayer : IDisposable
 {
     private readonly ReplayTimeline timeline;
     private readonly ModuleRegistry registry;
+    private readonly Configuration config;
     private readonly ImGuiArena arena = new();
 
     private readonly AIHints aiHints = new();
@@ -44,11 +46,13 @@ public sealed class ReplayPlayer : IDisposable
     public bool Playing { get; private set; }
     public float Speed = 1f;
 
-    public ReplayPlayer(ReplayTimeline timeline, ModuleRegistry registry)
+    public ReplayPlayer(ReplayTimeline timeline, ModuleRegistry registry, Configuration config)
     {
         this.timeline = timeline;
         this.registry = registry;
+        this.config = config;
         this.world = new WorldState(timeline.QPF, timeline.GameVersion);
+        this.world.Party.PlayerInstanceID = timeline.PlayerInstanceID;
         this.cursor = timeline.StartTicks;
         this.ApplyUpTo(this.cursor); // apply the opening snapshot so the first frame is visible paused
     }
@@ -98,6 +102,7 @@ public sealed class ReplayPlayer : IDisposable
         this.module?.Dispose();
         this.module = null;
         this.world = new WorldState(this.timeline.QPF, this.timeline.GameVersion);
+        this.world.Party.PlayerInstanceID = this.timeline.PlayerInstanceID;
         this.opIndex = 0;
         this.cursor = target;
         this.ApplyUpTo(target);
@@ -167,13 +172,22 @@ public sealed class ReplayPlayer : IDisposable
             this.arena.Begin(canvasTopLeft, canvasSize);
             this.module.Arena = this.arena;
             this.module.DrawArena(0, pc ?? this.module.PrimaryActor); // boundary + enemies + live AOEs
+            this.ClipAndFrame();
 
             foreach (var a in this.world.Actors)
                 if (a.Type == ActorType.Player && !a.IsDeadOrDestroyed)
                     this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
 
             if (pc != null)
-                this.DrawSafeSpot(pc); // green "stand here" guidance from the module's active AOEs
+            {
+                // the decision Minerva actually took at this moment, when the recording carries one; else the
+                // old recompute, which is a guess about what it would have done
+                if (this.world.LastDodge.Known)
+                    this.DrawRecordedDecision(pc);
+                else
+                    this.DrawSafeSpot(pc);
+            }
+            this.arena.End();
             return;
         }
 
@@ -195,6 +209,29 @@ public sealed class ReplayPlayer : IDisposable
             else if (a.Type == ActorType.Player)
                 this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
         }
+
+        this.ClipAndFrame();
+        this.arena.End();
+    }
+
+    /// <summary>
+    /// Mask everything drawn outside the boundary, then restate the frame on top, so a 40-yalm rect cast from
+    /// the arena edge stops at the border instead of painting across the view. Follows the same
+    /// <see cref="Configuration.ClipToArena"/> switch as the live radar. The mask is confined to the drawing
+    /// canvas by <see cref="ImGuiArena.ClipOutsideArena"/>, which is what keeps it off the playback toolbar.
+    /// The compass draws either way — it costs nothing and orients you.
+    /// </summary>
+    private void ClipAndFrame()
+    {
+        if (this.config.ClipToArena)
+        {
+            // Playback stays solid: this is a review panel, not an overlay on the world, and a
+            // see-through field would only make a recording harder to read.
+            this.arena.ClipOutsideArena(ImGui.GetColorU32(ImGuiCol.WindowBg) | 0xFF000000u);
+            this.arena.DrawBoundary();
+        }
+
+        this.arena.DrawCompass();
     }
 
     // without an authored module we don't know AOE shapes, but we can still show a cast is happening and
@@ -257,6 +294,9 @@ public sealed class ReplayPlayer : IDisposable
             else if (a.Type == ActorType.Player)
                 this.arena.ActorMarker(a.Position, a.Rotation, MathF.Max(a.HitboxRadius, 0.5f), Colors.PC);
         }
+
+        this.ClipAndFrame();
+        this.arena.End();
     }
 
     // a tether-driven AOE lands on the tethered target(s); if the tether already resolved, it erupts on the caster
@@ -279,6 +319,23 @@ public sealed class ReplayPlayer : IDisposable
     }
 
     // run the auto-dodge solver on the module's active AOEs and mark the nearest safe cell in green
+    /// <summary>The dodge decision at the cursor, from the recording; <c>Known</c> false on older logs.</summary>
+    public DodgeDecision Decision => this.world.LastDodge;
+
+    /// <summary>Where the POV stands at the cursor, for reading the decision's distance.</summary>
+    public WPos? PlayerPosition => this.FindPlayer()?.Position;
+
+    private void DrawRecordedDecision(Actor pc)
+    {
+        var d = this.world.LastDodge;
+        if (!d.NeedToMove || !d.Found)
+            return;
+        var color = d.Steering ? Colors.Safe : Colors.Vulnerable; // orange: it wanted to go there and could not
+        this.arena.AddLine(pc.Position, d.Target, color, 3f);
+        this.arena.AddCircleFilled(d.Target, 0.8f, color);
+        this.arena.AddCircle(d.Target, 0.8f, Colors.PC, 2f);
+    }
+
     private void DrawSafeSpot(Actor pc)
     {
         if (this.module == null)
