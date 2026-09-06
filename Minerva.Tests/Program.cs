@@ -570,6 +570,37 @@ t.Section("Auto-dodge pathfinding");
     t.True("two waves covering everything: still moves", staged.NeedToMove && staged.Found);
     t.True("two waves covering everything: clears the first wave", staged.Found && (staged.Target - (center - new WDir(15f, 0f))).Length() > 30f);
 
+    // the trash-mode arena estimate follows the party: a box learned in the last room is forgotten the
+    // moment the player is no longer inside it (Eureka Orthos, 2026-09-06)
+    var footprint = new ArenaFootprint();
+    footprint.EnterZone(1);
+    for (var i = 0; i < 30; ++i)
+        footprint.Observe(new WPos(90f + (i % 3) * 10f, 90f + (i % 5) * 5f));
+    t.True("a wide enough footprint is an arena when the player is inside it", footprint.TryEstimate(new WPos(100f, 100f), out var fpCenter, out _) && (fpCenter - new WPos(100f, 100f)).Length() < 1f);
+    t.True("the same footprint is forgotten when the player has left it", !footprint.TryEstimate(new WPos(300f, 300f), out _, out _) && footprint.Samples == 0);
+
+    // standing inside the margin band is not "settled": the margin the search used is the bar for holding too
+    // (Orthos 2026-09-06: held at 8.1-8.7y from an 8y circle with a 1.5y margin, hit at 8.5)
+    var band = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = center + new WDir(8.3f, 0f) };
+    band.AddForbiddenZone(new AOEShapeCircle(8f), center, default, now.AddSeconds(2));
+    var bandSpot = ArenaPathfinder.Solve(band, now, horizonSeconds: 5f, safetyMargin: 1.5f);
+    t.True("inside the margin band the dodge still moves", bandSpot.NeedToMove && bandSpot.Found);
+    t.True("and moves to a cell that clears the margin", (bandSpot.Target - center).Length() >= 9.5f - 0.01f);
+
+    // ground somebody stood on is remembered by cell and forgotten with the zone
+    var ground = new KnownGround();
+    ground.Observe(new WPos(100.4f, 100.9f));
+    t.True("a stood-on cell is known ground", ground.Contains(new WPos(101.5f, 101.5f)) && ground.Count == 1);
+    t.True("the next cell over is not", !ground.Contains(new WPos(103f, 100f)));
+    ground.Reset();
+    t.True("a zone change forgets it", !ground.Contains(new WPos(101f, 101f)) && ground.Count == 0);
+
+    // what the cast-bar guesser draws, one rule shared with the replay validator
+    t.True("guesser draws a ground circle", Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Circle, Radius: 8f)));
+    t.True("guesser draws a cone", Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Cone, Radius: 12f, HalfAngleDeg: 45f)));
+    t.True("guesser skips a raidwide-sized circle", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Circle, Radius: 30f)));
+    t.True("guesser skips single-target and unknown", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.SingleTarget)) && !Minerva.Automation.AutoHints.Draws(Minerva.Generation.ShapeHint.Unknown));
+
     // a big circle AOE lands right on the player -> must dodge out of it
     hints.AddForbiddenZone(new AOEShapeCircle(8f), center, default, now.AddSeconds(2));
     hints.PlayerPosition = center;
@@ -794,6 +825,15 @@ t.Section("Component library");
     var inPuddle = new Actor(0x9, 9, 0, "X", 0, ActorType.Player, new Vector4(100, 0, 102, 0)); // 2y from puddle center
     voidzone.AddHints(0, inPuddle, vt);
     t.True("voidzone warns a player standing in it", vt.Count > 0);
+
+    // a walking hazard (a Voidzone with a movement hint) forbids the lane ahead of it, not just the ground under it
+    var walker = new Actor(0xC, 12, 0, "Head", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0)); // rotation 0 = facing +Z
+    var walking = new Minerva.Components.Voidzone(module, 2f, _ => new[] { walker }, 6f);
+    var wh = new AIHints { Center = module.Center, Bounds = module.Bounds };
+    walking.AddAIHints(0, actorP1, PartyRolesConfig.Assignment.Unassigned, wh);
+    t.True("a walking hazard forbids four reaches ahead", wh.ForbiddenZones.Count == 4);
+    t.True("the lane ahead of it is forbidden", wh.InImminentDanger(new WPos(100f, 104f), DateTime.MaxValue));
+    t.True("behind it is not", !wh.InImminentDanger(new WPos(100f, 95f), DateTime.MaxValue));
 
     // Gaze: facing check
     var gaze = new Minerva.Components.Gaze(module, 502u);
@@ -2372,6 +2412,9 @@ t.Section("Party + class/role sync");
     ushort gotTimeline = 0;
     ws.Actors.ModelStateChanged.Subscribe((a, s) => gotModel = s);
     ws.Actors.ActionTimelineEvent.Subscribe((a, id) => gotTimeline = id);
+    ws.Execute(new ActorState.OpModelState(tank, 7));
+    ws.Execute(new ActorState.OpModelState(tank, 7, 1, 2));
+    t.True("model state carries both animation bytes", ws.Actors.Find(tank)!.ModelState is { ModelState: 7, AnimState1: 1, AnimState2: 2 });
     ws.Execute(new ActorState.OpModelState(tank, 7));
     ws.Execute(new ActorState.OpActionTimeline(tank, 0x123));
     t.Eq("model-state op fires its event", gotModel, (byte)7);

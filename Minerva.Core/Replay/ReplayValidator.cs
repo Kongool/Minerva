@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Minerva.Automation;
 using Minerva.Generation;
 
 namespace Minerva;
@@ -122,11 +123,30 @@ public sealed class ReplayValidator
         /// forbids is what the dodge planned around.</summary>
         public bool Knockback { get; init; }
 
-        public string Why
+        /// <summary>No module was active: the cast-bar guesser was the only dodge.</summary>
+        public bool NoModule { get; init; }
+
+        /// <summary>The guesser draws this cast (a ground shape from the sheet, smaller than a raidwide).</summary>
+        public bool Guessed { get; init; }
+
+        /// <summary>What the game's sheet says the cast is: the shape expression when guessed, else
+        /// "single-target", "raidwide", or empty when the sheet gives no ground shape.</summary>
+        public string Sheet { get; init; } = "";
+
+        public string Why => (this.NoModule && this.Guessed ? $"no module here; the cast-bar guesser drew this as {this.Sheet}. " : "") + this.Explain();
+
+        private string Explain()
         {
-            get
             {
                 var gave = this.StatusID != 0 ? $" It gave you status {this.StatusID}." : "";
+                if (this.NoModule && !this.Guessed)
+                    return this.Sheet switch
+                    {
+                        "single-target" => "no module here; the game's sheet says this is single-target (a tankbuster or an auto-attack), expected on whoever holds it." + gave,
+                        "raidwide" => "no module here; the sheet calls this a raidwide-sized circle: nowhere to stand, expected damage." + gave,
+                        "instant" => "no module here, and this landed with no cast bar (an instant, or a trap underfoot), so the guesser had nothing to draw from." + gave,
+                        _ => "no module here, and the game's sheet gives this cast no ground shape, so the guesser could not draw it: a module would be needed." + gave,
+                    };
                 var (you, your, them) = this.Foreign ? ("they", "their", "them") : ("you", "your", "you");
                 // a spread or stack is meant to land on its people; the question is only who shared it
                 if (this.Spread)
@@ -204,7 +224,7 @@ public sealed class ReplayValidator
     /// player in the same pull. The module's zones are the same for everyone, so "did it draw what they
     /// stood in" is answerable here; their dodge's decisions are not, and the wording says so.
     /// </summary>
-    public static Result Validate(ReplayTimeline timeline, ModuleRegistry registry, ulong povOverride, IReadOnlyList<double>? dumpAt = null)
+    public static Result Validate(ReplayTimeline timeline, ModuleRegistry registry, ulong povOverride, IReadOnlyList<double>? dumpAt = null, IShapeResolver? shapes = null)
     {
         var world = new WorldState(timeline.QPF, timeline.GameVersion);
         // without this the whole validation runs against the wrong character (see ReplayTimeline.PlayerInstanceID)
@@ -234,6 +254,11 @@ public sealed class ReplayValidator
         var hits = new List<Hit>();
         var dumps = new List<string>();
         var nextDump = 0;
+        // With no module the live dodge runs on the cast-bar guesser; replay the same guesser so a trash
+        // recording is judged like a module fight (Eureka Orthos, 2026-09-06). Needs the game's sheets.
+        var guess = shapes != null ? new AutoHints(world, shapes) : null;
+        var scratch = new AIHints();
+        var castEndDecision = new Dictionary<ulong, DodgeDecision>(); // the decision in force when each caster's cast ended: the hit event arrives after the guess is gone
         long lastSpreadOnMeTicks = 0, lastStackOnMeTicks = 0; // when the POV last carried a spread / stack marker
         var lastInsideDrawnTicks = 0L; // when the POV was last inside something the module drew (0, not MinValue: a subtraction from MinValue wraps and called every early hit "drawn")
         var autos = new HashSet<uint> { 7u, 8u, 870u, 871u, 872u, 873u }; // the generic auto-attacks; the module adds its own
@@ -267,6 +292,23 @@ public sealed class ReplayValidator
             {
                 var me = world.Actors.Find(pov);
                 var d = world.LastDodge;
+                var noModule = module == null;
+                var guessed = false;
+                var sheetText = "";
+                if (noModule && shapes != null)
+                {
+                    var sheet = shapes.Resolve(ev.Action.ID);
+                    var wasCast = castStarts.ContainsKey((cev.InstanceID, ev.Action.ID));
+                    guessed = wasCast && AutoHints.Draws(sheet);
+                    sheetText = guessed ? sheet.ToShapeExpression() ?? sheet.Kind.ToString()
+                        : !wasCast && AutoHints.Draws(sheet) ? "instant"
+                        : sheet.Kind == ShapeKind.SingleTarget ? "single-target"
+                        : sheet.Kind == ShapeKind.Circle ? "raidwide" : "";
+                    // the guess vanishes when the cast ends, a frame before the hit: judge the decision that
+                    // stood while the zone was still drawn, not the "no module" the hit instant reads
+                    if (guessed && castEndDecision.TryGetValue(cev.InstanceID, out var whileDrawn))
+                        d = whileDrawn;
+                }
                 var dist = me != null && d.Found ? (d.Target - me.Position).Length() : 0f;
                 // "drawn" means the module drew THIS action's zone, when the action is one that is cast; an
                 // uncast helper hit (no cast bar) can only be judged by whether the POV stood in any drawn
@@ -274,7 +316,7 @@ public sealed class ReplayValidator
                 // Either the module drew a zone when THIS action's cast began, or the POV stood in a drawn zone
                 // in the two seconds before the hit (zones drawn ahead of the cast, from a marker or a tether,
                 // never "rise" at cast start -- Pallmagia's Esoteric Instruction). Neither alone is right.
-                var drawnRecently = drawn.Contains(ev.Action.ID) || ticks - lastInsideDrawnTicks <= 2 * TimeSpan.TicksPerSecond;
+                var drawnRecently = drawn.Contains(ev.Action.ID) || ticks - lastInsideDrawnTicks <= 2 * TimeSpan.TicksPerSecond || guessed;
                 // in the zone when it resolved (Shantotto 2026-09-06: two Large Specimen hits from 15 and 19 yalms
                 // off 13-yalm cores read as "the AOE was larger than drawn" until the report could say "outside")
                 var inside = ticks - lastInsideDrawnTicks <= 3 * TimeSpan.TicksPerSecond / 4;
@@ -326,6 +368,7 @@ public sealed class ReplayValidator
                     Inside = inside, TargetsHit = playersHit, Proximity = playersHit >= Math.Max(4, (playersSeen.Count + 1) / 2),
                     Spread = isSpread, Stack = isStack, Mine = onMe, Owner = owner,
                     Knockback = knockbacks.Contains(ev.Action.ID),
+                    NoModule = noModule, Guessed = guessed, Sheet = sheetText,
                 });
             }
             // detect the start of an enemy/helper cast (players are ignored — their skills aren't mechanics)
@@ -342,6 +385,8 @@ public sealed class ReplayValidator
                 playersSeen.Add(made.InstanceID);
             if (pov != 0 && op is ActorState.OpStatus st && st.InstanceID == pov && st.Value.ID != 0)
                 povStatuses.Add((ticks, st.Value.ID, st.Value.SourceID));
+            if (op is ActorState.OpCastInfo ended && ended.Value == null)
+                castEndDecision[ended.InstanceID] = world.LastDodge;
             if (op is ActorState.OpCastInfo ci && ci.Value is { } cast && cast.Action.ID != 0)
             {
                 castStarts[(ci.InstanceID, cast.Action.ID)] = ticks;
@@ -388,9 +433,15 @@ public sealed class ReplayValidator
                 if (onStack)
                     lastStackOnMeTicks = ticks;
             }
-            if (dumpAt != null && nextDump < dumpAt.Count && module != null && op is WorldState.OpFrameStart && ticks - start >= (long)(dumpAt[nextDump] * TimeSpan.TicksPerSecond))
+            else if (pov != 0 && module == null && guess is { Count: > 0 } && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcTrash)
             {
-                dumps.Add(DescribeFrame(module, world, pov, (ticks - start) / (double)TimeSpan.TicksPerSecond));
+                TrashHints(guess, pcTrash, scratch);
+                if (scratch.InImminentDanger(pcTrash.Position, DateTime.MaxValue))
+                    lastInsideDrawnTicks = ticks;
+            }
+            if (dumpAt != null && nextDump < dumpAt.Count && (module != null || guess != null) && op is WorldState.OpFrameStart && ticks - start >= (long)(dumpAt[nextDump] * TimeSpan.TicksPerSecond))
+            {
+                dumps.Add(DescribeFrame(module, guess, world, pov, (ticks - start) / (double)TimeSpan.TicksPerSecond));
                 ++nextDump;
             }
 
@@ -412,6 +463,15 @@ public sealed class ReplayValidator
             if (enemyCastAid != 0)
             {
                 castCount[enemyCastAid] = castCount.GetValueOrDefault(enemyCastAid) + 1;
+                if (module == null && shapes != null)
+                {
+                    // the guesser's picture of the fight: drawn if it draws it, "hinted" if the sheet says single-target
+                    var sh = shapes.Resolve(enemyCastAid);
+                    if (AutoHints.Draws(sh))
+                        drawn.Add(enemyCastAid);
+                    else if (sh.Kind == ShapeKind.SingleTarget)
+                        watched.Add(enemyCastAid);
+                }
                 if (byHelper)
                     helperCast.Add(enemyCastAid);
                 if (AnyRose(countsBefore, countsAfter))
@@ -469,7 +529,7 @@ public sealed class ReplayValidator
                 hits[i] = h with { PartyWide = true };
         }
 
-        return new Result(module?.GetType().Name ?? "(no module activated)", castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps };
+        return new Result(module?.GetType().Name ?? (guess != null ? "(no module: cast-bar guesser)" : "(no module activated)"), castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps };
     }
 
     private static ModuleBase? TryActivate(WorldState world, ModuleRegistry registry, HashSet<uint> watched)
@@ -539,7 +599,7 @@ public sealed class ReplayValidator
     // What the module drew and what the solver would do with it at one instant: the offline half of "why did
     // it stand there" (Alexander 2026-09-06: three seconds of "no safe spot" under ten Divine Arrow lines).
     // The solve runs with the live AI's defaults (5s horizon, 1y margin, 1s lead, unsprinted speed, no uptime goal).
-    private static string DescribeFrame(ModuleBase module, WorldState world, ulong pov, double seconds)
+    private static string DescribeFrame(ModuleBase? module, AutoHints? guess, WorldState world, ulong pov, double seconds)
     {
         var b = new StringBuilder();
         var me = world.Actors.Find(pov);
@@ -549,6 +609,21 @@ public sealed class ReplayValidator
         if (me == null)
             return b.ToString();
         var slot = Math.Max(0, world.Party.FindSlot(pov));
+        if (module == null)
+        {
+            // no module: the cast-bar guesser's zones, solved inside the same player-centred window the live dodge uses without a footprint
+            foreach (var z in guess!.Active)
+            {
+                var inIt = z.Shape.Check(me.Position, z.Origin, z.Rotation);
+                b.AppendLine($"    guess for action {z.Action}: {z.Shape} at {Fmt(z.Origin)} rot {z.Rotation.Deg.ToString("0", CultureInfo.InvariantCulture)} in {(z.Activation - world.CurrentTime).TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture)}s{(inIt ? "  <- you are in it" : "")}");
+            }
+            var th = new AIHints();
+            TrashHints(guess, me, th);
+            var tspot = ArenaPathfinder.Solve(th, world.CurrentTime, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+            var tv = !tspot.NeedToMove ? "safe, stay" : tspot.Found ? $"move to {Fmt(tspot.Target)}, {(tspot.Target - me.Position).Length().ToString("0.0", CultureInfo.InvariantCulture)}y away" : "wants to move, no safe spot";
+            b.AppendLine($"    solver sees {th.ForbiddenZones.Count} guessed zone(s); offline solve (30y window, no footprint): {tv}");
+            return b.ToString();
+        }
         foreach (var c in module.Components)
         {
             if (c is Components.GenericAOEs g)
@@ -573,6 +648,16 @@ public sealed class ReplayValidator
         var verdict = !spot.NeedToMove ? "safe, stay" : spot.Found ? $"move to {Fmt(spot.Target)}, {(spot.Target - me.Position).Length().ToString("0.0", CultureInfo.InvariantCulture)}y away" : "wants to move, no safe spot";
         b.AppendLine($"    solver sees {hints.ForbiddenZones.Count} forbidden zone(s){(hints.ForbiddenZones.Count > 0 ? ", soonest in " + Math.Max(soonest, 0).ToString("0.0", CultureInfo.InvariantCulture) + "s" : "")}; offline solve: {verdict}");
         return b.ToString();
+    }
+
+    /// <summary>The live dodge's hints for trash, minus the footprint: the guessed zones inside a 30-yalm window on the player.</summary>
+    private static void TrashHints(AutoHints guess, Actor me, AIHints into)
+    {
+        into.Clear();
+        into.PlayerPosition = me.Position;
+        into.Center = me.Position;
+        into.Bounds = new ArenaBoundsCircle(30f);
+        guess.AddForbiddenZones(into);
     }
 
     private static string Fmt(WPos p) => $"({p.X.ToString("0.0", CultureInfo.InvariantCulture)}, {p.Z.ToString("0.0", CultureInfo.InvariantCulture)})";

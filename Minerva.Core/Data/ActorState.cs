@@ -438,16 +438,20 @@ public sealed class ActorState : IEnumerable<Actor>
         public override void Write(OperationOutput o) => o.Tag("VFX ").Emit(this.InstanceID, "X").Emit(vfxID).Emit(targetID, "X");
     }
 
-    /// <summary>Model-state change (e.g. a boss opening/closing a hand). Event-only.</summary>
-    public sealed class OpModelState(ulong instanceID, byte modelState) : Operation(instanceID)
+    /// <summary>Model-state change (e.g. a boss opening/closing a hand), with the two animation-state bytes
+    /// ported modules key on: a wandering head is walking when AnimState1 is 1. Until 2026-09-06 only the
+    /// model byte was ever set, so every module reading the animation bytes saw zero. Event-only.</summary>
+    public sealed class OpModelState(ulong instanceID, byte modelState, byte animState1 = 0, byte animState2 = 0) : Operation(instanceID)
     {
         public readonly byte ModelState = modelState;
+        public readonly byte AnimState1 = animState1;
+        public readonly byte AnimState2 = animState2;
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            actor.ModelState = new(this.ModelState);
+            actor.ModelState = new(this.ModelState, this.AnimState1, this.AnimState2);
             ws.Actors.ModelStateChanged.Fire(actor, this.ModelState);
         }
-        public override void Write(OperationOutput o) => o.Tag("MDLS").Emit(this.InstanceID, "X").Emit(this.ModelState);
+        public override void Write(OperationOutput o) => o.Tag("MDLS").Emit(this.InstanceID, "X").Emit(this.ModelState).Emit(this.AnimState1).Emit(this.AnimState2);
     }
 
     /// <summary>Action-timeline event played on an actor. Event-only.</summary>

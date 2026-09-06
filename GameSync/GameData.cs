@@ -21,6 +21,22 @@ namespace Minerva.GameSync;
 internal static unsafe class GameData
 {
     /// <summary>Content Finder Condition id of the current duty (0 in the open world).</summary>
+    /// <summary>Deep dungeons (ContentType 21) have walls but no ledges: nothing for the floor probe to
+    /// catch, and on 2026-09-06 it held the dodge still in a Nerve Gas cone instead.</summary>
+    public static bool IsDeepDungeon(ushort cfcId)
+    {
+        if (cfcId == 0)
+            return false;
+        if (deepDungeonByCfc.TryGetValue(cfcId, out var known))
+            return known;
+        var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
+        var deep = sheet != null && sheet.TryGetRow(cfcId, out var row) && row.ContentType.RowId == 21;
+        deepDungeonByCfc[cfcId] = deep;
+        return deep;
+    }
+
+    private static readonly Dictionary<ushort, bool> deepDungeonByCfc = [];
+
     public static ushort CurrentContentFinderConditionId()
     {
         var gm = GameMain.Instance();
@@ -105,6 +121,19 @@ internal static unsafe class GameData
     /// </summary>
     public static bool IsClassifiedEnemy(nint objectAddress)
         => objectAddress != 0 && ActionManager.ClassifyTarget((Character*)objectAddress) == ActionManager.TargetCategory.Enemy;
+
+    /// <summary>
+    /// The character's model state and both animation-state bytes, read from its timeline the way
+    /// BossmodReborn does every frame. The model-state packet alone never carried the animation bytes,
+    /// and eleven ported modules key on them (Tiamat's Clone's walking heads are "AnimState1 == 1").
+    /// </summary>
+    public static ActorModelState ModelState(nint characterAddress)
+    {
+        if (characterAddress == 0)
+            return default;
+        var chr = (Character*)characterAddress;
+        return new ActorModelState(chr->Timeline.ModelState, chr->Timeline.AnimationState[0], chr->Timeline.AnimationState[1]);
+    }
 
     /// <summary>
     /// True if the actor has a live cast-info block. Dalamud's cast getters (<c>IsCasting</c>,

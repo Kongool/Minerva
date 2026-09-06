@@ -237,11 +237,11 @@ public static class ArenaPathfinder
         // than freeze: partially clearing a zone beats standing in it because the ideal spot was too far.
         var budget = TimeUntilDanger(hints, player, deadline, solveNow);
         if (TryNearestSafe(hints, deadline, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
-            return Settle(hints, deadline, player, spot, cellSize);
+            return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
         if (TryNearestSafe(hints, deadline, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
-            return Settle(hints, deadline, player, spot, cellSize);
+            return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
         if (safetyMargin > 0f && TryNearestSafe(hints, deadline, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
-            return Settle(hints, deadline, player, spot, cellSize);
+            return Settle(hints, deadline, player, spot, cellSize, 0f);
 
         // Nothing is safe from everything inside the horizon. Before giving up, ask the same question with
         // a nearer deadline: the latest activation for which some reachable cell is clear of all that lands
@@ -251,7 +251,7 @@ public static class ArenaPathfinder
         // re-solves, so the second wave is dodged from wherever the first was dodged to, as a person does.
         foreach (var earlier in ActivationsBefore(hints, deadline, solveNow))
             if (TryNearestSafe(hints, earlier, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
-                return Settle(hints, earlier, player, spot, cellSize);
+                return Settle(hints, earlier, player, spot, cellSize, safetyMargin);
 
         return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
     }
@@ -379,12 +379,18 @@ public static class ArenaPathfinder
 
     /// <summary>
     /// When the best cell we can reach is the one we're already standing on, there is nothing to gain by
-    /// moving: hold, provided we aren't actually inside a zone. This is what keeps the margin-based
-    /// "need to move" test from twitching forever in arenas too constrained to satisfy the margin — e.g. a
-    /// donut whose safe centre is smaller than the margin itself.
+    /// moving: hold, provided the spot underfoot clears the same bar the search used. This is what keeps
+    /// the margin-based "need to move" test from twitching forever in arenas too constrained to satisfy
+    /// the margin — e.g. a donut whose safe centre is smaller than the margin itself: that search ran with
+    /// no margin, so holding is judged with none.
+    /// <para>Judged with the margin, not without it, since 2026-09-06. Judged without it, the hold applied
+    /// anywhere inside the margin band whenever the clear cell was under a yalm away, so the band the user
+    /// configured was worth nothing: a Warrior stood 8.1 to 8.7 yalms from a guessed 8-yalm Body Slam with
+    /// a 1.5-yalm margin, held there for two seconds, and the game (radius plus hitbox, plus a snapshot
+    /// taken early) hit at 8.5.</para>
     /// </summary>
-    private static SafeSpot Settle(AIHints hints, DateTime deadline, WPos player, SafeSpot spot, float cellSize)
-        => (spot.Target - player).LengthSq() <= cellSize * cellSize && !hints.InImminentDanger(player, deadline)
+    private static SafeSpot Settle(AIHints hints, DateTime deadline, WPos player, SafeSpot spot, float cellSize, float margin)
+        => (spot.Target - player).LengthSq() <= cellSize * cellSize && !hints.InImminentDanger(player, deadline, margin)
             ? SafeSpot.Stay
             : spot;
 

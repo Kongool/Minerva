@@ -30,6 +30,10 @@ public sealed class AIManager
     /// </summary>
     private readonly DaedalusRosterIPC roster = new();
     private readonly List<WPos> knownVoids = [];
+    private readonly KnownGround knownGround = new(); // where anyone has stood: the probe cannot overrule it
+    private int probeRejectStreak;       // consecutive frames on which the probe rejected a target
+    private DateTime probeLastReject;
+    private bool floorProbeDistrusted;   // the probe refused every frame on this zone: off until the next one
     private bool floorProbeStoodDown; // tracks the self-calibration state so the stand-down log fires on transition, not every frame
     private ushort voidsZone;
     private WPos? committedTarget;
@@ -674,6 +678,9 @@ public sealed class AIManager
             this.voidsZone = this.world.CurrentZone;
             this.knownVoids.Clear(); // a hole in the last arena says nothing about this one
             this.floorProbeStoodDown = false; // re-evaluate the probe fresh in the new zone (fresh stand-down signal)
+            this.floorProbeDistrusted = false;
+            this.probeRejectStreak = 0;
+            this.knownGround.Reset();
         }
 
         var playerY = pc.PosRot.Y;
@@ -682,6 +689,14 @@ public sealed class AIManager
             if (a.IsDeadOrDestroyed || a.Type is not (ActorType.Player or ActorType.Enemy or ActorType.Buddy))
                 continue;
             this.footprint.Observe(a.Position, a.PosRot.Y - playerY);
+            if (MathF.Abs(a.PosRot.Y - playerY) <= ArenaFootprint.SameFloorTolerance)
+            {
+                this.knownGround.Observe(a.Position);
+                // somebody standing in a "hole" settles it: the probe was wrong there
+                for (var i = this.knownVoids.Count - 1; i >= 0; --i)
+                    if ((this.knownVoids[i] - a.Position).LengthSq() < VoidRadius * VoidRadius)
+                        this.knownVoids.RemoveAt(i);
+            }
         }
     }
 
@@ -706,6 +721,12 @@ public sealed class AIManager
     private SafeSpot RejectFloorless(Actor pc, SafeSpot spot, DateTime now, float margin, UptimeGoal? goal, float horizon)
     {
         if (!spot.NeedToMove || !spot.Found)
+            return spot;
+
+        // Deep dungeons have walls, not ledges: nothing here for the probe to catch, and on 2026-09-06 it
+        // held the dodge still inside a Nerve Gas cone instead (Orthos 21-30: "no floor along the path"
+        // on every frame of a flat floor). A probe that has already refused every frame is off for the zone.
+        if (this.floorProbeDistrusted || GameSync.GameData.IsDeepDungeon(this.world.CurrentCFCID))
             return spot;
 
         var from = pc.PosRot;
@@ -738,6 +759,20 @@ public sealed class AIManager
 
             // instrumentation: the probe caught a ledge — a discrete, low-frequency event worth a line each
             Service.Log.Information($"Minerva floor probe: REJECTED dodge target {spot.Target} — no floor along the path (attempt {attempt + 1}/{MaxFloorRetries}); re-solving around the void.");
+
+            // A ledge is found once and remembered; the next solve routes round it. A probe that refuses
+            // frame after frame is misreading the zone (Orthos, 2026-09-06: the same target refused thirty
+            // times a second for six seconds while the party walked all over it), and every refusal it
+            // remembered is a fake hole. Stand down for the zone and forget them.
+            this.probeRejectStreak = (now - this.probeLastReject).TotalSeconds <= 0.25 ? this.probeRejectStreak + 1 : 1;
+            this.probeLastReject = now;
+            if (this.probeRejectStreak >= 30)
+            {
+                Service.Log.Information($"Minerva floor probe: STOOD DOWN — {this.probeRejectStreak} refusals in a row on ground nobody fell from; misreading this zone, floor checks off until the next one.");
+                this.floorProbeDistrusted = true;
+                this.knownVoids.Clear();
+                return spot;
+            }
             this.RememberVoid(spot.Target);
             this.hints.TemporaryObstacles.Add(new SDCircle(spot.Target, VoidRadius));
             spot = ArenaPathfinder.Solve(this.hints, now, horizonSeconds: horizon, safetyMargin: margin, goal: goal,
@@ -760,18 +795,39 @@ public sealed class AIManager
     /// over -- the first walks the character off the edge, the second refuses a destination that was fine.
     /// Falls back to the chord when no route was computed, which is what the direct-steering path walks.</para>
     /// </summary>
-    private static bool RouteHasFloor(Vector4 from, SafeSpot spot)
+    private bool RouteHasFloor(Vector4 from, SafeSpot spot)
     {
         var at = new Vector3(from.X, from.Y, from.Z);
         if (spot.Route is not { Count: > 0 } route)
-            return GameSync.GameData.PathHasFloor(at, new Vector3(spot.Target.X, from.Y, spot.Target.Z));
+            return this.SegmentHasFloor(at, new Vector3(spot.Target.X, from.Y, spot.Target.Z));
 
         for (var i = 0; i < route.Count; ++i)
         {
             var next = new Vector3(route[i].X, from.Y, route[i].Z);
-            if (!GameSync.GameData.PathHasFloor(at, next))
+            if (!this.SegmentHasFloor(at, next))
                 return false;
             at = next;
+        }
+        return true;
+    }
+
+    /// <summary>One leg of the walk, sampled every four yalms like <see cref="GameSync.GameData.PathHasFloor"/>,
+    /// except that a sample on ground somebody has stood on is ground whatever the ray says.</summary>
+    private bool SegmentHasFloor(Vector3 from, Vector3 to)
+    {
+        var dx = to.X - from.X;
+        var dz = to.Z - from.Z;
+        var dist = MathF.Sqrt((dx * dx) + (dz * dz));
+        var steps = Math.Clamp((int)MathF.Ceiling(dist / 4f), 1, 8);
+        for (var i = 1; i <= steps; ++i)
+        {
+            var t = (float)i / steps;
+            var x = from.X + (dx * t);
+            var z = from.Z + (dz * t);
+            if (this.knownGround.Contains(new WPos(x, z)))
+                continue;
+            if (!GameSync.GameData.HasFloorAt(x, z, from.Y))
+                return false;
         }
         return true;
     }
@@ -908,7 +964,7 @@ public sealed class AIManager
         // Prefer the arena we have watched people stand in over a window centred on the player. The window
         // is what walks you off a platform: stand on the edge and half of it is over the drop, so the far
         // side of an edge-hugging AOE reads as clear ground. An arena-centred box has no such far side.
-        if (this.footprint.TryEstimate(out var center, out var bounds))
+        if (this.footprint.TryEstimate(pc.Position, out var center, out var bounds))
         {
             this.hints.Center = center;
             this.hints.Bounds = bounds;

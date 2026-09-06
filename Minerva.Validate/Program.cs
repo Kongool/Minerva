@@ -29,6 +29,8 @@ if (args_.Length == 0 || args_.Contains("--help") || args_.Contains("-h"))
           --strict           also fail on uncovered boss-visual casts, not just helper casts
           --pov <name|hex>   judge the hits for another player in the pull (their name, or instance id)
           --aoes <s[,s..]>   print what the module drew at those seconds, and what the solver would do with it
+          --game <sqpack>    game data: lets a trash recording (no module) replay the cast-bar guesser and names actions;
+                             found on its own when the game is installed in the usual place
 
         minerva-validate --compare-bmr <recording.log> [--html <out.html>]
           run Minerva's and BMR's module over one recording and report AOE disagreements;
@@ -115,6 +117,18 @@ if (registry.Count == 0)
     return 2;
 }
 
+// The game's own sheets, best effort: with them a recording that activated no module is judged against the
+// cast-bar guesser the live dodge ran on, and actions get their names; without them it still validates.
+OfflineGameSheets? sheets = null;
+foreach (var candidate in ArgValue("--game") is { } gameArg ? [gameArg] : OfflineGameSheets.LikelyPaths().ToArray())
+{
+    sheets = OfflineGameSheets.TryOpen(candidate, out _);
+    if (sheets != null)
+        break;
+}
+if (sheets == null && !quiet)
+    Console.WriteLine("game data: not found (pass --game <...\\game\\sqpack>); trash recordings are judged without the cast-bar guesser");
+
 var files = Directory.Exists(target)
     ? Directory.GetFiles(target, "*.log", SearchOption.AllDirectories).OrderBy(f => f).ToArray()
     : File.Exists(target) ? [target] : [];
@@ -159,7 +173,7 @@ foreach (var file in files)
             if (povId == 0)
                 Console.WriteLine($"!! {Path.GetFileName(file)}: no player named {povArg} in this recording; judging the recorder instead");
         }
-        result = ReplayValidator.Validate(timeline, registry, povId, dumpAt);
+        result = ReplayValidator.Validate(timeline, registry, povId, dumpAt, sheets);
     }
     catch (Exception ex)
     {
@@ -181,7 +195,7 @@ foreach (var file in files)
     else
     {
         Console.WriteLine($"=== {Path.GetFileName(file)} ===");
-        Console.WriteLine(result.Render());
+        Console.WriteLine(result.Render(sheets));
         Console.WriteLine();
     }
 }

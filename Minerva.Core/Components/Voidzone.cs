@@ -14,6 +14,11 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
     /// <summary>The zone's footprint. Public because ported modules override <c>ActiveAOEs</c> and
     /// rebuild the instances themselves, which needs the Shape the component was built with.</summary>
     public readonly AOEShapeCircle Shape = new(radius);
+    /// <summary>How far ahead a moving source is assumed to keep going, in yalms; 0 for a puddle that stays
+    /// put. Twenty-three ported modules pass this and, until 2026-09-06, it was accepted and dropped.</summary>
+    public readonly float MovementHintLength;
+    /// <summary>A moving source's footprint: a capsule from where it stands to where it is heading.</summary>
+    public readonly AOEShapeCapsule? MoveShape;
     private readonly Func<ModuleBase, IEnumerable<Actor>>? sourcesFunc;
     private readonly List<AOEInstance> active = [];
 
@@ -21,7 +26,11 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
 
     /// <summary>BMR form: the live voidzone actors come from a callback (e.g. <c>m =&gt; m.Enemies(OID.Puddle)</c>).</summary>
     public Voidzone(ModuleBase module, float radius, Func<ModuleBase, IEnumerable<Actor>> sources, float moveHintLength = default) : this(module, radius, [])
-        => this.sourcesFunc = sources;
+    {
+        this.sourcesFunc = sources;
+        this.MovementHintLength = moveHintLength;
+        this.MoveShape = moveHintLength > 0f ? new AOEShapeCapsule(radius, moveHintLength) : null;
+    }
 
     /// <summary>The live voidzone actors. Public because ported modules query another component's
     /// voidzones to place themselves relative to them.</summary>
@@ -46,7 +55,7 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
         foreach (var a in this.Sources())
-            this.Arena.ZoneShape(this.Shape, a.Position, default, Colors.AOE);
+            this.Arena.ZoneShape(this.MoveShape ?? (AOEShape)this.Shape, a.Position, this.MoveShape != null ? a.Rotation : default, Colors.AOE);
     }
 
     public override void AddHints(int slot, Actor actor, TextHints hints)
@@ -63,8 +72,29 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        if (this.MovementHintLength <= 0f)
+        {
+            foreach (var a in this.Sources())
+                hints.AddForbiddenZone(this.Shape, a.Position, default, this.World.CurrentTime);
+            return;
+        }
+
+        // A walking hazard is forbidden where it is and, sooner or later, where it is heading: capsules of
+        // half, one, two and three hint lengths along its facing, landing at 1.1s, 3s, 10s and never, as
+        // BossmodReborn does. The dodge then leaves the lane rather than stepping a yalm aside and being
+        // caught (Tiamat's Clone's heads, 2026-09-06: six hits from a hazard drawn as a 2-yalm circle).
+        var near = this.World.FutureTime(1.1d);
+        var soon = this.World.FutureTime(3d);
+        var far = this.World.FutureTime(10d);
         foreach (var a in this.Sources())
-            hints.AddForbiddenZone(this.Shape, a.Position, default, this.World.CurrentTime);
+        {
+            var dir = a.Rotation.ToDirection();
+            hints.AddForbiddenZone(new SDCapsule(a.Position, dir, this.MovementHintLength * 0.5f, this.Radius), near);
+            hints.AddForbiddenZone(new SDCapsule(a.Position, dir, this.MovementHintLength, this.Radius), soon);
+            hints.AddForbiddenZone(new SDCapsule(a.Position, dir, 2f * this.MovementHintLength, this.Radius), far);
+            hints.AddForbiddenZone(new SDCapsule(a.Position, dir, 3f * this.MovementHintLength, this.Radius), DateTime.MaxValue);
+            hints.TemporaryObstacles.Add(new SDCircle(a.Position, this.Radius));
+        }
     }
 
     /// <summary>
@@ -77,7 +107,7 @@ public class Voidzone(ModuleBase module, float radius, uint[] oids) : ModuleComp
     {
         this.active.Clear();
         foreach (var a in this.Sources())
-            this.active.Add(new AOEInstance(this.Shape, a.Position, default, this.World.CurrentTime));
+            this.active.Add(new AOEInstance(this.MoveShape ?? (AOEShape)this.Shape, a.Position, this.MoveShape != null ? a.Rotation : default, this.World.CurrentTime));
         return CollectionsMarshal.AsSpan(this.active);
     }
 }

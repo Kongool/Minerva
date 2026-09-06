@@ -92,4 +92,25 @@ public sealed class ArenaFootprint
         bounds = new ArenaBoundsRect(MathF.Min(halfX, MaxHalfExtent), MathF.Min(halfZ, MaxHalfExtent));
         return true;
     }
+
+    /// <summary>
+    /// As above, but the estimate has to contain <paramref name="near"/> (the player) to count. One that
+    /// does not is the last room, not this one: a deep dungeon is one territory for ten floors, so the
+    /// zone reset never fires, the box grows to its cap around the midpoint of everywhere anyone stood
+    /// since the first floor, and the moment the party walks out of it the solver has no cells near the
+    /// player (Eureka Orthos 61-70, 2026-09-06: no trash dodged at all). Leaving the box forgets it, and
+    /// the next frame's actors re-learn it where the party now is; until that estimate is wide enough the
+    /// caller falls back to its player-centred window.
+    /// </summary>
+    public bool TryEstimate(WPos near, out WPos center, out ArenaBounds bounds)
+    {
+        if (!this.TryEstimate(out center, out bounds))
+            return false;
+        if (bounds.Contains(center, near))
+            return true;
+        this.Reset();
+        center = default;
+        bounds = null!;
+        return false;
+    }
 }

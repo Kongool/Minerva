@@ -393,7 +393,19 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             this.UpdateCast(existing, chr, addr);
             this.UpdateStatuses(existing, chr, addr);
             this.UpdateIncomingEffects(existing, addr);
+            this.UpdateModelState(existing, addr);
         }
+    }
+
+    /// <summary>Model and animation state, polled from the character's timeline as BossmodReborn does: the
+    /// model-state packet carries no animation bytes, and ported modules key on them.</summary>
+    private void UpdateModelState(Actor act, nint addr)
+    {
+        var ms = GameData.ModelState(addr);
+        var cur = act.ModelState;
+        if (cur.ModelState == ms.ModelState && cur.AnimState1 == ms.AnimState1 && cur.AnimState2 == ms.AnimState2)
+            return;
+        this.ws.Execute(new ActorState.OpModelState(act.InstanceID, ms.ModelState, ms.AnimState1, ms.AnimState2));
     }
 
     /// <summary>
@@ -681,9 +693,12 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             case CatTetherCancel:
                 this.QueueActorOp(actorID, new ActorState.OpTether(actorID, default));
                 break;
-            case CatModelState: // p1 = model state row index
-                this.QueueActorOp(actorID, new ActorState.OpModelState(actorID, (byte)p1));
+            case CatModelState: // p1 = model state row index; keep the polled animation bytes alongside it
+            {
+                var known = this.ws.Actors.Find(actorID)?.ModelState ?? default;
+                this.QueueActorOp(actorID, new ActorState.OpModelState(actorID, (byte)p1, known.AnimState1, known.AnimState2));
                 break;
+            }
             case CatPlayActionTimeline: // p1 = timeline id
                 this.QueueActorOp(actorID, new ActorState.OpActionTimeline(actorID, (ushort)p1));
                 break;

@@ -20,11 +20,12 @@ public sealed class AutoHints
     /// <summary>A point-blank circle at least this wide is a raidwide: no amount of running clears it.</summary>
     public const float RaidwideRadius = 30f;
 
+    /// <summary>One cast being tracked: what was drawn for it, where, and when it lands.</summary>
+    public readonly record struct Zone(AOEShape Shape, WPos Origin, Angle Rotation, DateTime Activation, uint Action);
+
     private readonly WorldState world;
     private readonly IShapeResolver shapes;
-    private readonly Dictionary<ulong, Pending> active = [];
-
-    private readonly record struct Pending(AOEShape Shape, WPos Origin, Angle Rotation, DateTime Activation);
+    private readonly Dictionary<ulong, Zone> active = [];
 
     public AutoHints(WorldState world, IShapeResolver shapes)
     {
@@ -38,6 +39,17 @@ public sealed class AutoHints
     /// <summary>Casts currently being tracked — lets a caller skip the pathfinder entirely when idle.</summary>
     public int Count => this.active.Count;
 
+    /// <summary>The zones being tracked right now, for a replay or a radar to show what the guess was.</summary>
+    public IEnumerable<Zone> Active => this.active.Values;
+
+    /// <summary>
+    /// The one rule for what gets drawn: a ground shape the sheet describes, smaller than a raidwide.
+    /// Shared with the replay validator so an offline verdict uses the same test as the live guess.
+    /// </summary>
+    public static bool Draws(ShapeHint hint)
+        => hint.Kind is not (ShapeKind.Unknown or ShapeKind.SingleTarget)
+            && !(hint.Kind == ShapeKind.Circle && hint.Radius >= RaidwideRadius);
+
     private void OnCastStarted(Actor caster)
     {
         if (caster.CastInfo is not { } cast || cast.Action.ID == 0)
@@ -46,17 +58,15 @@ public sealed class AutoHints
             return;
 
         var hint = this.shapes.Resolve(cast.Action.ID);
-        if (hint.Kind is ShapeKind.Unknown or ShapeKind.SingleTarget)
-            return; // nothing aimed at the ground: a tankbuster or a heal, not something to walk out of
-        if (hint.Kind == ShapeKind.Circle && hint.Radius >= RaidwideRadius)
-            return;
+        if (!Draws(hint))
+            return; // nothing aimed at the ground (a tankbuster, a heal), or a raidwide nobody can leave
 
         // a large enemy's cone or line starts at its edge, not its centre
         var reach = hint.Kind is ShapeKind.Cone or ShapeKind.Rect ? caster.HitboxRadius : 0f;
         if (hint with { Radius = hint.Radius + reach } is var sized && sized.ToShape() is { } shape)
         {
             var origin = cast.LocXZ != default ? cast.LocXZ : caster.Position;
-            this.active[caster.InstanceID] = new Pending(shape, origin, cast.Rotation, this.world.FutureTime(cast.RemainingTime));
+            this.active[caster.InstanceID] = new Zone(shape, origin, cast.Rotation, this.world.FutureTime(cast.RemainingTime), cast.Action.ID);
         }
     }
 

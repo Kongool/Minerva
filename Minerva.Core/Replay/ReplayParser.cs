@@ -146,7 +146,8 @@ public sealed class ReplayParser
         "ATG+" => new ActorState.OpTargetable(r.NextHex64(), true),
         "ATG-" => new ActorState.OpTargetable(r.NextHex64(), false),
         "CLAS" => new ActorState.OpClassChange(r.NextHex64(), (Class)r.NextU32()),
-        "MDLS" => new ActorState.OpModelState(r.NextHex64(), (byte)r.NextU32()),
+        // the two animation bytes are trailing and optional: logs before 2026-09-06 carry the model byte alone
+        "MDLS" => new ActorState.OpModelState(r.NextHex64(), (byte)r.NextU32(), r.HasMore ? (byte)r.NextU32() : (byte)0, r.HasMore ? (byte)r.NextU32() : (byte)0),
         "ATML" => new ActorState.OpActionTimeline(r.NextHex64(), (ushort)r.NextU32()),
         "ESTA" => new ActorState.OpEventState(r.NextHex64(), (byte)r.NextU32()),
         "RFLG" => new ActorState.OpRenderflags(r.NextHex64(), (int)r.NextHex32()),
