@@ -35,6 +35,10 @@ public sealed class ReplayValidator
         /// <summary>What the module drew and what the solver would do with it, at each second asked for with --aoes.</summary>
         public IReadOnlyList<string> Dumps { get; init; } = [];
 
+        /// <summary>How the fight's gazes would have driven facing, measured frame by frame. Empty when the
+        /// fight has none.</summary>
+        public string GazeNote { get; init; } = "";
+
         public int Uncovered => this.UncoveredMechanics.Count + this.UncoveredVisuals.Count;
 
         public string Render(INameResolver? names = null)
@@ -70,6 +74,8 @@ public sealed class ReplayValidator
                     b.AppendLine($"    {h.Seconds,6:0.0}s  {name} from {h.Caster}: {h.Why}");
                 }
             }
+            if (this.GazeNote.Length > 0)
+                b.AppendLine("  " + this.GazeNote);
             foreach (var d in this.Dumps)
                 b.Append(d);
             return b.ToString();
@@ -268,6 +274,14 @@ public sealed class ReplayValidator
         // recording is judged like a module fight (Eureka Orthos, 2026-09-06). Needs the game's sheets.
         var guess = shapes != null ? new AutoHints(world, shapes) : null;
         var scratch = new AIHints();
+        // Facing audit: a fight built out of gazes drives ResolveFacing every frame, and a heading that
+        // keeps changing means the live plugin re-faces (and cancels auto-attack) over and over. Sampled
+        // at 10Hz, which is coarse next to a frame but fine for "how long was a gaze up and how often
+        // would it have turned".
+        long gazeFrames = 0, refaceFrames = 0, holdFrames = 0, gazeSamples = 0;
+        var maxArcs = 0;
+        var impossibleFrames = 0L;
+        var lastGazeSample = 0L; // 0, not MinValue: subtracting from MinValue wraps (the same trap as lastInsideDrawnTicks)
         var castEndDecision = new Dictionary<ulong, DodgeDecision>(); // the decision in force when each caster's cast ended: the hit event arrives after the guess is gone
         long lastSpreadOnMeTicks = 0, lastStackOnMeTicks = 0; // when the POV last carried a spread / stack marker
         var lastInsideDrawnTicks = 0L; // when the POV was last inside something the module drew (0, not MinValue: a subtraction from MinValue wraps and called every early hit "drawn")
@@ -278,6 +292,10 @@ public sealed class ReplayValidator
         var myCasts = new List<(long Start, long End, uint Action, float Total)>(); // the POV's own hardcasts
         var enemyEvents = new List<(long Ticks, uint Action, HashSet<ulong> Players)>(); // who each enemy event hit, for the raidwide test
         var playersSeen = new HashSet<ulong>();
+        // "It hit everyone" has to mean the party, not the zone. An Occult Crescent critical engagement has
+        // up to forty-eight players in the actor table, so counting them all meant a raidwide never once
+        // qualified and nine of them were reported as module gaps (2026-09-06, Imbalanced Diet).
+        var partySeen = new HashSet<ulong>();
         var povStatuses = new List<(long Ticks, uint Status, ulong Source)>(); // statuses the POV gained, to attach late ones to their hit
         var castStarts = new Dictionary<(ulong Caster, uint Action), long>(); // when each enemy cast began
         foreach (var (ticks, op) in timeline.Ops)
@@ -395,6 +413,8 @@ public sealed class ReplayValidator
             }
             if (op is ActorState.OpCreate made && made.Type == ActorType.Player)
                 playersSeen.Add(made.InstanceID);
+            if (op is PartyState.OpModify joined && joined.Member.InstanceID != 0)
+                partySeen.Add(joined.Member.InstanceID);
             if (pov != 0 && op is ActorState.OpStatus st && st.InstanceID == pov && st.Value.ID != 0)
                 povStatuses.Add((ticks, st.Value.ID, st.Value.SourceID));
             if (op is ActorState.OpCastInfo ended && ended.Value == null)
@@ -435,6 +455,31 @@ public sealed class ReplayValidator
             }
             module?.Update();
             DrawCounts(module, countsAfter);
+            if (pov != 0 && module != null && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcFacing
+                && ticks - lastGazeSample >= TimeSpan.TicksPerSecond / 10)
+            {
+                lastGazeSample = ticks;
+                ++gazeSamples;
+                var gh = new AIHints();
+                module.BuildAIHints(Math.Max(0, world.Party.FindSlot(pov)), pcFacing, gh);
+                if (gh.ForbiddenDirections.Count > 0)
+                {
+                    ++gazeFrames;
+                    maxArcs = Math.Max(maxArcs, gh.ForbiddenDirections.Count);
+                    var horizon = world.CurrentTime.AddSeconds(5d);
+                    if (gh.TryFindBestFacing(horizon, pcFacing.Rotation, out var want, out var hit))
+                    {
+                        if (hit > 0)
+                            ++impossibleFrames;
+                        // the live plugin issues a Face whenever the wanted heading differs at all
+                        if (!want.AlmostEqual(pcFacing.Rotation, 0.01f))
+                            ++refaceFrames;
+                    }
+                    // the dodge's gaze hold: steering stops while a gaze resolves within 0.6s
+                    if (gh.NextGazeResolve(world.CurrentTime) is { } soon && (soon - world.CurrentTime).TotalSeconds <= 0.6d)
+                        ++holdFrames;
+                }
+            }
             if (pov != 0 && module != null && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcNow)
             {
                 if (InsideAnyAoe(module, pcNow))
@@ -537,11 +582,16 @@ public sealed class ReplayValidator
             foreach (var e in enemyEvents)
                 if (e.Action == h.Action && Math.Abs(e.Ticks - at) <= TimeSpan.TicksPerSecond / 2)
                     union.UnionWith(e.Players);
-            if (playersSeen.Count >= 2 && union.Count >= playersSeen.Count)
+            var everyone = partySeen.Count >= 2 ? partySeen : playersSeen;
+            var hitOfThem = 0;
+            foreach (var id in everyone)
+                if (union.Contains(id))
+                    ++hitOfThem;
+            if (everyone.Count >= 2 && hitOfThem >= everyone.Count)
                 hits[i] = h with { PartyWide = true };
         }
 
-        return new Result(module?.GetType().Name ?? (guess != null ? "(no module: cast-bar guesser)" : "(no module activated)"), castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps };
+        return new Result(module?.GetType().Name ?? (guess != null ? "(no module: cast-bar guesser)" : "(no module activated)"), castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps, GazeNote = GazeSummary(gazeFrames, refaceFrames, holdFrames, impossibleFrames, maxArcs, gazeSamples) };
     }
 
     private static ModuleBase? TryActivate(WorldState world, ModuleRegistry registry, HashSet<uint> watched)
@@ -653,12 +703,41 @@ public sealed class ReplayValidator
         }
         var hints = new AIHints();
         module.BuildAIHints(slot, me, hints);
+        if (hints.ForbiddenDirections.Count > 0)
+        {
+            b.AppendLine($"    facing: you are looking {me.Rotation.Deg.ToString("0", CultureInfo.InvariantCulture)} deg");
+            foreach (var (centre, half, act) in hints.ForbiddenDirections)
+            {
+                var off = MathF.Abs((me.Rotation - centre).Normalized().Deg);
+                b.AppendLine($"      forbidden arc centred {centre.Deg.ToString("0", CultureInfo.InvariantCulture)} deg +/-{half.Deg.ToString("0", CultureInfo.InvariantCulture)}, resolving in {(act == default ? 0d : (act - world.CurrentTime).TotalSeconds).ToString("0.0", CultureInfo.InvariantCulture)}s; you are {off.ToString("0", CultureInfo.InvariantCulture)} deg off it{(off <= half.Deg ? "  <- LOOKING INTO IT" : "")}");
+            }
+            if (hints.TryFindBestFacing(world.CurrentTime.AddSeconds(5d), me.Rotation, out var want, out var hit))
+            {
+                var turn = MathF.Abs((want - me.Rotation).Normalized().Deg);
+                b.AppendLine($"      Minerva would face {want.Deg.ToString("0", CultureInfo.InvariantCulture)} deg (a {turn.ToString("0", CultureInfo.InvariantCulture)} deg turn), gazes still on it: {hit}");
+            }
+        }
         var soonest = double.MaxValue;
         foreach (var z in hints.ForbiddenZones)
             soonest = Math.Min(soonest, (z.Activation - world.CurrentTime).TotalSeconds);
         var spot = ArenaPathfinder.Solve(hints, world.CurrentTime, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
         var verdict = !spot.NeedToMove ? "safe, stay" : spot.Found ? $"move to {Fmt(spot.Target)}, {(spot.Target - me.Position).Length().ToString("0.0", CultureInfo.InvariantCulture)}y away" : "wants to move, no safe spot";
         b.AppendLine($"    solver sees {hints.ForbiddenZones.Count} forbidden zone(s){(hints.ForbiddenZones.Count > 0 ? ", soonest in " + Math.Max(soonest, 0).ToString("0.0", CultureInfo.InvariantCulture) + "s" : "")}; offline solve: {verdict}");
+        return b.ToString();
+    }
+
+    /// <summary>One line on how the fight's gazes would have driven facing and held the dodge. Seconds are
+    /// derived from the 10Hz sampling, so they are the share of the fight rather than exact clock time.</summary>
+    private static string GazeSummary(long gazeFrames, long reface, long hold, long impossible, int maxArcs, long samples)
+    {
+        if (gazeFrames == 0 || samples == 0)
+            return "";
+        var b = new StringBuilder();
+        b.Append($"gazes: a forbidden facing was up for {gazeFrames / 10.0:0.0}s of {samples / 10.0:0.0}s ({100.0 * gazeFrames / samples:0}% of the fight), up to {maxArcs} arc(s) at once");
+        b.Append($"; Minerva would have re-faced on {reface / 10.0:0.0}s of that ({(gazeFrames > 0 ? 100.0 * reface / gazeFrames : 0):0}% of the frames with a gaze up)");
+        if (impossible > 0)
+            b.Append($"; no fully safe heading existed for {impossible / 10.0:0.0}s");
+        b.Append($"; the dodge's gaze hold would have blocked steering for {hold / 10.0:0.0}s");
         return b.ToString();
     }
 

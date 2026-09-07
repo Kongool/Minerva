@@ -35,6 +35,9 @@ public sealed class AIManager
     private DateTime probeLastReject;
     private bool floorProbeDistrusted;   // the probe refused every frame on this zone: off until the next one
     private bool floorProbeStoodDown; // tracks the self-calibration state so the stand-down log fires on transition, not every frame
+    private bool turningForGaze;      // inside a turn episode: the log and the auto-attack stop fire on entry, not per frame
+    private int gazeFaceIssues;       // how many times this episode re-issued the facing (a spin shows up as a big number)
+    private DateTime gazeTurnStarted;
     private ushort voidsZone;
     private WPos? committedTarget;
     private Positional requestedPositional;
@@ -191,7 +194,7 @@ public sealed class AIManager
         var lead = Math.Clamp(this.config.AutoDodgeClearanceLead, 0f, 5f);
         this.Current = ArenaPathfinder.Solve(this.hints, now, horizonSeconds: horizon, safetyMargin: margin, goal: goal, moveSpeed: moveSpeed, clearanceLead: lead);
         // the hold has to judge safety on the same clock the solve did, or it keeps a target the solve rejected
-        this.Current = this.HoldCommitment(pc, now.AddSeconds(horizon + lead), margin);
+        this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed);
         this.Current = this.RejectFloorless(pc, this.Current, now, margin, goal, horizon);
         this.HasSolution = true;
         this.ResolveFacing(pc, now.AddSeconds(horizon));
@@ -325,6 +328,10 @@ public sealed class AIManager
             return DodgeReason.None;
         if (!this.Current.Found)
             return DodgeReason.NoSafeSpot;
+        // standing on ground that will fire, though not yet: the move is a step off it, not a dodge
+        if (!this.hints.InImminentDanger(pc.Position, deadline, margin)
+            && this.hints.SecondsUntilDangerAt(pc.Position, this.world.CurrentTime, margin) <= 30f)
+            return DodgeReason.Clearing;
         if (this.hints.InImminentDanger(pc.Position, deadline, margin))
             return DodgeReason.Danger;
         if (goal is { } g)
@@ -865,7 +872,10 @@ public sealed class AIManager
     private void ResolveFacing(Actor pc, DateTime deadline)
     {
         if (this.hints.ForbiddenDirections.Count == 0)
+        {
+            this.EndGazeTurn();
             return;
+        }
 
         this.FacingConstrained = true;
 
@@ -880,15 +890,41 @@ public sealed class AIManager
 
         // already clear: TryFindSafeFacing hands back the preferred facing untouched in that case
         if (facing.AlmostEqual(pc.Rotation, 0.01f))
+        {
+            this.EndGazeTurn();
             return;
+        }
 
         this.SafeFacing = facing;
-        if (this.config.AutoFaceGazes)
+        if (!this.config.AutoFaceGazes)
+            return;
+
+        // Once per episode, not once per frame. Cancelling the auto-attack is a game call and the turn
+        // takes several frames to interpolate, so calling both sixty times a second is how a gaze fight
+        // ends up looking like a seizure. Re-issuing the heading IS per frame and has to be: the rotation
+        // auto-faces the target on every action and would otherwise turn the character straight back.
+        if (!this.turningForGaze)
         {
-            // auto-attack re-faces the target every frame and would undo the turn before the next frame
+            this.turningForGaze = true;
+            this.gazeFaceIssues = 0;
+            this.gazeTurnStarted = this.world.CurrentTime;
             GameData.StopAutoAttack();
-            this.movement.Face(facing);
+            Service.Log.Information($"Minerva gaze: turning away from {this.hints.ForbiddenDirections.Count} arc(s) to {facing.Deg:0} degrees ({(gazesHit > 0 ? $"no clear heading, {gazesHit} still on us" : "clear heading")}).");
         }
+
+        ++this.gazeFaceIssues;
+        this.movement.Face(facing);
+    }
+
+    /// <summary>Close a turn episode and say how it went: a heading that had to be re-issued hundreds of
+    /// times was being fought for, which is what a rotation auto-facing the boss does to a gaze turn.</summary>
+    private void EndGazeTurn()
+    {
+        if (!this.turningForGaze)
+            return;
+        this.turningForGaze = false;
+        var held = (this.world.CurrentTime - this.gazeTurnStarted).TotalSeconds;
+        Service.Log.Information($"Minerva gaze: facing released after {held:0.0}s; the heading was re-issued {this.gazeFaceIssues} time(s).");
     }
 
     /// <summary>
@@ -937,7 +973,7 @@ public sealed class AIManager
     /// alternate frames, which reads in game as pulsing — it looks like the AI cannot tell you are already
     /// clear. Committing to a destination until it is reached or genuinely becomes unsafe removes both.</para>
     /// </summary>
-    private SafeSpot HoldCommitment(Actor pc, DateTime deadline, float margin)
+    private SafeSpot HoldCommitment(Actor pc, DateTime now, DateTime deadline, float margin, float moveSpeed)
     {
         if (!this.Current.NeedToMove || !this.Current.Found)
         {
@@ -947,13 +983,48 @@ public sealed class AIManager
 
         if (this.committedTarget is { } prev
             && (prev - pc.Position).Length() > ArrivedRange
-            && !this.hints.InImminentDanger(prev, deadline, margin))
+            && !this.hints.InImminentDanger(prev, deadline, margin)
+            && this.WayStillClear(pc.Position, prev, now, margin, moveSpeed))
         {
             return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
         }
 
         this.committedTarget = this.Current.Target;
         return this.Current;
+    }
+
+    /// <summary>
+    /// Is the walk to a committed destination still clear, given when each bit of it fires?
+    ///
+    /// <para>The commitment exists so the dodge stops re-picking a cell every frame, and it checked that
+    /// the destination was still safe -- but never the ground on the way to it. In a phase that spawns
+    /// zones in waves, one appears across the path after the decision is made and the character walks
+    /// straight through it while the endpoint stays perfectly safe. Ahead of the Competition, 2026-09-06:
+    /// one decision at 149.93s, a two-second walk to (-65, 478), and a six-yalm circle spawned at
+    /// (-73, 479.5) squarely across it. Two hits, a vulnerability stack each.</para>
+    ///
+    /// <para>Sampled every couple of yalms rather than swept: the question is only whether some piece of
+    /// the walk fires before the character is past it, and the next frame re-solves anyway.</para>
+    /// </summary>
+    private bool WayStillClear(WPos from, WPos to, DateTime now, float margin, float moveSpeed)
+    {
+        if (moveSpeed <= 0f)
+            return true;
+        var delta = to - from;
+        var distance = delta.Length();
+        if (distance < 0.01f)
+            return true;
+        var step = delta / distance;
+        var samples = Math.Clamp((int)MathF.Ceiling(distance / 2f), 1, 16);
+        for (var i = 1; i <= samples; ++i)
+        {
+            var along = distance * i / samples;
+            var at = from + (step * along);
+            if (this.hints.SecondsUntilDangerAt(at, now, margin) <= (along / moveSpeed) + 0.3f)
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>

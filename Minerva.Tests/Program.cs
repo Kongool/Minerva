@@ -572,6 +572,69 @@ t.Section("Auto-dodge pathfinding");
     t.True("two waves covering everything: still moves", staged.NeedToMove && staged.Found);
     t.True("two waves covering everything: clears the first wave", staged.Found && (staged.Target - (center - new WDir(15f, 0f))).Length() > 30f);
 
+    // Standing in a zone that is not imminent yet: step off it now, while the step is short. Pallmagia,
+    // 2026-09-06 -- eight seconds of standing still, then a 15-yalm run with 0.7s to spare.
+    {
+        var here = new WPos(100f, 100f);
+        var doomed = new AIHints { Center = here, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = here };
+        // a big zone: getting clear is a long walk, so it starts now rather than at the last second
+        doomed.AddForbiddenZone(new AOEShapeCircle(16f), here, default, now.AddSeconds(9d));
+        var drift = ArenaPathfinder.Solve(doomed, now, horizonSeconds: 5f, safetyMargin: 1f);
+        t.True("a long escape from ground that fires in nine seconds starts now", drift.NeedToMove && drift.Found);
+        t.True("and goes just clear of it", (drift.Target - here).Length() is > 16f and < 30f);
+
+        // a small one: stepping out at the last moment is fine, and the horizon is trusted to do it
+        var small = new AIHints { Center = here, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = here };
+        small.AddForbiddenZone(new AOEShapeCircle(6f), here, default, now.AddSeconds(9d));
+        t.True("a short escape waits for the horizon", !ArenaPathfinder.Solve(small, now, horizonSeconds: 5f, safetyMargin: 1f).NeedToMove);
+
+        // scenery does not count: a permanent voidzone must not have the character drifting for ever
+        var scenery = new AIHints { Center = here, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = here };
+        scenery.AddForbiddenZone(new AOEShapeCircle(6f), here, default, DateTime.MaxValue);
+        t.True("ground that fires in an hour is not worth moving for", !ArenaPathfinder.Solve(scenery, now, horizonSeconds: 5f, safetyMargin: 1f).NeedToMove);
+    }
+
+    // A route may cross a telegraph that fires long after you are through it, and must not cross one that
+    // fires while you are still in it. Pallmagia, 2026-09-06: escaping a 30-yalm circle, the path ran
+    // straight through a cone with 0.7s left because six yalms of penalty was cheaper than going round.
+    {
+        var wallCentre = new WPos(100f, 100f);
+        var wall = new AOEShapeRect(20f, 2f);   // a wall at x = 100, from z = 100 north
+        var from = new WPos(94f, 105f);
+        var to = new WPos(106f, 105f);
+
+        static bool CrossesTheWall(List<WPos> route)
+        {
+            foreach (var p in route)
+                if (p.X > 97.5f && p.X < 102.5f && p.Z > 99.5f && p.Z < 120.5f)
+                    return true;
+            return false;
+        }
+
+        var soonHints = new AIHints { Center = wallCentre, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = from };
+        soonHints.AddForbiddenZone(wall, wallCentre, default, now.AddSeconds(0.2d));
+        var soon = new RouteGrid(soonHints, now.AddSeconds(5d), from, 1f, 0f, now, ArenaPathfinder.DefaultMoveSpeed);
+        t.True("a wall that fires immediately is routed around", !CrossesTheWall(soon.Route(from, to)));
+
+        var laterHints = new AIHints { Center = wallCentre, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = from };
+        laterHints.AddForbiddenZone(wall, wallCentre, default, now.AddSeconds(4.5d));
+        var afterwards = new RouteGrid(laterHints, now.AddSeconds(5d), from, 1f, 0f, now, ArenaPathfinder.DefaultMoveSpeed);
+        // and going round is what it costs: the detour is never shorter than the route that may cross
+        static float Length(List<WPos> route, WPos start)
+        {
+            var total = 0f;
+            var at = start;
+            foreach (var p in route)
+            {
+                total += (p - at).Length();
+                at = p;
+            }
+            return total;
+        }
+        t.True("routing around a live wall costs distance, it does not save it",
+            Length(soon.Route(from, to), from) >= Length(afterwards.Route(from, to), from) - 0.01f);
+    }
+
     // the trash-mode arena estimate follows the party: a box learned in the last room is forgotten the
     // moment the player is no longer inside it (Eureka Orthos, 2026-09-06)
     var footprint = new ArenaFootprint();
@@ -1331,6 +1394,30 @@ t.Section("Gaze facing hints");
 
     t.Eq("four overlapping gazes publish four arcs", overlapping.ForbiddenDirections.Count, 4);
 
+    // A turn away from a gaze has to clear it by a real margin, not by a degree: the rotation turns the
+    // character back, the turn interpolates, and the game snapshots on its own clock. Eye to Eye,
+    // 2026-09-06: a 46-degree turn off a 45-degree arc petrified the user on almost every cycle.
+    {
+        var one = new AIHints();
+        var eyeAt = 30f.Degrees();
+        one.ForbiddenDirections.Add((eyeAt, 45f.Degrees(), t0.AddSeconds(3d)));
+        t.True("a safe heading exists", one.TryFindSafeFacing(t0.AddSeconds(5d), eyeAt, out _));
+        t.True("a heading is found", one.TryFindBestFacing(t0.AddSeconds(5d), eyeAt, out var away, out var hit) && hit == 0);
+        var off = MathF.Abs((away - eyeAt).Normalized().Deg);
+        t.True($"and it clears the arc by more than a degree (got {off:0} deg off a 45 deg arc)", off >= 45f + 20f);
+        // A facing one degree outside the arc is improved during the cast, not left to be twitched back in:
+        // Phantom Hydra, 2026-09-06, a five-second gaze and the turn began 0.7s before the snapshot.
+        var marginal = eyeAt + 46f.Degrees();
+        one.TryFindBestFacing(t0.AddSeconds(5d), marginal, out var improved, out _);
+        var clearance = MathF.Abs((improved - eyeAt).Normalized().Deg) - 45f;
+        t.True($"a barely-clear facing is widened during the cast (clearance {clearance:0} deg)", clearance >= 20f);
+
+        // a facing that already has room is left alone rather than spun to the far side
+        var comfortable = eyeAt + 150f.Degrees();
+        one.TryFindBestFacing(t0.AddSeconds(5d), comfortable, out var kept, out _);
+        t.True("a facing with room to spare is not turned", kept.AlmostEqual(comfortable, 0.01f));
+    }
+
     // only the boss gaze has resolved by t+5: turning away from it is enough, and it is a real turn
     var facingBoss = Angle.FromDirection(seer - stand);
     t.True("with one gaze live there is a safe facing",
@@ -1957,12 +2044,16 @@ t.Section("Gaze compression: Eye to Eye at enrage");
     dense.TryFindBestFacing(now.AddSeconds(1), 0f.Degrees(), out _, out var denseHits);
     t.True("denser gazes degrade rather than fail", denseHits is > 0 and <= 3);
 
-    // a facing already looking into one gaze turns just past its edge, not across the arena
+    // A facing looking into one gaze turns CLEAR of its edge -- not one degree past it, which is what the
+    // old 45-degree answer amounted to and what petrified the user on nearly every Eye to Eye cycle
+    // (2026-09-06) -- and still not across the arena.
     var single = Looking(stood, orbs.Take(1), now);
     var into = Angle.FromDirection(orbs[0] - stood);
     single.TryFindBestFacing(now.AddSeconds(1), into, out var moved, out var oneHits);
     t.Eq("a single gaze is always escapable", oneHits, 0);
-    t.True("by a turn of about 45 degrees", MathF.Abs((moved - into).Normalized().Deg) is > 40f and < 50f);
+    var movedBy = MathF.Abs((moved - into).Normalized().Deg);
+    t.True($"by a turn that clears the arc with margin (got {movedBy:0})", movedBy >= 45f + 20f);
+    t.True($"and not by spinning right around (got {movedBy:0})", movedBy < 110f);
 
     // gazes that have not started yet must not constrain the current turn
     var later = Looking(centre, ring, now.AddSeconds(30));
@@ -2974,7 +3065,10 @@ t.Section("Counter-rotating rings");
         var solved = ArenaPathfinder.Solve(hints, ws.CurrentTime, goal: goal);
         var destination = solved.NeedToMove ? solved.Target : hints.PlayerPosition;
         t.True("uptime never walks into the lethal core", (destination - center).Length() > lethal.LethalCore);
-        t.True("uptime leaves a safe player where they are rather than chasing unreachable range", !solved.NeedToMove);
+        // It may now step off ground the rings are going to sweep (the leave-early rule, 2026-09-06), but
+        // it must never do so by closing on the boss: melee range here is entirely inside the kill circle.
+        t.True("uptime never closes on a boss standing in a lethal core",
+            (destination - center).Length() >= (hints.PlayerPosition - center).Length() - 0.01f);
     }
 
     // ---- Pallmagia's Roulette, with the real numbers off a recording ----

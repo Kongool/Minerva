@@ -143,7 +143,15 @@ sealed class EsotericInstruction(ModuleBase module) : Components.GenericAOEs(mod
                 // three dodged, the fourth eaten for uptime, twice in one pull. BossmodReborn has the same test.
                 if ((keeper.Position - pos).LengthSq() < 1f)
                 {
-                    _aoes.Add(new(isstate10002 ? cone : circle, pos.Quantized(), actor.Rotation, actorID: keeper.InstanceID));
+                    // Stamp the predicted time at creation, not only when the boss's cast finishes. A zone
+                    // built with no activation reads as "dangerous NOW" everywhere it is consulted, so
+                    // between the marker appearing and that cast ending all four zones were live at once
+                    // and the arena had almost no legal ground left: the dodge had to cross the room and
+                    // was caught crossing a zone as it fired (2026-09-06, screenshot -- ours solid red where
+                    // BossmodReborn still had the later zones yellow). Same stagger the cast-finish handler
+                    // uses, so the estimate is only ever refined by it, never contradicted.
+                    _aoes.Add(new(isstate10002 ? cone : circle, pos.Quantized(), actor.Rotation,
+                        World.FutureTime(6d + (_aoes.Count * 4.5d)), actorID: keeper.InstanceID));
                     break;
                 }
             }

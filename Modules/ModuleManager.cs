@@ -37,6 +37,7 @@ public sealed class ModuleManager : IDisposable
 
     public ModuleManager(WorldState world)
     {
+        InstallBrokenComponentReporter();
         this.world = world;
         // scan both the plugin assembly (content modules) and the core assembly; quest modules are keyed on
         // their quest id and need the game to say which duty that is (see ModuleRegistry.Build)
@@ -122,6 +123,11 @@ public sealed class ModuleManager : IDisposable
             }
         }
     }
+
+    /// <summary>Send a dropped component to the log once, naming the module and the component.</summary>
+    private static void InstallBrokenComponentReporter()
+        => ModuleBase.BrokenComponentReporter ??= (module, component, ex) =>
+            Service.Log.Error(ex, $"Minerva: {module.GetType().Name}.{component.GetType().Name} threw building AI hints; that component is off for the rest of the encounter, the rest keep running.");
 
     /// <summary>
     /// Has the fight finished? Only true for modules whose primary actor dying really is the end — a

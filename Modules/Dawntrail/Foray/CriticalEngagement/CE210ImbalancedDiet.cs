@@ -58,9 +58,12 @@ public enum AID : uint
 }
 
 [SkipLocalsInit]
-sealed class CursedScreech(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.CursedScreech);
+// Both ids: the boss casts the telegraph and a helper casts the damage. Watching only the boss's left the
+// helper unaccounted for, so nine hits in one pull read as "the module has no component for it" when they
+// were the raidwide the module already knew about (2026-09-06 recording).
+sealed class CursedScreech(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.CursedScreech, (uint)AID.CursedScreech1]);
 [SkipLocalsInit]
-sealed class ShrillPeal(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.ShrillPeal);
+sealed class ShrillPeal(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.ShrillPeal, (uint)AID.ShrillPeal1]);
 [SkipLocalsInit]
 sealed class Inhale(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Inhale2, new AOEShapeCone(60f, 15f.Degrees()));
 [SkipLocalsInit]

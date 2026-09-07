@@ -453,8 +453,35 @@ public abstract class ModuleBase : IDisposable
         hints.Bounds = this.Bounds;
         this.SeedPotentialTargets(hints);
         for (var i = 0; i < this.components.Count; ++i)
-            this.components[i].AddAIHints(slot, actor, assignment, hints);
+        {
+            var c = this.components[i];
+            if (this.brokenHints.Contains(c))
+                continue;
+            try
+            {
+                c.AddAIHints(slot, actor, assignment, hints);
+            }
+            catch (Exception ex)
+            {
+                // A component that throws here used to take the whole tick with it, so the dodge went blind
+                // for the rest of the fight and the radar with it -- twice in one evening (Shinryu Paradox
+                // and Forbidden Folios, 2026-09-06). One broken component is a lost mechanic; the other
+                // fifteen are the difference between a hard pull and a wipe. Reported once, then skipped.
+                this.brokenHints.Add(c);
+                this.ReportBrokenComponent(c, ex);
+            }
+        }
     }
+
+    private readonly HashSet<ModuleComponent> brokenHints = [];
+
+    /// <summary>Says a component was dropped. Overridable so the plugin can log it; the default is silent
+    /// because Minerva.Core has no logger of its own.</summary>
+    protected virtual void ReportBrokenComponent(ModuleComponent component, Exception ex)
+        => BrokenComponentReporter?.Invoke(this, component, ex);
+
+    /// <summary>Set once by the plugin so a dropped component reaches the log.</summary>
+    public static Action<ModuleBase, ModuleComponent, Exception>? BrokenComponentReporter;
 
     /// <summary>
     /// Fill <see cref="AIHints.PotentialTargets"/> with the hostiles present, so that modules have

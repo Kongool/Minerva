@@ -433,6 +433,15 @@ public sealed class AIHints
     /// <para>Exact for a union of arcs. If a gap exists, one of its ends is the edge of some arc, so testing
     /// the edges finds it — no sampling and no resolution to tune.</para>
     /// </summary>
+    /// <summary>
+    /// How far past a gaze's edge a turn aims. The game decides whether you are looking at an eye on its
+    /// own clock, the rotation turns the character back toward its target on every action, and the turn
+    /// itself interpolates over several frames -- so a heading that is only just outside the arc is not
+    /// outside it by the time it matters. Wide enough to survive all three, narrow enough that a heading
+    /// with room to spare is never spun further.
+    /// </summary>
+    public static readonly Angle GazeFacingMargin = 25f.Degrees();
+
     public bool TryFindSafeFacing(DateTime deadline, Angle preferred, out Angle facing)
         => !this.TryFindBestFacing(deadline, preferred, out facing, out var hit) || hit == 0;
 
@@ -460,35 +469,62 @@ public sealed class AIHints
             return false;
 
         gazesHit = Hits(preferred, active);
-        if (gazesHit == 0)
-            return true;
+        // NOT "already outside the arc, so we are done". A heading one degree clear of a gaze is one twitch
+        // from being inside it, and the twitch always comes: the rotation auto-faces the target on every
+        // action and the dodge walks the character while the eye moves. Phantom Hydra, 2026-09-06 -- a
+        // five-second gaze cast, and Minerva did not begin turning until 0.7s before the snapshot, because
+        // until then the facing was technically clear. It reached 35 degrees of the 70 it wanted and the
+        // gaze landed. So a clear-but-marginal facing is improved during the cast, while the scoring below
+        // still leaves a facing with real room alone (clearance is capped at the margin, then the shortest
+        // turn wins, and no turn at all is the shortest).
 
-        // Candidates are the arc edges, nudged just outside. Coverage only changes at an edge, so the
-        // fewest-hit heading is always either at one or where we already point.
-        const float epsilon = 0.02f; // ~1.1 degrees, comfortably inside the game's own facing tolerance
+        // Candidates are the arc edges pushed out by a real margin, plus the heading directly opposite
+        // each arc, which is where the clearance is greatest when there is only one eye. Coverage only
+        // changes at an edge, so a fewest-hit heading is always at one of these or where we already point.
+        //
+        // The margin is the whole point, and a death taught it. Eye to Eye, 2026-09-06: the character was
+        // looking straight into a 45-degree arc and the chosen heading was a 46-degree turn -- one degree
+        // clear of Minerva's own model of the arc. Against the rotation auto-facing the boss back, the
+        // interpolation taking a few frames, and the server snapshotting on its own clock, one degree is
+        // nothing, and the user was petrified on almost every gaze cycle with the eye glyph showing red
+        // the whole time. Turning away means turning CLEAR, as BossmodReborn does by spinning right around.
         var bestHits = gazesHit;
-        var bestTurn = 0f; // the incumbent is the current facing, which is no turn at all
+        var bestTurn = 0f;      // the incumbent is the current facing, which is no turn at all
+        var bestClear = Clearance(preferred, active);
+        var best = preferred;   // a local, because an out parameter cannot be touched from a local function
         foreach (var (center, halfWidth) in active)
         {
             for (var side = -1; side <= 1; side += 2)
-            {
-                var candidate = new Angle(center.Rad + (side * (halfWidth.Rad + epsilon)));
-                var hits = Hits(candidate, active);
-                var turn = MathF.Abs((candidate - preferred).Normalized().Rad);
-
-                // fewer gazes always wins; among equals, the shorter turn. An equal-hit candidate never
-                // displaces the current facing, so the character is not spun around for no gain.
-                if (hits < bestHits || (hits == bestHits && turn < bestTurn))
-                {
-                    facing = candidate;
-                    bestHits = hits;
-                    bestTurn = turn;
-                }
-            }
+                Consider(new Angle(center.Rad + (side * (halfWidth.Rad + GazeFacingMargin.Rad))));
+            Consider(center + 180f.Degrees());
         }
 
+        facing = best;
         gazesHit = bestHits;
         return true;
+
+        void Consider(Angle candidate)
+        {
+            var hits = Hits(candidate, active);
+            var turn = MathF.Abs((candidate - preferred).Normalized().Rad);
+            var clear = Clearance(candidate, active);
+
+            // Fewer gazes always wins. Among equals, clearance up to the margin: a heading a hair outside
+            // an arc is worth no more than the one inside it once anything nudges the character. Only when
+            // both are clear enough does the shorter turn decide, so a safe facing is never spun for gain
+            // it does not need.
+            var cappedClear = MathF.Min(clear, GazeFacingMargin.Rad);
+            var cappedBest = MathF.Min(bestClear, GazeFacingMargin.Rad);
+            var better = hits < bestHits
+                || (hits == bestHits && cappedClear > cappedBest + 0.001f)
+                || (hits == bestHits && MathF.Abs(cappedClear - cappedBest) <= 0.001f && turn < bestTurn);
+            if (!better)
+                return;
+            best = candidate;
+            bestHits = hits;
+            bestTurn = turn;
+            bestClear = clear;
+        }
 
         static int Hits(Angle a, List<(Angle Center, Angle HalfWidth)> arcs)
         {
@@ -497,6 +533,15 @@ public sealed class AIHints
                 if (MathF.Abs((a - center).Normalized().Rad) <= halfWidth.Rad)
                     ++n;
             return n;
+        }
+
+        // How far this heading is from the nearest arc it is NOT inside; negative while inside one.
+        static float Clearance(Angle a, List<(Angle Center, Angle HalfWidth)> arcs)
+        {
+            var worst = float.MaxValue;
+            foreach (var (center, halfWidth) in arcs)
+                worst = MathF.Min(worst, MathF.Abs((a - center).Normalized().Rad) - halfWidth.Rad);
+            return worst == float.MaxValue ? MathF.PI : worst;
         }
     }
 
@@ -573,6 +618,42 @@ public sealed class AIHints
     /// of a danger zone (sampled on a ring around it). Used to pick a dodge target that keeps clearance from the
     /// AOE edge — accounting for hitbox, reaction, and stopping distance — instead of landing right against it.
     /// </summary>
+    /// <summary>
+    /// Seconds until this spot becomes lethal, or <see cref="float.MaxValue"/> when nothing there is
+    /// coming. Zero when it already is. This is the question a route has to ask that a yes/no danger test
+    /// cannot answer: crossing a telegraph that fires in five seconds is free, crossing the one that fires
+    /// in half a second is a death, and both look identical to <see cref="InImminentDanger"/>.
+    /// </summary>
+    public float SecondsUntilDangerAt(WPos p, DateTime now, float margin)
+    {
+        if (this.InObstacle(p))
+            return 0f;
+        var soonest = float.MaxValue;
+        foreach (var z in this.ForbiddenZones)
+        {
+            if (!Touches(z, p, margin))
+                continue;
+            var seconds = z.Activation == default ? 0f : (float)(z.Activation - now).TotalSeconds;
+            soonest = MathF.Min(soonest, MathF.Max(seconds, 0f));
+        }
+
+        return soonest;
+
+        static bool Touches(in ForbiddenZone z, WPos at, float m)
+        {
+            if (z.ShapeDistance is not SDShapeCheck)
+                return z.ShapeDistance.Distance(at) <= m;
+            if (z.Contains(at))
+                return true;
+            if (m <= 0f)
+                return false;
+            for (var i = 0; i < 8; ++i)
+                if (z.Contains(at + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * m)))
+                    return true;
+            return false;
+        }
+    }
+
     public bool InImminentDanger(WPos p, DateTime deadline, float margin)
     {
         if (this.InObstacle(p))

@@ -177,7 +177,15 @@ foreach (var file in files)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"!! {Path.GetFileName(file)}: could not read ({ex.Message})");
+        Console.WriteLine($"!! {Path.GetFileName(file)}: could not read ({ex.GetType().Name}: {ex.Message})");
+        // Name the frame that threw. A module that dies here dies in the fight too (Shinryu Paradox,
+        // 2026-09-06, took the radar and the AI tick down for six minutes), so the trace is the point.
+        using (var trace = new StringReader(ex.StackTrace ?? ""))
+        {
+            for (var line = trace.ReadLine(); line != null; line = trace.ReadLine())
+                if (line.Contains("Minerva", StringComparison.Ordinal))
+                    Console.WriteLine($"   {line.Trim()}");
+        }
         failures++;
         continue;
     }

@@ -231,16 +231,24 @@ public static class ArenaPathfinder
         // centre crosses the edge, stranding them on the AOE rim where hitbox radius and server latency
         // still clip them. (Reported in-game as "starts to avoid but doesn't fully leave the AOE".)
         if (!hints.InImminentDanger(player, deadline, safetyMargin))
-            return Regain(hints, deadline, player, cellSize, safetyMargin, goal);
+        {
+            // Nothing is about to land -- but if the ground underfoot is going to fire at all, leaving now
+            // is the cheap version of leaving later. Pallmagia, 2026-09-06: the character stood in a
+            // 30-yalm circle for eight seconds because it was not yet imminent, then had to cross the arena
+            // with 0.7s to spare and was caught by a cone on the way. The user's call, and the right one:
+            // "i would leave earlier, it could cost the run if something lethal was inside of those aoe's".
+            var uptime = Regain(hints, deadline, player, cellSize, safetyMargin, goal);
+            return DriftOffDoomedGround(hints, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, uptime);
+        }
 
         // Prefer somewhere we can actually reach before the cast lands. If nothing qualifies, widen rather
         // than freeze: partially clearing a zone beats standing in it because the ideal spot was too far.
         var budget = TimeUntilDanger(hints, player, deadline, solveNow);
-        if (TryNearestSafe(hints, deadline, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
+        if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
-        if (TryNearestSafe(hints, deadline, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
+        if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
-        if (safetyMargin > 0f && TryNearestSafe(hints, deadline, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
+        if (safetyMargin > 0f && TryNearestSafe(hints, deadline, solveNow, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize, 0f);
 
         // Nothing is safe from everything inside the horizon. Before giving up, ask the same question with
@@ -250,10 +258,60 @@ public static class ArenaPathfinder
         // seconds reporting "no safe spot" while a cell four yalms away was clear of it. Every frame
         // re-solves, so the second wave is dodged from wherever the first was dodged to, as a person does.
         foreach (var earlier in ActivationsBefore(hints, deadline, solveNow))
-            if (TryNearestSafe(hints, earlier, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
+            if (TryNearestSafe(hints, earlier, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
                 return Settle(hints, earlier, player, spot, cellSize, safetyMargin);
 
         return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
+    }
+
+    /// <summary>How far ahead ground counts as "going to fire". Past this it is scenery -- a persistent
+    /// voidzone publishes an activation of DateTime.MaxValue, and drifting away from those forever is not
+    /// the point.</summary>
+    private const float DriftLookAhead = 30f;
+
+    /// <summary>
+    /// How far clear ground has to be before leaving early is worth it. Under this, stepping out at the
+    /// last moment is fine and the horizon can be trusted -- which is what every other test of this solver
+    /// asserts, and rightly. Over it, the last moment is not enough time and the walk has to start while
+    /// there is still room to choose the route: Pallmagia's 30-yalm circle needed fifteen yalms of walking
+    /// and got 0.7 seconds to do it in.
+    /// </summary>
+    private const float DriftMinEscape = 10f;
+
+    /// <summary>And the most it will walk for something that is not urgent yet, so a huge slow zone does
+    /// not send the character across the map for the next twenty seconds.</summary>
+    private const float DriftMaxWalk = 30f;
+
+    /// <summary>
+    /// Step off ground that will fire, while there is still time to do it cheaply. Returns
+    /// <paramref name="fallback"/> (the uptime answer) when the ground underfoot is not going to fire,
+    /// when nothing clear is close enough to be worth it, or when the uptime answer already moves further
+    /// than the drift would.
+    /// </summary>
+    private static SafeSpot DriftOffDoomedGround(AIHints hints, DateTime now, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, SafeSpot fallback)
+    {
+        var underfoot = hints.SecondsUntilDangerAt(player, now, margin);
+        if (underfoot > DriftLookAhead)
+            return fallback;
+
+        // Ground that stays clear for the whole look-ahead, scored the usual way, so the uptime band and
+        // the positional still decide between the candidates that qualify.
+        if (!TryNearestSafe(hints, now.AddSeconds(DriftLookAhead), now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out var clear))
+            return fallback;
+        if (!clear.NeedToMove || !clear.Found)
+            return fallback;
+        var walk = (clear.Target - player).Length();
+        if (walk <= DriftMinEscape || walk > DriftMaxWalk)
+            return fallback;
+
+        // Never toward what we are fighting. Leaving early is a convenience, and a convenience move that
+        // closes on the target is how a character ends up in the one place this solver exists to refuse:
+        // a boss standing in a permanently lethal core, where every cell nearer to it is worse than the
+        // ground being left. Outward or sideways only; if the safe ground is inward, the ordinary dodge
+        // can have it once the zone is actually imminent.
+        if (goal is { } g && (clear.Target - g.Target).Length() < (player - g.Target).Length() - 0.01f)
+            return fallback;
+        return clear;
     }
 
     /// <summary>Distinct activation instants inside the horizon, latest first: each is a candidate deadline
@@ -447,7 +505,7 @@ public static class ArenaPathfinder
         return AnchorBias * (1f - (deg / AnchorToleranceDeg)); // strongest on the anchor, fading to nothing
     }
 
-    private static bool TryNearestSafe(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, float timeBudget, out SafeSpot spot)
+    private static bool TryNearestSafe(AIHints hints, DateTime deadline, DateTime now, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, float timeBudget, out SafeSpot spot)
     {
         var hasGoals = hints.GoalZones.Count > 0;
         var found = false;
@@ -457,7 +515,7 @@ public static class ArenaPathfinder
         // Cost by route, not by displacement. Everything below scores a cell on what it takes to GET there,
         // so a safe wedge behind a rock is priced with the walk around the rock included, and an unreachable
         // one is not considered at all.
-        var grid = new RouteGrid(hints, deadline, player, cellSize, margin);
+        var grid = new RouteGrid(hints, deadline, player, cellSize, margin, now, moveSpeed);
 
         for (var gz = 0; gz < grid.Height; ++gz)
         {

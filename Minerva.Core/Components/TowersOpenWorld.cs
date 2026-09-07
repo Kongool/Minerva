@@ -116,12 +116,18 @@ public class GenericTowersOpenWorld(ModuleBase module, uint aid = default, bool 
         if (towers.Length == 0)
             return;
 
+        // Every tower first, before either loop reads AllowedSoakers. The pick-a-goal loop below breaks as
+        // soon as the player is standing in one, so towers after that index were never initialised, and the
+        // second loop then dereferenced a null set: a NullReferenceException every frame, which takes the
+        // whole AI tick with it (Forbidden Folios, 2026-09-06 -- the dodge was blind for the pull).
+        for (var i = 0; i < towers.Length; ++i)
+            towers[i].InitializeAllowedSoakers(this.Module);
+
         // pick one tower to aim at, then make everything outside it forbidden
         Tower? goal = null;
         for (var i = 0; i < towers.Length; ++i)
         {
             var t = towers[i];
-            t.InitializeAllowedSoakers(this.Module);
             if (!t.AllowedSoakers!.Contains(actor))
                 continue;
             if (t.IsInside(actor))

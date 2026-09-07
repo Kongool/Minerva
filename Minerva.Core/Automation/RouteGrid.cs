@@ -17,6 +17,19 @@ public sealed class RouteGrid
     /// High enough to go the long way when one exists, finite so that crossing is still possible.</summary>
     public const float DangerStepPenalty = 6f;
 
+    /// <summary>
+    /// What a step costs through ground that will have fired before the character can get across it.
+    /// Crossing a telegraph is a normal thing to do -- it fires in four seconds and the walk takes one --
+    /// and <see cref="DangerStepPenalty"/> prices that. Crossing one that fires while you are still in it
+    /// is not a detour, it is the hit: Pallmagia, 2026-09-06, the escape from a 30-yalm circle ran straight
+    /// through a cone with 0.7s left on it, because six yalms of penalty was cheaper than going round.
+    /// </summary>
+    public const float LethalStepPenalty = 1000f;
+
+    /// <summary>Slack on the arrival estimate, in seconds: the route is a grid path and the character
+    /// accelerates, so a cell is only counted as crossed in time with a little room to spare.</summary>
+    private const float ArrivalSlack = 0.3f;
+
     private const float Diagonal = 1.41421356f;
 
     private readonly WPos origin;   // world position of cell (0,0)
@@ -24,6 +37,8 @@ public sealed class RouteGrid
     private readonly int w, h;
     private readonly bool[] blocked;
     private readonly bool[] risky;
+    private readonly float[] dangerIn;  // seconds until each cell is lethal; MaxValue when it never is
+    private readonly float speed;
     private readonly float[] cost;    // penalised: what decides which way to go
     private readonly float[] length;  // plain yalms along that route: what the destination is scored on
     private readonly int[] came;
@@ -32,8 +47,17 @@ public sealed class RouteGrid
     public int Height => this.h;
 
     public RouteGrid(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin)
+        : this(hints, deadline, player, cellSize, margin, deadline, 0f)
+    {
+    }
+
+    /// <param name="now">When the solve is happening, so a cell's danger can be compared with the time it
+    /// takes to walk there.</param>
+    /// <param name="moveSpeed">Yalms per second; zero disables the arrival check entirely.</param>
+    public RouteGrid(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, DateTime now, float moveSpeed)
     {
         this.cell = cellSize;
+        this.speed = moveSpeed;
         var reach = hints.Bounds.Radius;
         var center = hints.Center;
         this.origin = new WPos(center.X - reach, center.Z - reach);
@@ -43,6 +67,7 @@ public sealed class RouteGrid
         var n = this.w * this.h;
         this.blocked = new bool[n];
         this.risky = new bool[n];
+        this.dangerIn = new float[n];
         this.cost = new float[n];
         this.length = new float[n];
         this.came = new int[n];
@@ -59,8 +84,13 @@ public sealed class RouteGrid
 
                 // out of bounds and inside something solid are both "cannot be here"; danger is not
                 this.blocked[i] = !hints.Bounds.Contains(center, p) || hints.InObstacle(p);
+                this.dangerIn[i] = float.MaxValue;
                 if (!this.blocked[i])
+                {
                     this.risky[i] = hints.InImminentDanger(p, deadline, margin);
+                    if (this.risky[i] && this.speed > 0f)
+                        this.dangerIn[i] = hints.SecondsUntilDangerAt(p, now, margin);
+                }
             }
         }
 
@@ -246,7 +276,16 @@ public sealed class RouteGrid
                         continue;
 
                     var step = (dx != 0 && dz != 0 ? Diagonal : 1f) * this.cell;
-                    var next = baseCost + (this.risky[j] ? step * DangerStepPenalty : step);
+                    var penalty = 1f;
+                    if (this.risky[j])
+                    {
+                        // Would it still be safe to be in that cell when we got there? The route so far is
+                        // this.length[i] yalms, so arrival is that plus this step, divided by walk speed.
+                        penalty = DangerStepPenalty;
+                        if (this.speed > 0f && this.dangerIn[j] <= ((this.length[i] + step) / this.speed) + ArrivalSlack)
+                            penalty = LethalStepPenalty;
+                    }
+                    var next = baseCost + (step * penalty);
                     if (next >= this.cost[j])
                         continue;
                     this.cost[j] = next;
