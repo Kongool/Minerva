@@ -594,6 +594,78 @@ t.Section("Auto-dodge pathfinding");
         t.True("ground that fires in an hour is not worth moving for", !ArenaPathfinder.Solve(scenery, now, horizonSeconds: 5f, safetyMargin: 1f).NeedToMove);
     }
 
+    // Uptime never walks through a telegraph to get back to the boss. Reported 2026-09-06: "after the
+    // knock back i walked through the aoe to get back to the boss".
+    {
+        var boss = new WPos(100f, 100f);
+        var knocked = new WPos(100f, 124f);            // 24y out, well beyond melee range
+        var back = new AIHints { Center = boss, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = knocked };
+        var target = new Actor(0x20, 32, 0, "boss", 0, ActorType.Enemy, new Vector4(boss.X, 0f, boss.Z, 0f));
+        var melee = UptimeGoal.For(target, Role.Melee);
+
+        // nothing in the way: walk back
+        t.True("uptime walks back when the way is clear",
+            ArenaPathfinder.Solve(back, now, goal: melee).NeedToMove);
+
+        // a wall of fire across the middle, firing before the character could be through it
+        var blocked = new AIHints { Center = boss, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = knocked };
+        blocked.AddForbiddenZone(new AOEShapeRect(40f, 4f), new WPos(80f, 112f), 90f.Degrees(), now.AddSeconds(1.5d));
+        var held = ArenaPathfinder.Solve(blocked, now, goal: melee);
+        t.True("and stands still rather than crossing one that is about to fire", !held.NeedToMove);
+    }
+
+    // The way out of an AOE must not be blocked by that same AOE. Elm Gigas, 2026-09-06: the commitment
+    // asked whether the walk was still clear, the samples nearest the character were inside the circle it
+    // was escaping, the answer came back no, and the destination was re-picked every frame for the whole
+    // dodge -- 116 target jumps over eight yalms, 75 of them straight back again.
+    {
+        var middle = new WPos(100f, 100f);
+        var speed = ArenaPathfinder.DefaultMoveSpeed;
+
+        var escaping = new AIHints { Center = middle, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = middle };
+        escaping.AddForbiddenZone(new AOEShapeCircle(10f), middle, default, now.AddSeconds(0.5d));
+        t.True("walking out of a circle that is about to fire is a clear walk",
+            escaping.WalkIsClear(middle, middle + new WDir(14f, 0f), now, 1f, speed));
+
+        // the guard the escape clause must not remove: a different zone across the path still blocks it
+        var ambush = new AIHints { Center = middle, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = middle };
+        ambush.AddForbiddenZone(new AOEShapeCircle(10f), middle, default, now.AddSeconds(0.5d));
+        ambush.AddForbiddenZone(new AOEShapeCircle(3f), middle + new WDir(12f, 0f), default, now.AddSeconds(0.5d));
+        t.True("a second zone across the escape route still blocks it",
+            !ambush.WalkIsClear(middle, middle + new WDir(14f, 0f), now, 1f, speed));
+
+        // and the same zone further along, which the walk never leaves, is still an objection when it is
+        // reached only after it fires
+        var reaching = new AIHints { Center = middle, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = middle };
+        reaching.AddForbiddenZone(new AOEShapeCircle(4f), middle + new WDir(20f, 0f), default, now.AddSeconds(0.5d));
+        t.True("ground that fires before the walk reaches it is not clear",
+            !reaching.WalkIsClear(middle, middle + new WDir(22f, 0f), now, 1f, speed));
+    }
+
+    // Two waves inside the horizon: the near one is about to land and the far one is four seconds out.
+    // Answer the near one from somewhere reachable rather than the pair from somewhere that is not.
+    // Dark Artistry, 2026-09-06: Long-dead Explorers in waves three seconds apart, the second wave armed
+    // 0.6s before the first landed, and the dodge switched to a cell sixteen yalms away and died walking.
+    {
+        var origin = new WPos(0f, 0f);
+        var standing = new WPos(7f, 0f);      // inside the near circle, two yalms from its edge
+        var staggered = new AIHints { Center = origin, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = standing };
+        staggered.AddForbiddenZone(new AOEShapeCircle(8f), origin, default, now.AddSeconds(1.2d));
+        staggered.AddForbiddenZone(new AOEShapeCircle(20f), origin, default, now.AddSeconds(4d));
+
+        var answer = ArenaPathfinder.Solve(staggered, now, horizonSeconds: 5f, safetyMargin: 1f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True("a spot is chosen", answer.NeedToMove && answer.Found);
+
+        var walk = (answer.Target - standing).Length();
+        var reach = 1.2f * ArenaPathfinder.DefaultMoveSpeed;
+        t.True($"and it is one the character can reach before the near wave lands (walk {walk:0.0}y in {reach:0.0}y)", walk <= reach);
+        t.True($"and it is clear of the near wave ({(answer.Target - origin).Length():0.0}y from its centre, radius 8)",
+            (answer.Target - origin).Length() >= 9f);
+        // the far wave is not answered here, and should not be: the next solve has three seconds for it
+        t.True("the twenty-yalm wave is not what this solve walked to", (answer.Target - origin).Length() < 21f);
+    }
+
     // A route may cross a telegraph that fires long after you are through it, and must not cross one that
     // fires while you are still in it. Pallmagia, 2026-09-06: escaping a 30-yalm circle, the path ran
     // straight through a cone with 0.7s left because six yalms of penalty was cheaper than going round.
@@ -665,6 +737,25 @@ t.Section("Auto-dodge pathfinding");
     t.True("a 30y donut's guessed hole stays under the real one", Minerva.Generation.CastTypeShapes.DonutInner(30f) <= 8f);
     t.True("a huge donut does not get a huge hole", Minerva.Generation.CastTypeShapes.DonutInner(40f) <= Minerva.Generation.CastTypeShapes.DonutInnerMax);
     t.True("a small donut's hole scales down", Minerva.Generation.CastTypeShapes.DonutInner(12f) <= 3f);
+
+    // A custom shape built from an injected polygon (Ruby Reflection and its kind) must draw and forbid,
+    // not merely answer Check: A Beast Unleashed, 2026-09-06 -- an empty radar, "GTFO from AOE" in text,
+    // and the dodge idle because the distance field was built from an empty shape list.
+    {
+        var centre = new WPos(200f, 200f);
+        var square = new List<WDir> { new(-5f, -5f), new(5f, -5f), new(5f, 5f), new(-5f, 5f) };
+        var poly = new RelSimplifiedComplexPolygon([new RelPolygonWithHoles(square)]);
+        var custom = new AOEShapeCustom(centre, [], skipPolygonInit: true);
+        custom.ReplacePolygon(poly, centre);
+
+        t.True("an injected polygon still answers Check", custom.Check(centre, centre, default));
+        t.True("and is outside it beyond the square", !custom.Check(centre + new WDir(9f, 0f), centre, default));
+        var loops = custom.Contours(centre, default);
+        t.True("an injected polygon has a contour to draw", loops.Count == 1 && loops[0].Count == 4);
+        var sd = custom.Distance(centre, default);
+        t.True("and a distance field that forbids its inside", sd.Distance(centre) <= 0f);
+        t.True("while leaving the ground outside it alone", sd.Distance(centre + new WDir(9f, 0f)) > 0f);
+    }
 
     // a gaze is answered by facing, and in unscripted content only the action's name says it is one
     t.True("a hex eye reads as a gaze", Minerva.Automation.AutoHints.LooksLikeGaze("Double Hex Eye"));

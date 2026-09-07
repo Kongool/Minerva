@@ -105,6 +105,13 @@ public sealed class ImGuiArena : Arena
 
     public override void ZoneShape(AOEShape shape, WPos origin, Angle rotation, uint color)
     {
+        // A caller that named no colour means danger, not "invisible with a black ring round it". Both
+        // AOEShape.Draw and Arena.ZoneCircle default the argument to zero, and zero here painted a
+        // transparent fill and then an outline forced to full alpha -- (0 & 0x00FFFFFF) | (255 << 24) is
+        // opaque black. Tiny Terror, 2026-09-06: the first flare drew as a hollow black circle.
+        if (color == 0u)
+            color = Colors.AOE;
+
         if (this.ClipZones)
         {
             var loops = shape.Contours(origin, rotation);
@@ -138,6 +145,9 @@ public sealed class ImGuiArena : Arena
 
     public override void OutlineShape(AOEShape shape, WPos origin, Angle rotation, uint color, float thickness = 1f)
     {
+        if (color == 0u)
+            color = Colors.Danger;
+
         if (shape is AOEShapeCircle c)
         {
             this.draw.AddCircle(this.W2S(origin), c.Radius * this.scale, color, 48, thickness);

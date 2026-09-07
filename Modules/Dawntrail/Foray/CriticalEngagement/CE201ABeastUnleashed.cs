@@ -53,6 +53,13 @@ public enum AID : uint
 [SkipLocalsInit]
 sealed class SonicHowl(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.SonicHowl);
 
+// Ruby Glow and the two Spinebreaking Stampede ids damage everybody nearby -- 9 or 10 players on every
+// one of them in the 2026-09-06 recording, in a zone with about ten people in it -- and the sheet gives
+// them no shape at all. Nothing watched them, so eight hits in one pull were reported as mechanics the
+// module has no component for, when they are simply unavoidable.
+sealed class UnavoidableDamage(ModuleBase module) : Components.RaidwideCasts(module,
+    [(uint)AID.WeaponskillRubyGlow, (uint)AID.SpinebreakingStampedeCast, (uint)AID.SpinebreakingStampedeTeleport1]);
+
 [SkipLocalsInit]
 sealed class TailToClaw(ModuleBase module) : Components.GenericAOEs(module)
 {
@@ -392,6 +399,7 @@ sealed class CE201ABeastUnleashedStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<SonicHowl>()
+            .ActivateOnEnter<UnavoidableDamage>()
             .ActivateOnEnter<TopazRay>()
             .ActivateOnEnter<RubyReflection>()
             .ActivateOnEnter<TailToClaw>()

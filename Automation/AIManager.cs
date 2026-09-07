@@ -40,6 +40,7 @@ public sealed class AIManager
     private DateTime gazeTurnStarted;
     private ushort voidsZone;
     private WPos? committedTarget;
+    private DateTime committedAt;
     private Positional requestedPositional;
     private DateTime requestedUntil;
     private DateTime holdUntil;
@@ -908,10 +909,15 @@ public sealed class AIManager
             this.turningForGaze = true;
             this.gazeFaceIssues = 0;
             this.gazeTurnStarted = this.world.CurrentTime;
-            GameData.StopAutoAttack();
             Service.Log.Information($"Minerva gaze: turning away from {this.hints.ForbiddenDirections.Count} arc(s) to {facing.Deg:0} degrees ({(gazesHit > 0 ? $"no clear heading, {gazesHit} still on us" : "clear heading")}).");
         }
 
+        // Every frame, both of them. Suppressing the auto-attack is not a one-off announcement: the swing
+        // re-faces the character at the target it is hitting, so the moment it resumes it undoes the turn,
+        // and the log line is the only thing that belonged once per episode. Moving this call out with the
+        // logging cost the turn entirely -- Eye to Eye, 2026-09-06: 166 facings issued over 3.8 seconds
+        // and the character did not rotate by a single degree, then took the gaze at 7 degrees off it.
+        GameData.StopAutoAttack();
         ++this.gazeFaceIssues;
         this.movement.Face(facing);
     }
@@ -966,6 +972,14 @@ public sealed class AIManager
     private const float ArrivedRange = 0.5f;
 
     /// <summary>
+    /// How long a chosen destination is kept before a changed picture may replace it. Long enough that a
+    /// solve which flips between two answers cannot shuffle the character on the spot, short enough that a
+    /// genuinely new mechanic is still answered inside the clearance lead. Ground that is already lethal
+    /// underfoot overrides it outright.
+    /// </summary>
+    private const float MinCommitSeconds = 0.5f;
+
+    /// <summary>
     /// Keep walking to the spot we already chose, as long as it is still safe and we have not reached it.
     /// <para>The solver is stateless and re-rasterises the arena every frame, so as the player moves the
     /// "nearest safe cell" flips between neighbouring cells and the dodge stutters in place. Worse, a player
@@ -981,15 +995,26 @@ public sealed class AIManager
             return this.Current;
         }
 
-        if (this.committedTarget is { } prev
-            && (prev - pc.Position).Length() > ArrivedRange
-            && !this.hints.InImminentDanger(prev, deadline, margin)
-            && this.WayStillClear(pc.Position, prev, now, margin, moveSpeed))
+        if (this.committedTarget is { } prev && (prev - pc.Position).Length() > ArrivedRange)
         {
-            return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
+            // The destination is still safe, and so is the way to it: keep going.
+            if (!this.hints.InImminentDanger(prev, deadline, margin)
+                && this.WayStillClear(pc.Position, prev, now, margin, moveSpeed))
+                return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
+
+            // Something changed -- but a fresh answer every frame is not a dodge, it is a character
+            // shuffling on the spot. Familiar Tactics, 2026-09-06: after reaching one safe spot the solver
+            // sent it twenty yalms east, then south, then back, a new target every 0.3s, and it was still
+            // oscillating where it started when the cast landed. So hold the destination for a moment
+            // longer unless the ground underfoot is the thing that is about to kill us, which always wins.
+            if (this.world.CurrentTime - this.committedAt < TimeSpan.FromSeconds(MinCommitSeconds)
+                && !this.hints.InImminentDanger(pc.Position, deadline, margin)
+                && !this.hints.InImminentDanger(prev, deadline, margin))
+                return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
         }
 
         this.committedTarget = this.Current.Target;
+        this.committedAt = this.world.CurrentTime;
         return this.Current;
     }
 
@@ -1007,25 +1032,7 @@ public sealed class AIManager
     /// the walk fires before the character is past it, and the next frame re-solves anyway.</para>
     /// </summary>
     private bool WayStillClear(WPos from, WPos to, DateTime now, float margin, float moveSpeed)
-    {
-        if (moveSpeed <= 0f)
-            return true;
-        var delta = to - from;
-        var distance = delta.Length();
-        if (distance < 0.01f)
-            return true;
-        var step = delta / distance;
-        var samples = Math.Clamp((int)MathF.Ceiling(distance / 2f), 1, 16);
-        for (var i = 1; i <= samples; ++i)
-        {
-            var along = distance * i / samples;
-            var at = from + (step * along);
-            if (this.hints.SecondsUntilDangerAt(at, now, margin) <= (along / moveSpeed) + 0.3f)
-                return false;
-        }
-
-        return true;
-    }
+        => this.hints.WalkIsClear(from, to, now, margin, moveSpeed);
 
     /// <summary>
     /// Hints for content with no module, from enemy cast bars. There is no arena to work with, so the dodge

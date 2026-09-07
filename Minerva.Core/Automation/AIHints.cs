@@ -625,6 +625,14 @@ public sealed class AIHints
     /// in half a second is a death, and both look identical to <see cref="InImminentDanger"/>.
     /// </summary>
     public float SecondsUntilDangerAt(WPos p, DateTime now, float margin)
+        => this.SecondsUntilDangerAt(p, now, margin, null);
+
+    /// <param name="leaving">
+    /// A point the character is currently standing on. Zones that already cover it are skipped, so the
+    /// answer is "how long until something NEW catches this spot" rather than "how long until anything
+    /// does". Only a walk starting inside danger needs this; pass null everywhere else.
+    /// </param>
+    public float SecondsUntilDangerAt(WPos p, DateTime now, float margin, WPos? leaving)
     {
         if (this.InObstacle(p))
             return 0f;
@@ -632,6 +640,8 @@ public sealed class AIHints
         foreach (var z in this.ForbiddenZones)
         {
             if (!Touches(z, p, margin))
+                continue;
+            if (leaving is { } start && Touches(z, start, margin))
                 continue;
             var seconds = z.Activation == default ? 0f : (float)(z.Activation - now).TotalSeconds;
             soonest = MathF.Min(soonest, MathF.Max(seconds, 0f));
@@ -652,6 +662,39 @@ public sealed class AIHints
                     return true;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Would every step of the walk from <paramref name="from"/> to <paramref name="to"/> still be safe by
+    /// the time the character got there? Sampled every couple of yalms, because the question is only
+    /// whether some piece of the walk fires before it is crossed.
+    ///
+    /// <para>Danger the walk is LEAVING does not count against it. Standing inside a circle that fires in
+    /// half a second, every sample near the start is inside that circle too, so the walk out of it reported
+    /// itself unwalkable -- and the caller asking is the commitment, which then threw the escape away and
+    /// picked a fresh one, every frame, for the whole dodge. Elm Gigas, 2026-09-06: 116 target jumps over
+    /// eight yalms in one fight, 75 of them back to where they came from within three seconds, 105 with no
+    /// intervening frame at all. A zone already covering the starting point is the reason for the walk, not
+    /// an objection to it; a zone that catches the path further on still is.</para>
+    /// </summary>
+    public bool WalkIsClear(WPos from, WPos to, DateTime now, float margin, float moveSpeed)
+    {
+        if (moveSpeed <= 0f)
+            return true;
+        var delta = to - from;
+        var distance = delta.Length();
+        if (distance < 0.01f)
+            return true;
+        var step = delta / distance;
+        var samples = Math.Clamp((int)MathF.Ceiling(distance / 2f), 1, 16);
+        for (var i = 1; i <= samples; ++i)
+        {
+            var along = distance * i / samples;
+            if (this.SecondsUntilDangerAt(from + (step * along), now, margin, from) <= (along / moveSpeed) + 0.3f)
+                return false;
+        }
+
+        return true;
     }
 
     public bool InImminentDanger(WPos p, DateTime deadline, float margin)

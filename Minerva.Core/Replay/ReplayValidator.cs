@@ -278,6 +278,7 @@ public sealed class ReplayValidator
         // keeps changing means the live plugin re-faces (and cancels auto-attack) over and over. Sampled
         // at 10Hz, which is coarse next to a frame but fine for "how long was a gaze up and how often
         // would it have turned".
+        var lastInsideForbiddenTicks = 0L; // the POV stood in ground the module forbade, however it was published
         long gazeFrames = 0, refaceFrames = 0, holdFrames = 0, gazeSamples = 0;
         var maxArcs = 0;
         var impossibleFrames = 0L;
@@ -286,6 +287,12 @@ public sealed class ReplayValidator
         long lastSpreadOnMeTicks = 0, lastStackOnMeTicks = 0; // when the POV last carried a spread / stack marker
         var lastInsideDrawnTicks = 0L; // when the POV was last inside something the module drew (0, not MinValue: a subtraction from MinValue wraps and called every early hit "drawn")
         var autos = new HashSet<uint> { 7u, 8u, 870u, 871u, 872u, 873u }; // the generic auto-attacks; the module adds its own
+        // A mechanic usually has two ids: the boss casts the telegraph and a helper casts the damage, and a
+        // module that watches only the first leaves the second looking like a hole in its coverage. Three
+        // fights in one evening reported it that way (Imbalanced Diet, A Beast Unleashed, Familiar Tactics)
+        // and in every case the module knew the mechanic perfectly well. The game gives both ids the same
+        // NAME, so that is the join.
+        var watchedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var gazes = new HashSet<uint>(); // actions a gaze component watches: a status from one is judged by facing, not by zones
         var knockbacks = new HashSet<uint>(); // actions a knockback component watches: the shove is the mechanic
         var myActions = new List<(long Ticks, uint Action)>(); // the POV's own resolved actions, for the rooting look-back
@@ -345,7 +352,8 @@ public sealed class ReplayValidator
                 // Either the module drew a zone when THIS action's cast began, or the POV stood in a drawn zone
                 // in the two seconds before the hit (zones drawn ahead of the cast, from a marker or a tether,
                 // never "rise" at cast start -- Pallmagia's Esoteric Instruction). Neither alone is right.
-                var drawnRecently = drawn.Contains(ev.Action.ID) || ticks - lastInsideDrawnTicks <= 2 * TimeSpan.TicksPerSecond || guessed;
+                var drawnRecently = drawn.Contains(ev.Action.ID) || ticks - lastInsideDrawnTicks <= 2 * TimeSpan.TicksPerSecond
+                    || ticks - lastInsideForbiddenTicks <= 2 * TimeSpan.TicksPerSecond || guessed;
                 // in the zone when it resolved (Shantotto 2026-09-06: two Large Specimen hits from 15 and 19 yalms
                 // off 13-yalm cores read as "the AOE was larger than drawn" until the report could say "outside")
                 var inside = ticks - lastInsideDrawnTicks <= 3 * TimeSpan.TicksPerSecond / 4;
@@ -391,7 +399,9 @@ public sealed class ReplayValidator
                         break;
                     }
                 }
-                hits.Add(new Hit((ticks - start) / (double)TimeSpan.TicksPerSecond, ev.Action.ID, src.Name, drawnRecently, d, dist, watched.Contains(ev.Action.ID) && !drawn.Contains(ev.Action.ID) && !inside, statusID, facingDeg, gazes.Contains(ev.Action.ID))
+                var sameMechanic = !watched.Contains(ev.Action.ID) && !drawn.Contains(ev.Action.ID)
+                    && names?.ActionName(ev.Action.ID) is { Length: > 0 } hitName && watchedNames.Contains(hitName);
+                hits.Add(new Hit((ticks - start) / (double)TimeSpan.TicksPerSecond, ev.Action.ID, src.Name, drawnRecently, d, dist, (watched.Contains(ev.Action.ID) || sameMechanic) && !drawn.Contains(ev.Action.ID) && !inside, statusID, facingDeg, gazes.Contains(ev.Action.ID))
                 {
                     RootedBy = rooted, Foreign = foreign, CasterID = cev.InstanceID,
                     Inside = inside, TargetsHit = playersHit, Proximity = playersHit >= Math.Max(4, (playersSeen.Count + 1) / 2),
@@ -462,6 +472,12 @@ public sealed class ReplayValidator
                 ++gazeSamples;
                 var gh = new AIHints();
                 module.BuildAIHints(Math.Max(0, world.Party.FindSlot(pov)), pcFacing, gh);
+                // A component that publishes a forbidden zone without a drawable AOE -- Tiny Terror's
+                // growing spheres add theirs straight to the hints -- is invisible to the drawn-AOE count,
+                // so a hit inside one was reported as "the module has no component for it" when the module
+                // had one and the dodge was acting on it. Standing in forbidden ground counts as drawn.
+                if (gh.InImminentDanger(pcFacing.Position, world.CurrentTime.AddSeconds(30d), 0f))
+                    lastInsideForbiddenTicks = ticks;
                 if (gh.ForbiddenDirections.Count > 0)
                 {
                     ++gazeFrames;
@@ -520,6 +536,9 @@ public sealed class ReplayValidator
             if (enemyCastAid != 0)
             {
                 castCount[enemyCastAid] = castCount.GetValueOrDefault(enemyCastAid) + 1;
+                if (names != null && (watched.Contains(enemyCastAid) || drawn.Contains(enemyCastAid))
+                    && names.ActionName(enemyCastAid) is { Length: > 0 } known)
+                    watchedNames.Add(known);
                 if (module == null && shapes != null)
                 {
                     // the guesser's picture of the fight: drawn if it draws it, "hinted" if the sheet says single-target
@@ -546,6 +565,8 @@ public sealed class ReplayValidator
                 drawnList.Add(aid);
             else if (watched.Contains(aid))
                 hinted.Add(aid);
+            else if (names?.ActionName(aid) is { Length: > 0 } n && watchedNames.Contains(n))
+                hinted.Add(aid); // the module watches this mechanic under its other id
             else if (helperCast.Contains(aid))
                 uncoveredMechanics.Add(aid); // a Helper cast the module ignores is a likely missing mechanic
             else

@@ -493,13 +493,32 @@ public sealed class AOEShapeCustom : AOEShape
     /// </summary>
     public override IReadOnlyList<IReadOnlyList<WPos>> Contours(WPos origin, Angle rotation)
     {
+        // A polygon handed in by ReplacePolygon has no source shapes to walk, and returning nothing here
+        // meant the zone was never painted: A Beast Unleashed, 2026-09-06 -- Ruby Reflection builds its
+        // squares as a bare polygon, so the radar showed an empty arena while the module knew perfectly
+        // well where the danger was and printed "GTFO from AOE". Walk the polygon instead.
+        if (this.polygonReplaced && this.polygon is { } poly)
+        {
+            var parts = poly.Parts;
+            var loops = new List<IReadOnlyList<WPos>>(parts.Count);
+            for (var i = 0; i < parts.Count; ++i)
+            {
+                var ext = parts[i].Exterior;
+                var loop = new WPos[ext.Length];
+                for (var v = 0; v < ext.Length; ++v)
+                    loop[v] = this.polygonOrigin + ext[v];
+                loops.Add(loop);
+            }
+            return loops;
+        }
+
         var n = this.shapes1.Count;
         if (n == 0)
             return [];
-        var loops = new IReadOnlyList<WPos>[n];
+        var loops2 = new IReadOnlyList<WPos>[n];
         for (var i = 0; i < n; ++i)
-            loops[i] = this.shapes1[i].ContourWorld();
-        return loops;
+            loops2[i] = this.shapes1[i].ContourWorld();
+        return loops2;
     }
 
     /// <summary>
@@ -507,9 +526,15 @@ public sealed class AOEShapeCustom : AOEShape
     /// ground lies. Only the union/difference form is exact here; an intersection or xor still falls back.
     /// </summary>
     public override ShapeDistance Distance(WPos origin, Angle rotation)
-        => this.operand == OperandType.Union && this.shapes2.Count == 0
-            ? new SDShapeSet(this.shapes1, this.difference, this.InvertForbiddenZone)
-            : base.Distance(origin, rotation);
+        // An injected polygon has no source shapes, and building an SDShapeSet from an empty list told the
+        // dodge that nothing was forbidden at all -- the same Ruby Reflection zones, warned about in text
+        // and then walked straight into. Fall back to the boolean field, which asks Check and therefore
+        // sees the polygon.
+        => this.polygonReplaced || (this.operand == OperandType.Union && this.shapes2.Count == 0 && this.shapes1.Count == 0)
+            ? base.Distance(origin, rotation)
+            : this.operand == OperandType.Union && this.shapes2.Count == 0
+                ? new SDShapeSet(this.shapes1, this.difference, this.InvertForbiddenZone)
+                : base.Distance(origin, rotation);
 
     public override string ToString() => $"CustomAOE u={this.shapes1.Count} d={this.difference.Count}";
 }

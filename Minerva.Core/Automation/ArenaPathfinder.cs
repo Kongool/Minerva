@@ -237,7 +237,7 @@ public static class ArenaPathfinder
             // 30-yalm circle for eight seconds because it was not yet imminent, then had to cross the arena
             // with 0.7s to spare and was caught by a cone on the way. The user's call, and the right one:
             // "i would leave earlier, it could cost the run if something lethal was inside of those aoe's".
-            var uptime = Regain(hints, deadline, player, cellSize, safetyMargin, goal);
+            var uptime = Regain(hints, deadline, player, cellSize, safetyMargin, goal, solveNow, moveSpeed);
             return DriftOffDoomedGround(hints, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, uptime);
         }
 
@@ -246,6 +246,23 @@ public static class ArenaPathfinder
         var budget = TimeUntilDanger(hints, player, deadline, solveNow);
         if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
+
+        // Nothing reachable is clear of the whole horizon. Before considering somewhere further away, ask
+        // for a spot that is reachable and clear of everything up to an earlier wave: surviving the cast
+        // that is about to land beats standing in it while walking to a cell that answers the next one too.
+        //
+        // Dark Artistry, 2026-09-06. Long-dead Explorers explode in waves three seconds apart, and each
+        // wave turns risky four seconds out, so from the moment the second wave appears the horizon holds
+        // two overlapping grids of eight-yalm circles. At 152.27s the character had been walking to a spot
+        // for two and a half seconds with the blast 0.6s away; the second wave armed, that spot stopped
+        // being clear of everything, and this fell through to the unlimited search, which answered with a
+        // cell sixteen yalms away -- nearly three seconds of walking. It was caught in transit, three times
+        // in one pull. A person steps out of the circle that is about to go off and deals with the next one
+        // next, which is exactly what a nearer deadline asks for.
+        foreach (var soon in ActivationsBefore(hints, deadline, solveNow))
+            if (TryNearestSafe(hints, soon, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
+                return Settle(hints, soon, player, spot, cellSize, safetyMargin);
+
         if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
         if (safetyMargin > 0f && TryNearestSafe(hints, deadline, solveNow, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
@@ -309,8 +326,19 @@ public static class ArenaPathfinder
         // a boss standing in a permanently lethal core, where every cell nearer to it is worse than the
         // ground being left. Outward or sideways only; if the safe ground is inward, the ordinary dodge
         // can have it once the zone is actually imminent.
-        if (goal is { } g && (clear.Target - g.Target).Length() < (player - g.Target).Length() - 0.01f)
-            return fallback;
+        if (goal is { } g)
+        {
+            if ((clear.Target - g.Target).Length() < (player - g.Target).Length() - 0.01f)
+                return fallback;
+
+            // And it must not throw away uptime the character currently has. Leaving early is worth a walk
+            // when you are already out of position -- Pallmagia, a warrior twenty yalms out of melee -- but
+            // a ranged toon standing correctly in its band should not answer a telegraph by leaving the
+            // fight. Reported 2026-09-06: "ranged toons ran away from the boss at the start".
+            if ((player - g.Target).Length() <= g.Range && (clear.Target - g.Target).Length() > g.Range)
+                return fallback;
+        }
+
         return clear;
     }
 
@@ -360,7 +388,7 @@ public static class ArenaPathfinder
     /// walk into the danger. A module only has to publish such ground as a forbidden zone with no activation
     /// time, so it reads as dangerous now rather than at some future resolve.</para>
     /// </summary>
-    private static SafeSpot Regain(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, UptimeGoal? goal)
+    private static SafeSpot Regain(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, UptimeGoal? goal, DateTime now = default, float moveSpeed = 0f)
     {
         if (goal is not { } g || g.Range <= 0f)
             return SafeSpot.Stay;
@@ -378,11 +406,21 @@ public static class ArenaPathfinder
         // extra arc at melee radius. Measured on a samurai switching rear to flank, the nearest-on-side
         // pass parked it one cell past the border, and the boss's next turn put it back on the rear. The
         // nearest cell past the floor is still what wins, so the switch stays as short as the floor allows.
-        if (Nearest(hints, deadline, player, cellSize, margin, g, SideRule.Inside) is { } deep)
-            return deep;
-        if (Nearest(hints, deadline, player, cellSize, margin, g, SideRule.OnSide) is { } onSide)
-            return onSide;
-        return Nearest(hints, deadline, player, cellSize, margin, g, SideRule.Any) ?? SafeSpot.Stay;
+        var pick = Nearest(hints, deadline, player, cellSize, margin, g, SideRule.Inside)
+            ?? Nearest(hints, deadline, player, cellSize, margin, g, SideRule.OnSide)
+            ?? Nearest(hints, deadline, player, cellSize, margin, g, SideRule.Any);
+        if (pick is not { } back)
+            return SafeSpot.Stay;
+
+        // Uptime is never worth walking through a telegraph. The destination was already filtered for
+        // safety, but nothing looked at the ground in between, so the walk back to the boss after a
+        // knockback went straight through an AOE (reported 2026-09-06, and the Elm Gigas Topaz Ray at
+        // 224.1s is the same thing). Standing still costs a few seconds of damage; the crossing costs the
+        // pull. The next frame re-solves, so as soon as the way clears the walk resumes on its own.
+        if (back.NeedToMove && back.Found && now != default
+            && !hints.WalkIsClear(player, back.Target, now, margin, moveSpeed))
+            return SafeSpot.Stay;
+        return back;
     }
 
     /// <summary>How strictly a regain pass reads the positional.</summary>
