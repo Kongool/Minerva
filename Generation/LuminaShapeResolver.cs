@@ -15,7 +15,7 @@ namespace Minerva.Generation;
 /// <para>The Action sheet does not carry a cone's angle; that lives in the Omen row it points at, whose
 /// VFX path encodes it by name (<c>gl_fan120_1bf</c> = a 120-degree cone), so the path is passed along.</para>
 /// </summary>
-public sealed class LuminaShapeResolver : IShapeResolver
+public sealed class LuminaShapeResolver : IShapeResolver, INameResolver
 {
     private readonly ExcelSheet<LuminaAction>? sheet;
     private readonly ExcelSheet<LuminaOmen>? omens;
@@ -38,4 +38,12 @@ public sealed class LuminaShapeResolver : IShapeResolver
 
         return CastTypeShapes.Resolve(a.CastType, a.EffectRange, a.XAxisModifier, omenPath);
     }
+
+    /// <summary>The action's own name, which is what tells an unscripted cast apart from a gaze
+    /// (<see cref="Minerva.Automation.AutoHints.LooksLikeGaze"/>).</summary>
+    public string? ActionName(uint actionId)
+        => this.sheet != null && this.sheet.TryGetRow(actionId, out var a) ? a.Name.ExtractText() : null;
+
+    /// <summary>Not read in the plugin -- object names come from the actor table, which is always right.</summary>
+    public string? ObjectName(uint oid) => null;
 }

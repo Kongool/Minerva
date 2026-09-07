@@ -209,6 +209,13 @@ public sealed class AIManager
         // steering is opt-in and only meaningful with a real controller installed
         var steering = this.config.AutoDodgeEnabled && this.Current.NeedToMove && this.Current.Found;
 
+        // Stunned, asleep, bound or petrified: the game ignores movement input, so a steer is a lie the
+        // whole way down -- the mover reports it is driving and the character does not move (Orthos,
+        // 2026-09-06). Say so instead, and leave the facing alone: a gaze still resolves while stunned.
+        var incapacitated = steering && Incapacitation.Blocking(pc) != null;
+        if (incapacitated)
+            steering = false;
+
         // A hold says the character is out of position on purpose -- Daedalus walking a healer to a corpse
         // 30y from the boss for an eight second raise. Without it the two engines fight over one character:
         // Regain keeps steering back to uptime, the cast never gets its still seconds, and neither side is
@@ -275,6 +282,7 @@ public sealed class AIManager
             : held ? DodgeBlocker.Hold
             : gazeHold ? DodgeBlocker.Gaze
             : casting ? DodgeBlocker.Casting
+            : incapacitated ? DodgeBlocker.Incapacitated
             : this.movement is NullMovementController or MovementController { HookInstalled: false, UsingNavmesh: false } ? DodgeBlocker.NoController
             : DodgeBlocker.None;
         this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target,
@@ -955,7 +963,8 @@ public sealed class AIManager
     /// </summary>
     private bool BuildTrashHints(Actor pc)
     {
-        if (!this.config.AutoHintsForTrash || this.autoHints is not { Count: > 0 })
+        // a gaze is worth answering even when there is nothing on the ground to walk out of
+        if (!this.config.AutoHintsForTrash || this.autoHints is not { } guess || (guess.Count == 0 && guess.GazeCount == 0))
             return false;
 
         this.hints.Clear();
@@ -976,6 +985,7 @@ public sealed class AIManager
         }
 
         this.autoHints.AddForbiddenZones(this.hints);
+        this.autoHints.AddForbiddenDirections(this.hints, pc.Position);
         this.ApplyKnownVoids();
         return true;
     }

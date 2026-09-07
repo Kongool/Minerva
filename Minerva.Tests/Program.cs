@@ -328,6 +328,8 @@ t.Section("Replay round-trip");
         new DodgeDecision(true, true, default, DodgeReason.Uptime, DodgeBlocker.None, true) { Known = true }.Explain(true, 4f).Contains("did not draw"));
     t.True("a gaze hold explains itself", new DodgeDecision(true, true, default, DodgeReason.Danger, DodgeBlocker.Gaze, false) { Known = true }.Explain(true, 3f).Contains("gaze"));
     t.True("a fresh world knows no decision", !new WorldState(1, "x").LastDodge.Known);
+    t.True("a hit while stunned is not a dodge failure",
+        new DodgeDecision(true, true, default, DodgeReason.Danger, DodgeBlocker.Incapacitated, false) { Known = true }.Explain(true, 5f).Contains("stunned"));
     t.True("a hit with nothing drawn is called a module gap",
         new DodgeDecision(false, false, default, DodgeReason.None, DodgeBlocker.None, false).Explain(false, 0f).Contains("module gap"));
     t.True("a hit while auto-move is off says so",
@@ -594,6 +596,25 @@ t.Section("Auto-dodge pathfinding");
     t.True("the next cell over is not", !ground.Contains(new WPos(103f, 100f)));
     ground.Reset();
     t.True("a zone change forgets it", !ground.Contains(new WPos(101f, 101f)) && ground.Count == 0);
+
+    // a guessed donut's hole errs small: too large paints lethal ground safe and killed a samurai on the
+    // Orthochimera's Dragon's Voice (30y donut, real hole <= 9.9, old estimate 12), 2026-09-06
+    t.True("a 30y donut's guessed hole stays under the real one", Minerva.Generation.CastTypeShapes.DonutInner(30f) <= 8f);
+    t.True("a huge donut does not get a huge hole", Minerva.Generation.CastTypeShapes.DonutInner(40f) <= Minerva.Generation.CastTypeShapes.DonutInnerMax);
+    t.True("a small donut's hole scales down", Minerva.Generation.CastTypeShapes.DonutInner(12f) <= 3f);
+
+    // a gaze is answered by facing, and in unscripted content only the action's name says it is one
+    t.True("a hex eye reads as a gaze", Minerva.Automation.AutoHints.LooksLikeGaze("Double Hex Eye"));
+    t.True("so does a gaze and a glare", Minerva.Automation.AutoHints.LooksLikeGaze("Chilling Glare") && Minerva.Automation.AutoHints.LooksLikeGaze("Baleful Gaze"));
+    t.True("an ordinary AOE does not", !Minerva.Automation.AutoHints.LooksLikeGaze("Knowing Gleam") && !Minerva.Automation.AutoHints.LooksLikeGaze("Body Slam"));
+    t.True("nothing named is not a gaze", !Minerva.Automation.AutoHints.LooksLikeGaze(null));
+    // the state, not the status name, so a report reads as a sentence
+    {
+        var stunned = new Actor(0xE, 14, 0, "S", 0, ActorType.Player, new Vector4(100, 0, 100, 0));
+        t.True("a free actor is not incapacitated", Incapacitation.Blocking(stunned) == null);
+        stunned.Statuses[0].ID = 149u;
+        t.Eq("a stunned actor reports the state", Incapacitation.Blocking(stunned), "stunned");
+    }
 
     // what the cast-bar guesser draws, one rule shared with the replay validator
     t.True("guesser draws a ground circle", Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Circle, Radius: 8f)));

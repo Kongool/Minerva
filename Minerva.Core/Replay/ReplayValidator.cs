@@ -119,6 +119,10 @@ public sealed class ReplayValidator
         /// <summary>Whose spread or stack it was, when not the POV's.</summary>
         public string Owner { get; init; } = "";
 
+        /// <summary>The POV was stunned, asleep, bound or petrified when this landed: no dodge could have
+        /// moved it, whatever the decision said. Names the status.</summary>
+        public string Incapacitated { get; init; } = "";
+
         /// <summary>A knockback component watches this action: the shove is the mechanic, and the ground it
         /// forbids is what the dodge planned around.</summary>
         public bool Knockback { get; init; }
@@ -139,15 +143,20 @@ public sealed class ReplayValidator
         {
             {
                 var gave = this.StatusID != 0 ? $" It gave you status {this.StatusID}." : "";
+                var (you, your, them) = this.Foreign ? ("they", "their", "them") : ("you", "your", "you");
                 if (this.NoModule && !this.Guessed)
                     return this.Sheet switch
                     {
                         "single-target" => "no module here; the game's sheet says this is single-target (a tankbuster or an auto-attack), expected on whoever holds it." + gave,
                         "raidwide" => "no module here; the sheet calls this a raidwide-sized circle: nowhere to stand, expected damage." + gave,
                         "instant" => "no module here, and this landed with no cast bar (an instant, or a trap underfoot), so the guesser had nothing to draw from." + gave,
+                        "gaze" => $"no module here; the name reads as a gaze, so the guesser turns {you} away from it rather than drawing ground. Nothing to walk out of; whether the turn beat the snapshot is the question." + gave,
                         _ => "no module here, and the game's sheet gives this cast no ground shape, so the guesser could not draw it: a module would be needed." + gave,
                     };
-                var (you, your, them) = this.Foreign ? ("they", "their", "them") : ("you", "your", "you");
+                // an incapacitated character cannot be moved by anyone: that answers the hit before any
+                // dodge reasoning does (Orthos, 2026-09-06: stunned, then killed by the next cast)
+                if (this.Incapacitated.Length > 0 && !this.Gaze)
+                    return $"{you} were {this.Incapacitated} when it landed, so no dodge could move {them}: the mechanic to answer is whatever applied that, not this one." + gave;
                 // a spread or stack is meant to land on its people; the question is only who shared it
                 if (this.Spread)
                 {
@@ -226,6 +235,7 @@ public sealed class ReplayValidator
     /// </summary>
     public static Result Validate(ReplayTimeline timeline, ModuleRegistry registry, ulong povOverride, IReadOnlyList<double>? dumpAt = null, IShapeResolver? shapes = null)
     {
+        var names = shapes as INameResolver;
         var world = new WorldState(timeline.QPF, timeline.GameVersion);
         // without this the whole validation runs against the wrong character (see ReplayTimeline.PlayerInstanceID)
         world.Party.PlayerInstanceID = timeline.PlayerInstanceID;
@@ -302,6 +312,7 @@ public sealed class ReplayValidator
                     guessed = wasCast && AutoHints.Draws(sheet);
                     sheetText = guessed ? sheet.ToShapeExpression() ?? sheet.Kind.ToString()
                         : !wasCast && AutoHints.Draws(sheet) ? "instant"
+                        : wasCast && AutoHints.LooksLikeGaze(names?.ActionName(ev.Action.ID)) ? "gaze"
                         : sheet.Kind == ShapeKind.SingleTarget ? "single-target"
                         : sheet.Kind == ShapeKind.Circle ? "raidwide" : "";
                     // the guess vanishes when the cast ends, a frame before the hit: judge the decision that
@@ -368,6 +379,7 @@ public sealed class ReplayValidator
                     Inside = inside, TargetsHit = playersHit, Proximity = playersHit >= Math.Max(4, (playersSeen.Count + 1) / 2),
                     Spread = isSpread, Stack = isStack, Mine = onMe, Owner = owner,
                     Knockback = knockbacks.Contains(ev.Action.ID),
+                    Incapacitated = Incapacitation.Blocking(me) ?? "",
                     NoModule = noModule, Guessed = guessed, Sheet = sheetText,
                 });
             }

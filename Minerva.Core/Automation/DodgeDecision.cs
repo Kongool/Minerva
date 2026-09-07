@@ -35,6 +35,8 @@ public enum DodgeBlocker : byte
     Gaze = 6,
     /// <summary>The character is hardcasting on ground that is not yet lethal; the cast was left to finish.</summary>
     Casting = 7,
+    /// <summary>Stunned, asleep, bound or petrified: the game ignores movement, whoever asks for it.</summary>
+    Incapacitated = 8,
 }
 
 /// <summary>Which mover a steer went through. Mirrors the plugin's movement controller so a log can say
@@ -101,6 +103,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeBlocker.NoController => $"safe spot {dist}y away ({why}) -- no movement controller",
             DodgeBlocker.Gaze => $"safe spot {dist}y away ({why}) -- holding still: a gaze resolves in under a second",
             DodgeBlocker.Casting => $"safe spot {dist}y away ({why}) -- hardcasting; the ground is not lethal yet, so the cast is left to finish",
+            DodgeBlocker.Incapacitated => $"safe spot {dist}y away ({why}) -- stunned, asleep or bound: the game will not move you",
             _ => $"safe spot {dist}y away ({why}) -- not steering",
         } + this.GazeSuffix;
     }
@@ -132,6 +135,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeBlocker.NoController => $"a safe spot {dist}y away was found, but no movement controller could walk there (hook signature or navmesh).",
             DodgeBlocker.Gaze => $"a safe spot {dist}y away was found, but Minerva held still for a gaze about to resolve; the ground cost what the gaze would have.",
             DodgeBlocker.Casting => $"a safe spot {dist}y away was found while you were hardcasting, and Minerva judged the ground not yet lethal, so it let the cast finish instead of moving.",
+            DodgeBlocker.Incapacitated => $"a safe spot {dist}y away was found, but you were stunned, asleep or bound: no dodge could move you, and nothing here was a dodge failure. The mechanic to answer is whatever applied it.",
             // walking for uptime or a positional means the destination was judged clear, so a hit there is a zone
             // the module never drew (Web of Terror, 2026-09-05: back toward the boss into an undrawn funnel lane)
             DodgeBlocker.None when this.Steering && this.Reason is DodgeReason.Uptime or DodgeReason.Positional

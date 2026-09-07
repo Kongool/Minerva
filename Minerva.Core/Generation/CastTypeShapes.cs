@@ -19,8 +19,23 @@ public static class CastTypeShapes
     /// <summary>
     /// A donut's inner radius appears in no sheet, so it is estimated and flagged for review. A fraction
     /// rather than a constant because inner and outer scale together in practice.
+    ///
+    /// <para>Which way to be wrong is not symmetric, and a death settled it. Eureka Orthos, 2026-09-06:
+    /// the Orthochimera's Dragon's Voice is a 30-yalm donut, so the old 0.4 drew the hole as 0-12; the
+    /// real hole ends somewhere at or under 9.9, which is where a samurai stood, read "safe where you
+    /// stand", never ran in, and died. An estimate that is too LARGE paints lethal ground as the safe
+    /// spot; one that is too SMALL only walks the character further in than it needed to go, which is
+    /// where the mechanic wanted it anyway. So the fraction errs small, and is capped in absolute terms
+    /// as well, because a 40-yalm donut does not have a 16-yalm hole.</para>
     /// </summary>
-    public const float DonutInnerFraction = 0.4f;
+    public const float DonutInnerFraction = 0.25f;
+
+    /// <summary>The estimated hole never grows past this, whatever the outer radius (see above).</summary>
+    public const float DonutInnerMax = 8f;
+
+    /// <summary>The estimated inner radius of a donut whose outer radius is <paramref name="effectRange"/>.</summary>
+    public static float DonutInner(float effectRange)
+        => MathF.Round(MathF.Min(effectRange * DonutInnerFraction, DonutInnerMax));
 
     /// <param name="omenPath">The action's Omen row path, which encodes a cone's angle by name
     /// (<c>gl_fan120_1bf</c> = 120 degrees total). Null or unparseable falls back and flags review.</param>
@@ -44,7 +59,7 @@ public static class CastTypeShapes
             8 => new ShapeHint(ShapeKind.Charge, HalfWidth: halfWidth, NeedsReview: true),
 
             10 => new ShapeHint(ShapeKind.Donut, Radius: effectRange,
-                InnerRadius: MathF.Round(effectRange * DonutInnerFraction), NeedsReview: true),
+                InnerRadius: DonutInner(effectRange), NeedsReview: true),
             11 => new ShapeHint(ShapeKind.Cross, Radius: effectRange, HalfWidth: halfWidth, NeedsReview: true),
             _ => ShapeHint.Unknown,
         };
