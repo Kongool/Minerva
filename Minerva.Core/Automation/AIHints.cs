@@ -152,6 +152,9 @@ public sealed class AIHints
         this.ForbiddenZones.Clear();
         this.PotentialTargets.Clear();
         this.TemporaryObstacles = [];
+        this.WalkableGround = null;
+        this.PositioningZones.Clear();
+        this.PositioningSuspended = false;
         this.GoalZones.Clear();
         this.ForbiddenDirections.Clear();
         this.PredictedDamage.Clear();
@@ -174,13 +177,80 @@ public sealed class AIHints
 
     // --- forbidden zones ---
     public void AddForbiddenZone(ShapeDistance shapeDistance, DateTime activation = default, ulong source = default)
-        => this.ForbiddenZones.Add(new ForbiddenZone(shapeDistance, activation, source));
+        => this.AddZone(new ForbiddenZone(shapeDistance, activation, source));
 
     public void AddForbiddenZone(AOEShape shape, WPos origin, Angle rotation = default, DateTime activation = default, ulong source = default)
-        => this.ForbiddenZones.Add(new ForbiddenZone(shape.Distance(origin, rotation), activation, source));
+        => this.AddZone(new ForbiddenZone(shape.Distance(origin, rotation), activation, source));
 
     public void AddForbiddenZone(in AOEInstance aoe)
-        => this.ForbiddenZones.Add(new ForbiddenZone(aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation));
+        => this.AddZone(new ForbiddenZone(aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation));
+
+    private void AddZone(in ForbiddenZone zone)
+    {
+        this.ForbiddenZones.Add(zone);
+        if (zone.Activation == DateTime.MaxValue && IsUnbounded(zone.ShapeDistance))
+            this.PositioningZones.Add(zone.ShapeDistance);
+    }
+
+    /// <summary>
+    /// "Stand here" instructions: zones added at <see cref="DateTime.MaxValue"/> that forbid ground without
+    /// limit, meaning everything except some region. BossmodReborn modules say "go to this spot" exactly this
+    /// way, and BossmodReborn reads MaxValue as "always, but no hurry".
+    ///
+    /// <para>Here they were ignored outright. Every danger test skips a zone whose activation is past its
+    /// deadline, MaxValue is past all of them, and so none of the 46 such calls across the modules (swept
+    /// 2026-09-12) ever moved anyone. The Porta Decumana's orb soak was the one reported.</para>
+    ///
+    /// <para>They are kept apart from danger on purpose. <see cref="ForbiddenZones"/> still holds them, so
+    /// <see cref="IsPositionSafe"/> and the radar behave as before, and every damage test still skips them by
+    /// activation: being off the spot cancels no cast, overrides no hold and costs nothing from the cast
+    /// budget, which is what "no hurry" means and what BossmodReborn does. Only the dodge's choice of where
+    /// to stand reads them, through <see cref="Misplaced"/>.</para>
+    ///
+    /// <para>A bounded zone at MaxValue is not one of these. The Voidzone component's furthest tier and
+    /// persistent scenery use MaxValue to mean "never", and a shape that ends cannot be an instruction to
+    /// stand inside it.</para>
+    /// </summary>
+    public readonly List<ShapeDistance> PositioningZones = [];
+
+    /// <summary>
+    /// Set by the solver for its last-resort pass, when no answer honours both the positioning instructions
+    /// and the real danger: a spot to stand on is never worth a hit.
+    /// </summary>
+    public bool PositioningSuspended;
+
+    /// <summary>
+    /// Is this point outside ground a positioning instruction assigns?
+    /// <para>Measured with no safety margin. The margin keeps a hitbox and a moment of lag away from the edge
+    /// of an AOE; the edge of an assigned spot does not hurt, and these spots were sized for BossmodReborn's
+    /// pathfinder, not ours. A one-yalm knockback landing spot (Diamond Dust slides) is a circle of radius
+    /// one: at a one-yalm margin no point of it qualifies, at none the solver's one-yalm grid always has a cell
+    /// inside, since no point is further than 0.71 yalms from a grid centre.</para>
+    /// </summary>
+    public bool Misplaced(WPos p)
+    {
+        if (this.PositioningSuspended)
+            return false;
+        for (var i = 0; i < this.PositioningZones.Count; ++i)
+            if (this.PositioningZones[i].Distance(p) <= 0f)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Does this shape forbid ground without end? Asked of eight points a hundred kilometres out. No AOE
+    /// reaches that far, so only a shape that forbids "everything except" -- inverted, intersected, a
+    /// half-plane -- can contain one. Decided by what the shape does rather than what class it is, so a
+    /// module that builds its instruction from primitives nobody listed is still recognised.
+    /// </summary>
+    private static bool IsUnbounded(ShapeDistance shape)
+    {
+        const float far = 100000f;
+        for (var i = 0; i < 8; ++i)
+            if (shape.Distance(new WPos(0f, 0f) + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * far)) <= 0f)
+                return true;
+        return false;
+    }
 
     // --- enemy targeting (recorded; Minerva does not auto-target) ---
     public Enemy? FindEnemy(Actor? actor)
@@ -594,8 +664,20 @@ public sealed class AIHints
     }
 
     /// <summary>True if a point sits inside a standing obstacle (always dangerous, no activation time).</summary>
+    /// <summary>
+    /// When set, ground nobody has stood on is treated as an obstacle.
+    /// <para>Only for content with no module, where the "arena" is a guess. The guess is a rectangle fitted
+    /// round where the party has been, so a circular arena hands the dodge four corners of nothing and a
+    /// smaller arena inside a larger room hands it the whole room. Occult Crescent, 2026-09-07: a toon was
+    /// steered out of a critical engagement and into the death barrier. A module's own bounds are authored
+    /// and are left alone; this is the guess admitting what it does not know.</para>
+    /// </summary>
+    public KnownGround? WalkableGround;
+
     public bool InObstacle(WPos p)
     {
+        if (this.WalkableGround is { } ground && !ground.Near(p))
+            return true;
         for (var i = 0; i < this.TemporaryObstacles.Count; ++i)
             if (this.TemporaryObstacles[i].Contains(p))
                 return true;
@@ -695,6 +777,38 @@ public sealed class AIHints
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// How far this point sits from the nearest thing that will hurt it, in yalms, stopping at
+    /// <paramref name="cap"/> because more room than that changes no decision. Zero inside danger.
+    /// <para>Safety is otherwise a yes-or-no test against the safety margin, which is the right test for
+    /// "may I stand here" and the wrong one for "where is best". Accept No Imitators, 2026-09-07: three
+    /// 90-degree cones from the arena centre leave three 30-degree wedges, and a wedge is only as wide as
+    /// its radius allows -- about a yalm across at four yalms out, five at twenty. Every cell in the wedge
+    /// passed the margin test, so the dodge kept the nearest one, which was the narrowest one, and the
+    /// character was clipped three times threading a gap barely wider than itself.</para>
+    /// <para>Zones that cannot measure a distance are skipped rather than probed. This runs per cell of the
+    /// solver's grid, and the ring probe those shapes need costs nine evaluations; a shape that cannot say
+    /// how far away it is simply does not contribute room.</para>
+    /// </summary>
+    public float ClearanceAt(WPos p, DateTime deadline, float cap)
+    {
+        var room = cap;
+        foreach (var z in this.ForbiddenZones)
+        {
+            if (z.Activation > deadline || z.ShapeDistance is SDShapeCheck)
+                continue;
+            var d = z.ShapeDistance.Distance(p);
+            if (d < room)
+            {
+                if (d <= 0f)
+                    return 0f;
+                room = d;
+            }
+        }
+
+        return room;
     }
 
     public bool InImminentDanger(WPos p, DateTime deadline, float margin)

@@ -18,6 +18,8 @@ public enum DodgeReason : byte
     /// <summary>Standing on ground that will fire, with time still to spare: stepping off it now, while the
     /// step is short, rather than at the last second when the way out may be through another telegraph.</summary>
     Clearing = 5,
+    /// <summary>Safe where it stands, but not where the module asked it to stand: taking up an assigned spot.</summary>
+    Positioning = 6,
 }
 
 /// <summary>What stopped a wanted move from being steered, if anything.</summary>
@@ -95,6 +97,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeReason.Danger => "danger",
             DodgeReason.Uptime => "regaining uptime",
             DodgeReason.Clearing => "clearing ground that will fire",
+            DodgeReason.Positioning => "taking up an assigned spot",
             DodgeReason.Positional => "positional",
             _ => "move",
         };
@@ -144,8 +147,8 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             // the module never drew (Web of Terror, 2026-09-05: back toward the boss into an undrawn funnel lane)
             DodgeBlocker.None when this.Steering && this.Reason == DodgeReason.Clearing
                 => $"Minerva was stepping off ground that was going to fire, to a spot {dist}y away, and something landed on the way: the zone that caught you resolved sooner than the one being cleared.",
-            DodgeBlocker.None when this.Steering && this.Reason is DodgeReason.Uptime or DodgeReason.Positional
-                => $"Minerva was walking {(this.Reason == DodgeReason.Uptime ? "back for uptime" : "for a positional")} to a spot {dist}y away that the module considered clear, and the hit landed on the way: the module did not draw this AOE where it fell (module gap), not a late dodge.",
+            DodgeBlocker.None when this.Steering && this.Reason is DodgeReason.Uptime or DodgeReason.Positional or DodgeReason.Positioning
+                => $"Minerva was walking {(this.Reason == DodgeReason.Uptime ? "back for uptime" : this.Reason == DodgeReason.Positioning ? "to a spot the module assigned" : "for a positional")} to a spot {dist}y away that the module considered clear, and the hit landed on the way: the module did not draw this AOE where it fell (module gap), not a late dodge.",
             DodgeBlocker.None when this.Steering && this.MoverKnown && !this.MoverBusy => $"Minerva was steering to a safe spot {dist}y away but the movement layer reported nothing driving (mover: {this.Mover}), so the steer never became motion.",
             DodgeBlocker.None when this.Steering => $"Minerva was steering to a safe spot {dist}y away and did not arrive in time: more clearance lead, or the AOE resolved early.",
             _ => $"a safe spot {dist}y away was chosen but steering did not run that frame.",

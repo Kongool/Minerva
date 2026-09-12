@@ -28,5 +28,21 @@ public sealed class KnownGround
     /// <summary>Has anyone stood in this cell?</summary>
     public bool Contains(WPos p) => this.cells.Contains(Key(p));
 
+    /// <summary>
+    /// Has anyone stood in this cell or one touching it? The looser test, for deciding where the dodge may
+    /// send someone rather than whether a single point is solid: the edge of the ground people have walked
+    /// is still ground, and insisting on an exact cell would pin the character to the party's own footprints.
+    /// One cell of slack is two yalms.
+    /// </summary>
+    public bool Near(WPos p)
+    {
+        var (x, z) = Key(p);
+        for (var dx = -1; dx <= 1; ++dx)
+            for (var dz = -1; dz <= 1; ++dz)
+                if (this.cells.Contains((x + dx, z + dz)))
+                    return true;
+        return false;
+    }
+
     private static (int X, int Z) Key(WPos p) => ((int)MathF.Floor(p.X / Cell), (int)MathF.Floor(p.Z / Cell));
 }

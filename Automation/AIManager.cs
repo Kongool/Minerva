@@ -335,6 +335,8 @@ public sealed class AIManager
             return DodgeReason.Clearing;
         if (this.hints.InImminentDanger(pc.Position, deadline, margin))
             return DodgeReason.Danger;
+        if (this.hints.Misplaced(pc.Position))
+            return DodgeReason.Positioning;
         if (goal is { } g)
         {
             if ((pc.Position - g.Target).Length() > g.Range)
@@ -998,7 +1000,7 @@ public sealed class AIManager
         if (this.committedTarget is { } prev && (prev - pc.Position).Length() > ArrivedRange)
         {
             // The destination is still safe, and so is the way to it: keep going.
-            if (!this.hints.InImminentDanger(prev, deadline, margin)
+            if (!this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev)
                 && this.WayStillClear(pc.Position, prev, now, margin, moveSpeed))
                 return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
 
@@ -1009,7 +1011,7 @@ public sealed class AIManager
             // longer unless the ground underfoot is the thing that is about to kill us, which always wins.
             if (this.world.CurrentTime - this.committedAt < TimeSpan.FromSeconds(MinCommitSeconds)
                 && !this.hints.InImminentDanger(pc.Position, deadline, margin)
-                && !this.hints.InImminentDanger(prev, deadline, margin))
+                && !this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev))
                 return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
         }
 
@@ -1061,6 +1063,13 @@ public sealed class AIManager
             this.hints.Center = pc.Position;
             this.hints.Bounds = new ArenaBoundsCircle(TrashHorizon);
         }
+
+        // Whatever the box above says, the only ground we actually know about is ground somebody has stood
+        // on. Without this the guess is free to steer into a wall, a ledge, or a critical engagement death
+        // barrier, all of which look like clean floor to a rectangle. The party spreads out within seconds,
+        // so this costs a little reach on arrival and nothing after that, and standing still for those few
+        // seconds is much the cheaper mistake.
+        this.hints.WalkableGround = this.knownGround;
 
         this.autoHints.AddForbiddenZones(this.hints);
         this.autoHints.AddForbiddenDirections(this.hints, pc.Position);

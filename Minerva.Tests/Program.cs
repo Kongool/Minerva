@@ -666,6 +666,195 @@ t.Section("Auto-dodge pathfinding");
         t.True("the twenty-yalm wave is not what this solve walked to", (answer.Target - origin).Length() < 21f);
     }
 
+    // With no module the arena is a guess, and a rectangle fitted round a real arena includes ground that
+    // is not there. Occult Crescent, 2026-09-07: a toon was steered out of a critical engagement and into
+    // its death barrier. Ground nobody has stood on is not offered.
+    {
+        var middleOfFloor = new WPos(0f, 0f);
+        var walked = new KnownGround();
+        for (var x = -6f; x <= 6f; x += 1f)
+            for (var z = -6f; z <= 6f; z += 1f)
+                walked.Observe(new WPos(x, z));
+
+        var guess = new AIHints { Center = middleOfFloor, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = middleOfFloor };
+        t.True("with no guard a guessed arena offers ground nobody has seen", !guess.InObstacle(new WPos(25f, 25f)));
+
+        guess.WalkableGround = walked;
+        t.True("ground the party has stood on stays available", !guess.InObstacle(middleOfFloor));
+        t.True("and so does the cell just past its edge", !guess.InObstacle(new WPos(7.5f, 0f)));
+        t.True("ground nobody has walked is an obstacle", guess.InObstacle(new WPos(25f, 25f)));
+
+        // and the solver honours it: an AOE on the party pushes to the edge of walked ground, not past it
+        guess.AddForbiddenZone(new AOEShapeCircle(4f), middleOfFloor, default, now.AddSeconds(1d));
+        var spot = ArenaPathfinder.Solve(guess, now, horizonSeconds: 5f, safetyMargin: 1f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True("a dodge is still found on walked ground", spot.NeedToMove && spot.Found);
+        t.True($"and it stays on it ({spot.Target.X:0.0},{spot.Target.Z:0.0})", walked.Near(spot.Target));
+    }
+
+    // Room is scored, not merely tested. Accept No Imitators, 2026-09-07: three 90-degree cones from the
+    // arena centre leave three 30-degree wedges, and a wedge is only as wide as its radius allows. Every
+    // cell in one passed the safety margin, so the dodge took the nearest, which was the narrowest, and the
+    // tank was clipped three times threading a gap barely wider than itself.
+    {
+        var origin = new WPos(0f, 0f);
+        var wedge = new AIHints { Center = origin, Bounds = new ArenaBoundsCircle(25f), PlayerPosition = new WPos(0f, 4f) };
+        // two 90-degree cones centred at +/-60 degrees, leaving a 30-degree gap along +Z
+        wedge.AddForbiddenZone(new AOEShapeCone(60f, 45f.Degrees()), origin, 60f.Degrees(), now.AddSeconds(2d));
+        wedge.AddForbiddenZone(new AOEShapeCone(60f, 45f.Degrees()), origin, (-60f).Degrees(), now.AddSeconds(2d));
+
+        t.True("clearance grows with distance along the wedge",
+            wedge.ClearanceAt(new WPos(0f, 12f), now.AddSeconds(5d), 8f) > wedge.ClearanceAt(new WPos(0f, 4f), now.AddSeconds(5d), 8f));
+        t.Near("and it is zero inside a cone", wedge.ClearanceAt(new WPos(5.2f, 3f), now.AddSeconds(5d), 8f), 0f, 0.01f);
+
+        // What clearance scoring does NOT do, recorded so nobody re-derives it. Making the dodge prefer
+        // the roomier side needs a weight around 2.9 in Accept No Imitators geometry, and Pallmagia starts
+        // losing melee range at 3.0 (the assertion further down). There is no global weight that does both,
+        // so this is a tie-break between comparable cells and never buys room with range. The rotating
+        // wedge wants the character to orbit with the gap, which is a per-mechanic behaviour.
+        var pinch = new AIHints { Center = origin, Bounds = new ArenaBoundsSquare(25f), PlayerPosition = origin };
+        pinch.AddForbiddenZone(new AOEShapeRect(40f, 1f), new WPos(0f, -20f), default, now.AddSeconds(1.5d));
+        pinch.AddForbiddenZone(new AOEShapeRect(40f, 1f), new WPos(5f, -20f), default, now.AddSeconds(1.5d));
+        t.True("a corridor between two walls measures tighter than open floor",
+            pinch.ClearanceAt(new WPos(3f, 0f), now.AddSeconds(6d), 8f) < pinch.ClearanceAt(new WPos(-3f, 0f), now.AddSeconds(6d), 8f));
+        t.True("and a dodge off the wall underfoot is still found",
+            ArenaPathfinder.Solve(pinch, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed) is { NeedToMove: true, Found: true });
+
+        // but room is a tie-break, not a reason to abandon range: with a goal at the origin the walk stops
+        // at the band rather than running to the widest ground available
+        var roomVsRange = new AIHints { Center = origin, Bounds = new ArenaBoundsCircle(25f), PlayerPosition = new WPos(0f, 4f) };
+        roomVsRange.AddForbiddenZone(new AOEShapeCone(60f, 45f.Degrees()), origin, 60f.Degrees(), now.AddSeconds(2d));
+        roomVsRange.AddForbiddenZone(new AOEShapeCone(60f, 45f.Degrees()), origin, (-60f).Degrees(), now.AddSeconds(2d));
+        var tank = new UptimeGoal(origin, default, 5.6f);
+        var held = ArenaPathfinder.Solve(roomVsRange, now, horizonSeconds: 5f, safetyMargin: 1f, goal: tank,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        var at = held.NeedToMove ? held.Target : roomVsRange.PlayerPosition;
+        t.True($"and stops at the edge of its band rather than chasing room ({(at - origin).Length():0.0}y)",
+            (at - origin).Length() <= tank.Range + 1.5f);
+    }
+
+    // Soaking a moving orb means standing on its path, now. The Porta Decumana, 2026-09-12: phase two's
+    // Aetheroplasm orbs were never soaked, because the soak was ported as a one-yalm box activating at
+    // DateTime.MaxValue -- never imminent, and too small to stand in at a one-yalm margin.
+    {
+        var bossAt = new WPos(0f, 0f);
+        var ultima = new Actor(900, 0x3900, 0, "The Ultima Weapon", 0, ActorType.Enemy, new Vector4(bossAt.X, 0f, bossAt.Z, 0f), 6f);
+        var orb = new Actor(901, 0x3902, 0, "Aetheroplasm", 0, ActorType.Enemy, new Vector4(0f, 0f, -16f, 0f), 1f); // south, rolling +Z at the boss
+        var standing = new WPos(7f, -8f);
+
+        // the ported form, recorded so the reason is not rediscovered
+        var box = new SDIntersection([new SDInvertedRect(orb.Position + (0.5f * orb.Rotation.ToDirection()), new WDir(0f, 1f), 0.5f, 0.5f, 0.5f)]);
+        var never = new AIHints { Center = bossAt, Bounds = new ArenaBoundsCircle(19.5f), PlayerPosition = standing };
+        never.AddForbiddenZone(box, DateTime.MaxValue);
+        // (Since the positioning rule, a MaxValue "stand here" zone is honoured -- but this box's deepest point
+        // is half a yalm from its edge, under the 0.71 the solver's grid is guaranteed to land inside.)
+        t.Eq("the ported MaxValue box is recognised as a positioning instruction", never.PositioningZones.Count, 1);
+        var tooSmall = new AIHints { Center = bossAt, Bounds = new ArenaBoundsCircle(19.5f), PlayerPosition = standing };
+        tooSmall.AddForbiddenZone(box, now);
+        t.True("and a one-yalm box has no cell clear of a one-yalm margin", !ArenaPathfinder.Solve(tooSmall, now, horizonSeconds: 5f, safetyMargin: 1f).Found);
+
+        // the intercept path
+        var soak = Minerva.Components.OrbIntercept.Zone([orb], ultima);
+        t.True("an orb produces a soak zone", soak != null);
+        var soakHints = new AIHints { Center = bossAt, Bounds = new ArenaBoundsCircle(19.5f), PlayerPosition = standing };
+        soakHints.AddForbiddenZone(soak!, now);
+        var go = ArenaPathfinder.Solve(soakHints, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True("a character off the path is sent to it", go.NeedToMove && go.Found);
+        t.True($"onto the line the orb rolls along, close enough to be run over (x {go.Target.X:0.0})", MathF.Abs(go.Target.X) <= 1.5f);
+        t.True($"ahead of the orb, not behind it (z {go.Target.Z:0.0})", go.Target.Z > orb.Position.Z);
+        t.True($"and short of the boss it is rolling into (z {go.Target.Z:0.0})", go.Target.Z < -ultima.HitboxRadius);
+
+        var there = new AIHints { Center = bossAt, Bounds = new ArenaBoundsCircle(19.5f), PlayerPosition = new WPos(0f, -12f) };
+        there.AddForbiddenZone(soak!, now);
+        t.True("a character already on the path stays there", !ArenaPathfinder.Solve(there, now, horizonSeconds: 5f, safetyMargin: 1f).NeedToMove);
+    }
+
+    // "Stand here" instructions ported from BossmodReborn arrive as an inverted zone at DateTime.MaxValue,
+    // which BossmodReborn reads as "always, but no hurry". 46 such calls across the modules (swept
+    // 2026-09-12), every one invisible to this solver because MaxValue is past every deadline. The rule:
+    // an unbounded zone at MaxValue is a positioning instruction. It steers the dodge and the walk back to
+    // uptime, is measured without the safety margin, and is dropped before it can cost a real dodge. It is
+    // not danger: it cancels no cast, overrides no hold, and moves no cast budget.
+    {
+        var arena = new WPos(0f, 0f);
+        var spotAt = new WPos(10f, 0f);
+        var rule = now.AddSeconds(6d);
+
+        var spot = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = arena };
+        spot.AddForbiddenZone(new SDInvertedCircle(spotAt, 3f), DateTime.MaxValue);
+        var toSpot = ArenaPathfinder.Solve(spot, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"a stand-here zone at MaxValue sends the character to it ({toSpot.Target.X:0.0},{toSpot.Target.Z:0.0})",
+            toSpot.NeedToMove && toSpot.Found && (toSpot.Target - spotAt).Length() < 3f);
+
+        var tiny = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = arena };
+        tiny.AddForbiddenZone(new SDInvertedCircle(spotAt, 1f), DateTime.MaxValue);
+        var toTiny = ArenaPathfinder.Solve(tiny, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"a one-yalm spot is standable, because positioning is not measured with the damage margin ({toTiny.Target.X:0.0},{toTiny.Target.Z:0.0})",
+            toTiny.NeedToMove && toTiny.Found && (toTiny.Target - spotAt).Length() < 1f);
+
+        // detected by shape, not by class: the orb-soak idiom is an intersection of inverted rects
+        var boxes = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = arena };
+        boxes.AddForbiddenZone(new SDIntersection([new SDInvertedRect(new WPos(8f, 0f), new WDir(0f, 1f), 2f, 2f, 2f)]), DateTime.MaxValue);
+        var toBox = ArenaPathfinder.Solve(boxes, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"an intersection of inverted boxes at MaxValue is a positioning instruction too ({toBox.Target.X:0.0},{toBox.Target.Z:0.0})",
+            toBox.NeedToMove && toBox.Found && MathF.Abs(toBox.Target.X - 8f) < 2f && MathF.Abs(toBox.Target.Z) < 2f);
+
+        // the walk back to uptime keeps to the assigned ground
+        var held = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = arena };
+        held.AddForbiddenZone(new SDInvertedCircle(arena, 4f), DateTime.MaxValue);
+        var farBoss = new UptimeGoal(new WPos(15f, 0f), default, 3f);
+        var back = ArenaPathfinder.Solve(held, now, horizonSeconds: 5f, safetyMargin: 1f, goal: farBoss, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"uptime does not walk the character off its assigned ground ({back.Target.X:0.0},{back.Target.Z:0.0})",
+            !back.NeedToMove || (back.Target - arena).Length() < 4f);
+
+        // guards: none of this is danger
+        t.True("being off the spot is not imminent danger, so no cast is cancelled and no hold overridden",
+            !spot.InImminentDanger(arena, rule, 1f));
+        t.True("and it does not shrink the cast budget", spot.MaxCastTime(now, 1f, ArenaPathfinder.DefaultMoveSpeed) > 60f);
+
+        var farTier = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = arena };
+        farTier.AddForbiddenZone(new SDCapsule(new WPos(-2f, 0f), new WDir(1f, 0f), 6f, 2f), DateTime.MaxValue);
+        t.True("a bounded zone at MaxValue still means never: a voidzone's far tier moves nobody",
+            !ArenaPathfinder.Solve(farTier, now, horizonSeconds: 5f, safetyMargin: 1f).NeedToMove);
+
+        var clash = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = spotAt };
+        clash.AddForbiddenZone(new SDInvertedCircle(spotAt, 3f), DateTime.MaxValue);
+        clash.AddForbiddenZone(new AOEShapeCircle(6f), spotAt, default, now.AddSeconds(1.5d));
+        var escape = ArenaPathfinder.Solve(clash, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"and a positioning spot under a real AOE never costs the dodge ({escape.Target.X:0.0},{escape.Target.Z:0.0})",
+            escape.NeedToMove && escape.Found && (escape.Target - spotAt).Length() > 6f);
+    }
+
+    // Seven modules copied BossmodReborn's orb soak: a one-yalm box half a yalm ahead of each orb. Even read as
+    // a positioning instruction it is too small for the solver's one-yalm grid. The replacement is a circle
+    // of the orb's radius at the same centre: always standable, and anywhere in it touches the orb.
+    {
+        var orbAt = new WPos(6f, 0f);
+        var orbFacing = 90f.Degrees();                     // facing +X
+        var orb = new Actor(950, 0x4162, 0, "Aura Sphere", 0, ActorType.Enemy, new Vector4(orbAt.X, 0f, orbAt.Z, orbFacing.Rad), 1f);
+        var ahead = orb.Position + (0.5f * orb.Rotation.ToDirection());
+
+        var oldBox = new SDInvertedRect(ahead, new WDir(0f, 1f), 0.5f, 0.5f, 0.5f);
+        var touch = Minerva.Components.OrbIntercept.Touch(orb);
+        t.True($"the copied box is under what the grid can always land in (deepest point {oldBox.Distance(ahead):0.00}y)", oldBox.Distance(ahead) < 0.71f);
+        t.True($"the touch circle is not ({touch.Distance(ahead):0.00}y)", touch.Distance(ahead) >= 0.71f);
+
+        // every point the circle allows is in contact: sample its rim
+        var worst = 0f;
+        for (var i = 0; i < 32; ++i)
+        {
+            var rim = ahead + (new Angle(i * (Angle.TwoPI / 32f)).ToDirection() * (orb.HitboxRadius - 0.001f));
+            worst = MathF.Max(worst, (rim - orb.Position).Length());
+        }
+        t.True($"and anywhere in it touches the orb (furthest {worst:0.00}y, reach {orb.HitboxRadius + 0.5f:0.00}y)", worst <= orb.HitboxRadius + 0.5f + 0.01f);
+
+        var soakHere = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(20f), PlayerPosition = new WPos(-6f, 4f) };
+        soakHere.AddForbiddenZone(new SDIntersection([touch]), DateTime.MaxValue);
+        var went = ArenaPathfinder.Solve(soakHere, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"a soak built from it at MaxValue walks the character into contact ({(went.Target - orb.Position).Length():0.00}y from the orb)",
+            went.NeedToMove && went.Found && (went.Target - orb.Position).Length() <= orb.HitboxRadius + 0.5f);
+    }
+
     // A route may cross a telegraph that fires long after you are through it, and must not cross one that
     // fires while you are still in it. Pallmagia, 2026-09-06: escaping a 30-yalm circle, the path ran
     // straight through a cone with 0.7s left because six yalms of penalty was cheaper than going round.

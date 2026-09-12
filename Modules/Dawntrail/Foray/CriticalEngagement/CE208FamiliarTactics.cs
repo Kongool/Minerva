@@ -86,6 +86,77 @@ sealed class UnbowedSpirit(ModuleBase module) : Components.GenericAOEs(module)
         return _aoes;
     }
 
+    /// <summary>The puddle plus the ground it is about to roll over. Drawn, and lethal now.</summary>
+    private const float DrawnLead = 4f;
+
+    /// <summary>Puddle radius, from the actor's own hitbox in the recordings.</summary>
+    private const float PuddleRadius = 4.2f;
+
+    /// <summary>
+    /// How much further ahead the dodge is told about, and when that ground turns lethal.
+    /// <para>The drawn capsule reaches four yalms. Measured over 7,317 movement samples in
+    /// <c>minerva-20260906-221928-Elm Gigas.log</c>, a puddle travels 3.1 yalms a second at the median and
+    /// 5.2 at the ninetieth percentile, so four yalms is between eight tenths of a second and one and a
+    /// third of warning -- and a dodge takes two to three seconds. The character walked to ground that was
+    /// clear when it was chosen and occupied by the time it arrived: five puddle hits in the 09-06 pull, six
+    /// in Korha's 09-07 pull and two in Saar's. The module was ported carrying the note "needs extended
+    /// moving AOE support", and this is it.</para>
+    /// <para>Distances are stamped at the ninetieth-percentile speed rather than the median, so the warning
+    /// errs early. Rasterising the arena at the four hit moments, the whole set costs about a fifth of the
+    /// floor: 67-72% of the circle is free at four yalms of lead and 49-55% at sixteen, so there is no risk
+    /// of walling the dodge in.</para>
+    /// </summary>
+    private static readonly (float Length, double Seconds)[] Lookahead =
+    [
+        (8f, 1.5d),
+        (12f, 2.3d),
+        (16f, 3.1d),
+    ];
+
+    /// <summary>
+    /// The swept shape a puddle covers over the next <paramref name="length"/> yalms of its travel. Puddles
+    /// either roll straight or orbit the arena centre, which is what <see cref="circular"/> decides; an
+    /// orbiting one sweeps an arc, and the same yalms of travel are fewer degrees the further out it is.
+    /// </summary>
+    private AOEShape SweptShape(Actor puddle, float length)
+    {
+        if (!circular)
+        {
+            return new AOEShapeCapsule(PuddleRadius, length);
+        }
+
+        var center = Module.Center;
+        var offset = puddle.Position - center;
+        var radius = offset.Length();
+        if (radius < 0.1f)
+        {
+            return new AOEShapeCapsule(PuddleRadius, length);
+        }
+
+        var angleDirection = offset.Cross(puddle.Rotation.ToDirection()) > 0f;
+        var span = length / radius;
+        return new AOEShapeArcCapsule(PuddleRadius, (angleDirection ? -span : span).Radians(), center);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        // the drawn capsule: the puddle and the next four yalms, dangerous right now
+        base.AddAIHints(slot, actor, assignment, hints);
+
+        var countP = puddles.Count;
+        for (var i = 0; i < countP; ++i)
+        {
+            var puddle = puddles[i];
+            var pos = puddle.Position;
+            var rot = puddle.Rotation;
+            for (var t = 0; t < Lookahead.Length; ++t)
+            {
+                var (length, seconds) = Lookahead[t];
+                hints.AddForbiddenZone(SweptShape(puddle, length), pos, rot, World.FutureTime(seconds));
+            }
+        }
+    }
+
     public override void Update()
     {
         var countP = puddles.Count;
@@ -93,25 +164,11 @@ sealed class UnbowedSpirit(ModuleBase module) : Components.GenericAOEs(module)
         {
             _aoes = [];
         }
-        var center = Module.Center;
         _aoes = new AOEInstance[countP];
         for (var i = 0; i < countP; ++i)
         {
             var puddle = puddles[i];
-            var pos = puddle.Position;
-            var rot = puddle.Rotation;
-            if (circular)
-            {
-                var offset = pos - center;
-                var angleDirection = offset.Cross(rot.ToDirection()) > 0f;
-                var length = 4f / offset.Length();
-                var lengthDirection = (angleDirection ? -length : length).Radians();
-                _aoes[i] = new(new AOEShapeArcCapsule(4.2f, lengthDirection, center), pos, rot, color: Colors.Danger);
-            }
-            else
-            {
-                _aoes[i] = new(new AOEShapeCapsule(4.2f, 4f), pos, rot, color: Colors.Danger);
-            }
+            _aoes[i] = new(this.SweptShape(puddle, DrawnLead), puddle.Position, puddle.Rotation, color: Colors.Danger);
         }
     }
 }
@@ -136,7 +193,9 @@ sealed class CE208FamiliarTacticsStates : StateMachineBuilder
     }
 }
 
-//TODO: Needs extended moving AOE support- once implemented can be moved to Verified after testing
+// Moving-AOE support is in: UnbowedSpirit publishes the puddle's future path as timed forbidden zones
+// (see its Lookahead). Still WIP for the rest -- Ancient Aero (47540) clipped both toons repeatedly on
+// 09-07, twice while the dodge believed the spot was safe inside its margin.
 [ModuleInfo(Group = ModuleGroup.CriticalEngagement, CFCID = 1093u, NameID = 58u, PrimaryActorOID = (uint)OID.ElmGigas, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class CE208FamiliarTactics : ModuleBase

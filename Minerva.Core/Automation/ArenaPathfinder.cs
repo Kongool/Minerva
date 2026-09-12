@@ -230,7 +230,7 @@ public static class ArenaPathfinder
         // while requiring the margin of the destination makes the solve stop the instant the player's
         // centre crosses the edge, stranding them on the AOE rim where hitbox radius and server latency
         // still clip them. (Reported in-game as "starts to avoid but doesn't fully leave the AOE".)
-        if (!hints.InImminentDanger(player, deadline, safetyMargin))
+        if (!hints.InImminentDanger(player, deadline, safetyMargin) && !hints.Misplaced(player))
         {
             // Nothing is about to land -- but if the ground underfoot is going to fire at all, leaving now
             // is the cheap version of leaving later. Pallmagia, 2026-09-06: the character stood in a
@@ -277,6 +277,21 @@ public static class ArenaPathfinder
         foreach (var earlier in ActivationsBefore(hints, deadline, solveNow))
             if (TryNearestSafe(hints, earlier, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
                 return Settle(hints, earlier, player, spot, cellSize, safetyMargin);
+
+        // A positioning instruction is advice, danger is not. If nothing honours both, answer the danger
+        // alone, as though the module had never asked: a spot to stand on is never worth a hit.
+        if (hints.PositioningZones.Count != 0 && !hints.PositioningSuspended)
+        {
+            hints.PositioningSuspended = true;
+            try
+            {
+                return Solve(hints, now, horizonSeconds, cellSize, safetyMargin, goal, moveSpeed, clearanceLead);
+            }
+            finally
+            {
+                hints.PositioningSuspended = false;
+            }
+        }
 
         return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
     }
@@ -452,7 +467,7 @@ public static class ArenaPathfinder
                     continue;
                 if (!hints.Bounds.Contains(center, p))
                     continue;
-                if (hints.InImminentDanger(p, deadline, margin))
+                if (hints.InImminentDanger(p, deadline, margin) || hints.Misplaced(p))
                     continue;
 
                 var cost = (p - player).LengthSq();             // nearest such cell: the shortest walk back
@@ -486,7 +501,7 @@ public static class ArenaPathfinder
     /// taken early) hit at 8.5.</para>
     /// </summary>
     private static SafeSpot Settle(AIHints hints, DateTime deadline, WPos player, SafeSpot spot, float cellSize, float margin)
-        => (spot.Target - player).LengthSq() <= cellSize * cellSize && !hints.InImminentDanger(player, deadline, margin)
+        => (spot.Target - player).LengthSq() <= cellSize * cellSize && !hints.InImminentDanger(player, deadline, margin) && !hints.Misplaced(player)
             ? SafeSpot.Stay
             : spot;
 
@@ -528,6 +543,43 @@ public static class ArenaPathfinder
     private const float PositionalPenalty = 16f;
 
     /// <summary>
+    /// Room enough. Past this the cell is simply safe and extra space buys nothing, so a fight with an open
+    /// floor scores exactly as it did before this existed. Four yalms is about what survives a step of
+    /// server lag, the character's own hitbox, and an AOE that turns out a little larger than drawn — the
+    /// three ways a cell that measured clear still lands a hit.
+    /// </summary>
+    private const float ClearanceFloor = 4f;
+
+    /// <summary>
+    /// What a missing yalm of clearance costs, against a yalm outside the uptime band
+    /// (<see cref="UptimeWeight"/>, 4). Half of it, deliberately: this is a tie-break among cells that are
+    /// already safe, not a reason to give up range.
+    ///
+    /// <para>The ceiling is set by Pallmagia's Roulette, where the kill circle is 5 yalms and melee range
+    /// reaches 6.1, so the only place a melee can stand is a one-yalm sliver with almost no clearance in it.
+    /// Solving the cost function there, the chosen distance is (26.4 + 9w)/(5 + w), which passes 6.85 —
+    /// the point where melee range is lost — at w = 3.6. Anything at or above that trades the whole band
+    /// for room and fails that fight.</para>
+    ///
+    /// <para>The floor is Accept No Imitators, where a tank on a 3-yalm hitbox has a 5.6-yalm band and the
+    /// rotating wedge is about a quarter of the radius wide: one yalm of room at four out, 1.5 at the band
+    /// edge. Any weight above about 1 walks the character out of the narrowest part to the edge of its
+    /// band, which is as far as uptime allows.</para>
+    ///
+    /// <para>Be honest about the limit, because the two fights above are in direct conflict and the
+    /// measurements are close. Escaping into Accept No Imitators' wedge, the nearest way in sits four yalms
+    /// out with 1.0 of room and the next one along sits six yalms out with 1.6; preferring the second needs
+    /// about 2.9, and Pallmagia starts failing at 3.0. There is no value that fixes the wedge without
+    /// throwing away melee range on the Roulette.</para>
+    ///
+    /// <para>So this is a tie-break and nothing more: at 2 it decides between cells of comparable cost and
+    /// never buys room with range. What Accept No Imitators actually wants is for the character to orbit
+    /// with the rotating gap rather than stand anywhere in it, which is a per-mechanic behaviour and not a
+    /// scoring constant. That fight is still open.</para>
+    /// </summary>
+    private const float ClearanceWeight = 2f;
+
+    /// <summary>
     /// What standing where the next positional is cheap to reach is worth, in yards² of walking. Enough to
     /// choose between otherwise equal cells in the arc, never enough to drag the character off safe ground.
     /// </summary>
@@ -565,6 +617,8 @@ public static class ArenaPathfinder
                 var p = grid.Center(gx, gz);
                 if (float.IsInfinity(grid.CostAt(gx, gz)))
                     continue;                                   // nothing walks there from here
+                if (hints.Misplaced(p))
+                    continue;                                   // not where the module asked us to stand
 
                 // Scored on displacement, routed on cost. The route decides which cells exist and which
                 // way to go; it deliberately does not price them, because its danger penalty is worth
@@ -577,6 +631,12 @@ public static class ArenaPathfinder
                 if (hasGoals)
                     travel = MathF.Max(travel - (hints.GoalScore(p) * GoalWorthYalms), 0f);
                 var cost = travel * travel;
+
+                // Prefer ground with room around it. Everything reaching this line already passed the
+                // margin, so this is not a safety test — it is the difference between clear and barely.
+                var shortfall = ClearanceFloor - hints.ClearanceAt(p, deadline, ClearanceFloor);
+                if (shortfall > 0f)
+                    cost += shortfall * shortfall * ClearanceWeight;
 
                 // ... and increased the further the cell sits from whatever we want uptime on, so that among
                 // safe ground the dodge gives up as little melee range as it can rather than simply taking

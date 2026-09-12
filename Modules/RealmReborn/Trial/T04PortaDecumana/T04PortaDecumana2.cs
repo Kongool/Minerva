@@ -104,18 +104,11 @@ sealed class Aetheroplasm(ModuleBase module) : ModuleComponent(module)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        var orbs = GetOrbs(Module);
-        var count = orbs.Count;
-        if (count != 0)
-        {
-            var orbz = new ShapeDistance[count];
-            for (var i = 0; i < count; ++i)
-            {
-                var o = orbs[i];
-                orbz[i] = new SDInvertedRect(o.Position + 0.5f * o.Rotation.ToDirection(), new WDir(default, 1f), 0.5f, 0.5f, 0.5f);
-            }
-            hints.AddForbiddenZone(new SDIntersection(orbz), DateTime.MaxValue);
-        }
+        // Soaking is "be on an orb's path, now". BossmodReborn's version -- a one-yalm box ahead of each orb,
+        // activating at DateTime.MaxValue -- was invisible to this solver twice over: past every deadline, so
+        // never imminent, and smaller than the safety margin, so never standable. See OrbIntercept.
+        if (Components.OrbIntercept.Zone(GetOrbs(Module), Module.PrimaryActor) is { } soak)
+            hints.AddForbiddenZone(soak, World.CurrentTime);
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)

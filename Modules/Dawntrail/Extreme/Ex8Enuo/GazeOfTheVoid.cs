@@ -47,7 +47,7 @@ sealed class GazeOfTheVoidSoaks(ModuleBase module) : ModuleComponent(module)
                 for (var i = 0; i < count; ++i)
                 {
                     var o = orbs[i];
-                    orbz[i] = new SDInvertedRect(o.Position + 0.5f * o.Rotation.ToDirection(), new WDir(default, 1f), 0.5f, 0.5f, 0.5f);
+                    orbz[i] = Components.OrbIntercept.Touch(o);
                 }
                 hints.AddForbiddenZone(new SDIntersection(orbz), DateTime.MaxValue);
             }
@@ -60,7 +60,7 @@ sealed class GazeOfTheVoidSoaks(ModuleBase module) : ModuleComponent(module)
                 for (var i = 0; i < bigcount; ++i)
                 {
                     var o = bigorbs[i];
-                    orbz[i] = new SDInvertedRect(o.Position + 0.5f * o.Rotation.ToDirection(), new WDir(default, 1f), 0.5f, 0.5f, 0.5f);
+                    orbz[i] = Components.OrbIntercept.Touch(o);
                 }
                 hints.AddForbiddenZone(new SDIntersection(orbz), DateTime.MaxValue);
             }
