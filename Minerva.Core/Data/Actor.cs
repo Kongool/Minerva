@@ -12,6 +12,9 @@ public enum Class : byte
     ACN = 26, SMN = 27, SCH = 28, ROG = 29, NIN = 30, MCH = 31, DRK = 32,
     AST = 33, SAM = 34, RDM = 35, BLU = 36, GNB = 37, DNC = 38,
     RPR = 39, SGE = 40, VPR = 41, PCT = 42,
+    // Beastmaster (7.56), the melee limited job. Unlisted it read as Role.None, i.e. ranged uptime, so the
+    // dodge never walked it into melee of the target Parcae/Daedalus were fighting.
+    BST = 43,
 }
 
 /// <summary>
@@ -34,6 +37,7 @@ public static class ClassExtensions
         Class.ARC or Class.BRD or Class.MCH or Class.DNC => ClassCategory.PhysRanged,
         Class.THM or Class.BLM or Class.ACN or Class.SMN or Class.RDM or Class.PCT => ClassCategory.Caster,
         Class.BLU => allowLimited ? ClassCategory.Limited : ClassCategory.Caster,
+        Class.BST => allowLimited ? ClassCategory.Limited : ClassCategory.Melee,
         _ => ClassCategory.Undefined,
     };
 
@@ -48,7 +52,7 @@ public static class ClassExtensions
     {
         Class.GLA or Class.PLD or Class.MRD or Class.WAR or Class.DRK or Class.GNB => Role.Tank,
         Class.CNJ or Class.WHM or Class.SCH or Class.AST or Class.SGE => Role.Healer,
-        Class.PGL or Class.MNK or Class.LNC or Class.DRG or Class.ROG or Class.NIN or Class.SAM or Class.RPR or Class.VPR => Role.Melee,
+        Class.PGL or Class.MNK or Class.LNC or Class.DRG or Class.ROG or Class.NIN or Class.SAM or Class.RPR or Class.VPR or Class.BST => Role.Melee,
         Class.ARC or Class.BRD or Class.MCH or Class.DNC or Class.THM or Class.BLM or Class.ACN or Class.SMN or Class.RDM or Class.PCT or Class.BLU => Role.Ranged,
         _ => Role.None,
     };
