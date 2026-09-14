@@ -855,6 +855,64 @@ t.Section("Auto-dodge pathfinding");
             went.NeedToMove && went.Found && (went.Target - orb.Position).Length() <= orb.HitboxRadius + 0.5f);
     }
 
+    // A wave that fires inside the clearance lead is still a stage. Quarried Away, 2026-09-13: two waves of
+    // three 60-degree cones from the boss, three seconds apart, covering every direction between them. At
+    // 113.8s Korha stood in a gap of the first wave (one second left) inside a cone of the second, and the
+    // dodge walked twelve yalms through a first-wave cone to escape the second; the first landed on the way.
+    // The right answer is to stay out of the wave that is about to fire, and move once it has.
+    {
+        var boss = new WPos(0f, 0f);
+        var coneWaves = new AIHints { Center = boss, Bounds = new ArenaBoundsCircle(20f) };
+        foreach (var deg in new[] { 60f, 180f, -60f })
+            coneWaves.AddForbiddenZone(new AOEShapeCone(40f, 30f.Degrees()), boss, deg.Degrees(), now.AddSeconds(0.8d));
+        foreach (var deg in new[] { 0f, 120f, -120f })
+            coneWaves.AddForbiddenZone(new AOEShapeCone(40f, 30f.Degrees()), boss, deg.Degrees(), now.AddSeconds(3.8d));
+        var gap = boss + (new Angle((-114f).Degrees().Rad).ToDirection() * 6.5f);  // clear of wave one, inside wave two
+        coneWaves.PlayerPosition = gap;
+        t.True("the test stands in a first-wave gap", !coneWaves.InImminentDanger(gap, now.AddSeconds(0.8d), 1f));
+
+        var answer = ArenaPathfinder.Solve(coneWaves, now, horizonSeconds: 5f, safetyMargin: 1f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"the dodge holds its gap until the first wave has fired (target {answer.Target.X:0.0},{answer.Target.Z:0.0}, move {answer.NeedToMove})",
+            !answer.NeedToMove);
+    }
+
+    // Shortening a route must not undo the detour the route was made of. Cursed Resurgence, 2026-09-13: the
+    // grid went round a standing puddle, then the simplifier -- which only asked whether a straight line hit a
+    // wall -- replaced the whole path with one straight step through the puddle, and the navmesh walked it.
+    // Twice in one pull, 2.3 and 4.9 yalms deep.
+    {
+        var floor = new WPos(0f, 0f);
+        var puddleAt = new WPos(5f, 0f);
+        var puddleHints = new AIHints { Center = floor, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = floor };
+        puddleHints.AddForbiddenZone(new AOEShapeCircle(3f), puddleAt);                    // standing, lethal now
+        var grid = new RouteGrid(puddleHints, now.AddSeconds(5d), floor, 1f, 1f, now, ArenaPathfinder.DefaultMoveSpeed);
+        var path = grid.Route(floor, new WPos(10f, 0f));
+
+        var deepest = float.MaxValue;
+        var from = floor;
+        foreach (var q in path)
+        {
+            for (var k = 1; k <= 40; ++k)
+                deepest = MathF.Min(deepest, (from + ((q - from) * (k / 40f)) - puddleAt).Length() - 3f);
+            from = q;
+        }
+        t.True($"the walked route stays out of the puddle it was planned around ({path.Count} point(s), closest {deepest:0.0}y from its edge)", deepest > 0f);
+
+        // and a clean straight line still collapses to one step
+        var open = new AIHints { Center = floor, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = floor };
+        var openGrid = new RouteGrid(open, now.AddSeconds(5d), floor, 1f, 1f, now, ArenaPathfinder.DefaultMoveSpeed);
+        var openPath = openGrid.Route(floor, new WPos(10f, 0f));
+        var walked = 0f;
+        var prev = floor;
+        foreach (var q in openPath)
+        {
+            walked += (q - prev).Length();
+            prev = q;
+        }
+        t.True($"open ground still simplifies to a straight walk ({walked:0.00}y for 10)", walked <= 10.2f);
+    }
+
     // A route may cross a telegraph that fires long after you are through it, and must not cross one that
     // fires while you are still in it. Pallmagia, 2026-09-06: escaping a 30-yalm circle, the path ran
     // straight through a cone with 0.7s left because six yalms of penalty was cheaper than going round.
@@ -864,11 +922,20 @@ t.Section("Auto-dodge pathfinding");
         var from = new WPos(94f, 105f);
         var to = new WPos(106f, 105f);
 
-        static bool CrossesTheWall(List<WPos> route)
+        // Checks the legs, not just the corners. Until 2026-09-13 this looked only at the route's points, and passed
+        // a route that was one straight step 1.98 yalms through the wall: the simplifier had thrown the detour away
+        // and no point landed inside. Half a cell of tolerance, since this grid is a yalm and runs with no margin.
+        var wallSd = new AOEShapeRect(20f, 2f).Distance(wallCentre, default);
+        bool CrossesTheWall(List<WPos> route)
         {
+            var prev = from;
             foreach (var p in route)
-                if (p.X > 97.5f && p.X < 102.5f && p.Z > 99.5f && p.Z < 120.5f)
-                    return true;
+            {
+                for (var k = 0; k <= 100; ++k)
+                    if (wallSd.Distance(prev + ((p - prev) * (k / 100f))) < -0.5f)
+                        return true;
+                prev = p;
+            }
             return false;
         }
 

@@ -632,6 +632,18 @@ public sealed class SDKnockbackInAABBRectLeftRightAlongZAxis(WPos center, float 
     }
 }
 
+/// <summary>
+/// BossmodReborn's X-axis twin of <see cref="SDKnockbackInAABBRectLeftRightAlongZAxis"/>, ported as it is written
+/// there: the side is chosen by Z and the push runs along X. Forbids ground from which that push leaves the box.
+/// </summary>
+public sealed class SDKnockbackInAABBRectLeftRightAlongXAxis(WPos center, float distance, float halfWidth, float halfHeight) : ShapeDistance
+{
+    public override float Distance(WPos p)
+    {
+        return (p + new WDir(p.Z > center.Z ? distance : -distance, 0f)).InRect(center, halfWidth, halfHeight) ? 1f : -1f;
+    }
+}
+
 /// <summary>The same, with rectangular AOEs you must also not be pushed into.</summary>
 public sealed class SDKnockbackInAABBRectLeftRightAlongZAxisPlusAOERects(
     WPos center, float distance, float halfWidth, float halfHeight,

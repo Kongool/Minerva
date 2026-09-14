@@ -54,7 +54,9 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
         float minDistance = default,     // for attracts: don't pull closer than this
         IReadOnlyList<SafeWall>? safeWalls = null,
         ulong actorID = default,
-        bool ignoreImmunes = false)
+        bool ignoreImmunes = false,
+        int? arenaProjectionLayer = null,
+        bool? restrictToArenaProjectionLayer = false)
     {
         public readonly WPos Origin = origin;
         public readonly float Distance = distance;
@@ -66,6 +68,10 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
         public readonly SafeWall[] SafeWalls = safeWalls != null ? [.. safeWalls] : [];
         public readonly ulong ActorID = actorID;
         public readonly bool IgnoreImmunes = ignoreImmunes;
+
+        /// <summary>Floor this knockback belongs to, for BossmodReborn parity. Inert: see <see cref="ModuleComponent.ArenaProjectionLayer"/>.</summary>
+        public readonly int? ArenaProjectionLayer = arenaProjectionLayer;
+        public readonly bool? RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
     }
 
     public bool StopAtWall = stopAtWall;   // wall is solid: the push stops at the boundary rather than crossing it

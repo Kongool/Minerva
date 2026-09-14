@@ -5,7 +5,7 @@ namespace Minerva;
 /// resolving (dealing damage) at <see cref="Activation"/>. Components maintain lists of these and
 /// the radar draws them; hint logic warns when the local player stands inside one.
 /// </summary>
-public struct AOEInstance(AOEShape shape, WPos origin, Angle rotation = default, DateTime activation = default, uint color = default, bool risky = true, ulong actorID = default, ShapeDistance? shapeDistance = null)
+public struct AOEInstance(AOEShape shape, WPos origin, Angle rotation = default, DateTime activation = default, uint color = default, bool risky = true, ulong actorID = default, ShapeDistance? shapeDistance = null, int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = false)
 {
     // mutable (matching BMR) so components like SimpleAOEs can recolour / re-flag instances per frame
     public AOEShape Shape = shape;
@@ -16,6 +16,10 @@ public struct AOEInstance(AOEShape shape, WPos origin, Angle rotation = default,
     public bool Risky = risky;   // if false, drawn but not counted as "you're in danger"
     public ulong ActorID = actorID;
     public ShapeDistance? ShapeDistance = shapeDistance; // optional cached SDF (matching BMR; unused by Minerva's renderer)
+
+    /// <summary>Floor this AOE belongs to, for BossmodReborn parity. Inert: see <see cref="ModuleComponent.ArenaProjectionLayer"/>.</summary>
+    public int? ArenaProjectionLayer = arenaProjectionLayer;
+    public bool? RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
 
     public readonly bool Check(WPos pos) => this.Shape.Check(pos, this.Origin, this.Rotation);
     public readonly IReadOnlyList<WPos> Contour() => this.Shape.Contour(this.Origin, this.Rotation);

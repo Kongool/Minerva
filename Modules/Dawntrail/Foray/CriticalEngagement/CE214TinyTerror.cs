@@ -239,100 +239,119 @@ sealed class TinyMeteor(ModuleBase module) : Components.SimpleAOEs(module, (uint
 
 sealed class Comet(ModuleBase module) : ModuleComponent(module)
 {
-    private readonly List<ArcaneSphere> arcaneSpheres = [];
+    // Kill order, from the user (2026-09-13): the three outer Arcane Spheres, then the one in the centre, then
+    // the boss. The port only ever raised one outer sphere -- whichever had the most Tiny Apprentices beside it
+    // -- and said nothing about the centre sphere or the boss, so the order held only when the rotation happened
+    // to pick it. Which outer sphere goes first is left exactly as ported: all three start the same 60-second
+    // Comet together, so nothing in the recording says one is more urgent, and the ported choice is the order
+    // the party actually killed them in without a Comet going off.
 
-    private class ArcaneSphere(Actor actor)
+    /// <summary>How close a Tiny Apprentice has to be to count as feeding a sphere, in yalms (a box, as ported).</summary>
+    private const float ApprenticeReach = 4f;
+
+    /// <summary>
+    /// BossmodReborn's count, kept as ported: one per frame per apprentice beside a sphere, so it measures how
+    /// long each sphere has been fed rather than how many feed it now. It also stops counting for the frame at
+    /// the first apprentice away from every sphere; unchanged, since the choice it makes held up in play.
+    /// </summary>
+    private readonly Dictionary<ulong, int> fed = [];
+
+    private const int FocusPriority = 3;
+    private const int SpherePriority = 2;
+
+    private List<Actor> AliveOuter()
     {
-        public Actor arcaneSphere = actor;
-        public int mages = 0;
+        var result = new List<Actor>();
+        foreach (var a in Module.Enemies((uint)OID.ArcaneSphereSmall))
+            if (!a.IsDead)
+                result.Add(a);
+        return result;
     }
 
-    public override void OnActorCreated(Actor actor)
+    private Actor? AliveCentre()
     {
-        if (actor.OID == (uint)OID.ArcaneSphereSmall)
-        {
-            arcaneSpheres.Add(new ArcaneSphere(actor));
-        }
-    }
-
-    public override void OnActorDeath(Actor actor)
-    {
-        if (actor.OID == (uint)OID.ArcaneSphereSmall)
-        {
-            var sphere = arcaneSpheres.Find(a => a.arcaneSphere.InstanceID == actor.InstanceID);
-            if (sphere != null)
-            {
-                arcaneSpheres.Remove(sphere);
-            }
-        }
+        foreach (var a in Module.Enemies((uint)OID.ArcaneSphereBig))
+            if (!a.IsDead)
+                return a;
+        return null;
     }
 
     public override void Update()
     {
-        if (arcaneSpheres.Count == 0)
-        {
+        var outer = AliveOuter();
+        if (outer.Count == 0)
             return;
-        }
-
-        foreach (var actor in World.Actors)
+        foreach (var mage in Module.Enemies((uint)OID.TinyApprentice))
         {
-            if (actor.OID == (uint)OID.TinyApprentice)
-            {
-                var index = arcaneSpheres.FindIndex(sphere => actor.Position.AlmostEqual(sphere.arcaneSphere.Position, 4.0f));
-                if (index < 0)
-                {
-                    return;
-                }
+            var sphere = outer.Find(s => mage.Position.AlmostEqual(s.Position, ApprenticeReach));
+            if (sphere == null)
+                return;
+            this.fed[sphere.InstanceID] = this.fed.GetValueOrDefault(sphere.InstanceID) + 1;
+        }
+    }
 
-                arcaneSpheres[index].mages++;
+    /// <summary>The outer sphere fed longest; the first one on a tie, as ported.</summary>
+    private Actor? FocusOuter(List<Actor> outer)
+    {
+        Actor? best = null;
+        var bestCount = -1;
+        foreach (var sphere in outer)
+        {
+            var n = this.fed.GetValueOrDefault(sphere.InstanceID);
+            if (n > bestCount)
+            {
+                best = sphere;
+                bestCount = n;
             }
         }
+
+        return best;
+    }
+
+    /// <summary>What to be hitting now, in the kill order, or null once both kinds of sphere are gone.</summary>
+    private Actor? KillTarget(out bool outerPhase)
+    {
+        var outer = AliveOuter();
+        outerPhase = outer.Count != 0;
+        return outerPhase ? FocusOuter(outer) : AliveCentre();
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)
     {
-        if (arcaneSpheres.Count == 0)
-        {
-            return;
-        }
-
-        var firstArcaneSphere = arcaneSpheres.MaxBy(a => a.mages);
-        if (firstArcaneSphere != null)
-        {
-            Arena.ZoneCircleOutline(firstArcaneSphere.arcaneSphere.Position, 2.0f, Colors.Safe, 2.0f);
-        }
+        if (KillTarget(out _) is { } target)
+            Arena.ZoneCircleOutline(target.Position, 2.0f, Colors.Safe, 2.0f);
     }
 
     public override void AddHints(int slot, Actor actor, TextHints hints)
     {
-        if (arcaneSpheres.Count == 0)
-        {
+        if (KillTarget(out var outerPhase) is null)
             return;
-        }
-
-        hints.Add("Attack the arcane sphere with the green circle around it!", false);
+        hints.Add(outerPhase
+            ? "Kill the outer arcane spheres (green circle first), then the centre one, then the boss."
+            : "Kill the centre arcane sphere, then the boss.", false);
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (arcaneSpheres.Count == 0)
-        {
+        var outer = AliveOuter();
+        var centre = AliveCentre();
+        if (outer.Count == 0 && centre == null)
             return;
-        }
 
-        var firstArcaneSphere = arcaneSpheres.MaxBy(a => a.mages);
-        if (firstArcaneSphere != null)
+        var focus = outer.Count != 0 ? FocusOuter(outer) : null;
+        var count = hints.PotentialTargets.Count;
+        for (var i = 0; i < count; ++i)
         {
-            var arcane = firstArcaneSphere.arcaneSphere;
-            var count = hints.PotentialTargets.Count;
-            for (var i = 0; i < count; ++i)
-            {
-                var enemy = hints.PotentialTargets[i];
-                if (enemy.Actor.InstanceID == arcane.InstanceID)
-                {
-                    enemy.Priority = 2;
-                }
-            }
+            var enemy = hints.PotentialTargets[i];
+            var a = enemy.Actor;
+            if (a.OID == (uint)OID.ArcaneSphereSmall && !a.IsDead)
+                enemy.Priority = a == focus ? FocusPriority : SpherePriority;
+            else if (a.OID == (uint)OID.ArcaneSphereBig && !a.IsDead)
+                // attackable, but not while an outer sphere stands
+                enemy.Priority = outer.Count != 0 ? AIHints.Enemy.PriorityUndesirable : FocusPriority;
+            else if (a.OID == (uint)OID.TinyMage)
+                // the boss comes last: after every sphere is down, the ordinary priority returns
+                enemy.Priority = AIHints.Enemy.PriorityUndesirable;
         }
     }
 }

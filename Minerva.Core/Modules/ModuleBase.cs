@@ -370,6 +370,17 @@ public abstract class ModuleBase : IDisposable
 
     public void Update()
     {
+        // BossmodReborn calls this every frame until its state machine starts. Minerva does not run a
+        // module's own CheckPull (ported overrides dereference things the radar owns), so the stand-in for
+        // "not started" is the primary actor never yet having been in combat.
+        if (!this.Pulled)
+        {
+            if (this.PrimaryActor.InCombat)
+                this.Pulled = true;
+            else
+                this.UpdatePreModuleActivation();
+        }
+
         this.OnUpdate();
         this.AdvancePhase();
         for (var i = 0; i < this.components.Count; ++i)
@@ -413,6 +424,31 @@ public abstract class ModuleBase : IDisposable
     // module overriding one is recording something real about the fight.
     protected virtual bool CheckPull() => this.PrimaryActor.IsTargetable && this.PrimaryActor.InCombat;
 
+    /// <summary>Has the primary actor been in combat yet? Latches; see <see cref="Update"/>.</summary>
+    public bool Pulled { get; private set; }
+
+    /// <summary>
+    /// Notes for the fight, shown before the pull. BossmodReborn (2026-09) renders these in a window of their
+    /// own; Minerva adds them to the radar's global hints until <see cref="Pulled"/>.
+    /// </summary>
+    public virtual string[] PrePullHints => [];
+
+    /// <summary>An actor's floor. Always null. <inheritdoc cref="ModuleComponent.ArenaProjectionLayer"/></summary>
+    public int? ResolveArenaProjectionLayer(Actor actor) => null;
+
+    /// <summary>Does a mechanic on this floor apply to this actor? Always, without floors.</summary>
+    public bool MechanicAppliesToArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer) => true;
+
+    /// <summary>Is this actor on the mechanic's floor? Always, without floors.</summary>
+    public bool ActorMatchesArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer) => true;
+
+    /// <summary>Are these two actors on the same floor? Always, without floors.</summary>
+    public bool ActorsMatchArenaProjectionLayer(Actor first, Actor second) => true;
+
+    /// <summary>Called every frame until the fight starts, as BossmodReborn does. Ported modules use it to
+    /// find actors they draw or hint from before anything has been cast.</summary>
+    protected virtual void UpdatePreModuleActivation() { }
+
     /// <summary>True when the fight has reset (wipe, or the player left the arena) and the module should
     /// stand down. Recorded, not yet acted on.</summary>
     public virtual bool CheckReset() => false;
@@ -430,10 +466,21 @@ public abstract class ModuleBase : IDisposable
             this.Arena.ActorMarker(this.PrimaryActor.Position, this.PrimaryActor.Rotation, this.PrimaryActor.HitboxRadius, Colors.Enemy);
     }
 
-    public void AddGlobalHints(ModuleComponent.GlobalHints hints)
+    public void AddGlobalHints(ModuleComponent.GlobalHints hints) => this.AddGlobalHints(null, hints);
+
+    /// <summary>Global hints from every component, through both of BossmodReborn's signatures, and this
+    /// module's <see cref="PrePullHints"/> until the fight starts.</summary>
+    public void AddGlobalHints(Actor? actor, ModuleComponent.GlobalHints hints)
     {
+        if (!this.Pulled)
+            foreach (var note in this.PrePullHints)
+                hints.Add(note);
         for (var i = 0; i < this.components.Count; ++i)
+        {
             this.components[i].AddGlobalHints(hints);
+            if (actor != null)
+                this.components[i].AddGlobalHints(actor, hints);
+        }
     }
 
     public void AddHints(int slot, Actor actor, ModuleComponent.TextHints hints)

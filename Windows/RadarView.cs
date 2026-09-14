@@ -143,7 +143,7 @@ public sealed class RadarView(ModuleManager manager, AIManager ai, Configuration
         // bottom-left: the hints, then the auto-move readout
         var lines = new List<(string Text, Vector4 Color)>();
         var global = new ModuleComponent.GlobalHints();
-        module.AddGlobalHints(global);
+        module.AddGlobalHints(pc, global);
         foreach (var h in global)
             lines.Add((h, UiKit.Yellow));
 

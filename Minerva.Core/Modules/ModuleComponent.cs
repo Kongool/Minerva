@@ -212,6 +212,36 @@ public abstract class ModuleComponent(ModuleBase module)
     public virtual void AddHints(int slot, Actor actor, TextHints hints) { }
     public virtual void AddGlobalHints(GlobalHints hints) { }
 
+    /// <summary>
+    /// BossmodReborn's current form of <see cref="AddGlobalHints(GlobalHints)"/>, which gained the player in
+    /// its 2026-09 refactor (about two hundred modules changed signature). Both are called; override either.
+    /// </summary>
+    public virtual void AddGlobalHints(Actor actor, GlobalHints hints) { }
+
+    /// <summary>
+    /// BossmodReborn's arena projection layers (2026-09): arenas with several floors at different heights, where a mechanic can apply to one floor only. Minerva has no multi-floor arenas -- its ArenaBoundsCustom cannot declare floors, so a module that does will not compile rather than silently lose them -- and BossmodReborn with no floors declared behaves exactly as these do: every mechanic applies, every actor matches, and an actor's floor resolves to null.
+    /// <para>Declared on the base so every ported component that sets or reads it compiles.</para>
+    /// </summary>
+    public int? ArenaProjectionLayer;
+
+    /// <inheritdoc cref="ArenaProjectionLayer"/>
+    public bool? RestrictToArenaProjectionLayer;
+
+    /// <summary>The floor at this height. Always null: no floors. <inheritdoc cref="ArenaProjectionLayer"/></summary>
+    protected int? ResolveArenaProjectionLayer(float y) => null;
+
+    /// <summary>Does a mechanic on this floor apply to this actor? Always: no floors.</summary>
+    protected bool ArenaProjectionLayerApplies(Actor actor, int? mechanicLayer, bool? restrictToLayer)
+        => this.Module.MechanicAppliesToArenaProjectionLayer(actor, mechanicLayer, restrictToLayer);
+
+    /// <summary>Is this actor a participant on the mechanic's floor? Always: no floors.</summary>
+    protected bool ArenaProjectionLayerParticipantApplies(Actor actor, int? mechanicLayer, bool? restrictToLayer)
+        => this.Module.ActorMatchesArenaProjectionLayer(actor, mechanicLayer, restrictToLayer);
+
+    /// <summary>The floor to clip AI geometry to, as BossmodReborn computes it.</summary>
+    protected static int? ArenaProjectionLayerForAI(int? mechanicLayer, bool? restrictToLayer)
+        => restrictToLayer.HasValue ? mechanicLayer : null;
+
     /// <summary>Contribute danger zones for the auto-dodge engine (see <see cref="AIHints"/>). The
     /// <paramref name="assignment"/> role slot (matching BMR) lets role-based positioning port unchanged.</summary>
     public virtual void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }

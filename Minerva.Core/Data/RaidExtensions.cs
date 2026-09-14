@@ -63,6 +63,9 @@ public static class SortHelpers
     public static void SortAOEByActivation(List<AOEInstance> aoes)
         => aoes.Sort(static (a, b) => a.Activation.CompareTo(b.Activation));
 
+    public static void SortKnockbacksByActivation(List<Components.GenericKnockback.Knockback> list)
+        => list.Sort(static (a, b) => a.Activation.CompareTo(b.Activation));
+
     /// <summary>Stable order by the actor that owns each AOE — for fights where several casters put up the
     /// same shape and a component needs to pair an AOE back to its caster by position in the list.</summary>
     public static void SortAOEsByActorID(List<AOEInstance> aoes)

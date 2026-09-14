@@ -170,45 +170,89 @@ public sealed class RouteGrid
             return [target];
 
         // came[] runs destination -> player, so this is reversed to walk the other way
-        var back = new List<WPos>();
+        var back = new List<int>();
         var i = (tz * this.w) + tx;
         while (i >= 0 && back.Count <= this.w * this.h)
         {
-            back.Add(this.Center(i % this.w, i / this.w));
+            back.Add(i);
             i = this.came[i];
         }
         back.Reverse();
 
         var route = new List<WPos>();
         var from = player;
+        var fromCost = 0f;
+        var fromLength = 0f;
         var at = 0;
         while (at < back.Count)
         {
             var furthest = -1;
             for (var j = back.Count - 1; j >= at; --j)
             {
-                if (this.Walkable(from, back[j]))
+                if (this.Shortcut(from, fromCost, fromLength, back[j]))
                 {
                     furthest = j;
                     break;
                 }
             }
-            if (furthest < 0)
-            {
-                // nothing ahead is directly reachable: keep the next cell and let the next solve re-plan
-                route.Add(back[at]);
-                from = back[at];
-                ++at;
-                continue;
-            }
-            route.Add(back[furthest]);
-            from = back[furthest];
-            at = furthest + 1;
+            var keep = furthest < 0 ? at : furthest;   // nothing ahead is a fair shortcut: keep the next cell
+            var cellIndex = back[keep];
+            from = this.Center(cellIndex % this.w, cellIndex / this.w);
+            fromCost = this.cost[cellIndex];
+            fromLength = this.length[cellIndex];
+            route.Add(from);
+            at = keep + 1;
         }
 
         if (route.Count == 0 || !route[^1].AlmostEqual(target, 0.01f))
             route.Add(target);
         return route;
+    }
+
+    /// <summary>
+    /// May the route jump straight from <paramref name="from"/> to the path cell <paramref name="toIndex"/>?
+    /// Only if nothing solid is in the way and the straight line costs no more, at the prices the search used,
+    /// than the stretch of path it replaces.
+    /// <para>The simplifier used to ask about walls alone. Danger is not a wall -- it is priced, so the search
+    /// can still cross it when that is the only way -- and so a path that went carefully round a standing
+    /// puddle was handed on as one straight step through it. Cursed Resurgence, 2026-09-13: twice in one pull,
+    /// 2.3 and 4.9 yalms deep. On clean ground the straight line is always the cheaper, so routes shorten
+    /// exactly as before; through danger it is not, so the detour survives.</para>
+    /// </summary>
+    private bool Shortcut(WPos from, float fromCost, float fromLength, int toIndex)
+    {
+        var to = this.Center(toIndex % this.w, toIndex / this.w);
+        if (!this.Walkable(from, to))
+            return false;
+
+        var d = to - from;
+        var len = d.Length();
+        var steps = Math.Max(1, (int)MathF.Ceiling(len / MathF.Max(this.cell * 0.5f, 0.1f)));
+        var sub = len / steps;
+        var straight = 0f;
+        var dearest = 1f;
+        for (var s = 1; s <= steps; ++s)
+        {
+            var p = from + (d * ((float)s / steps));
+            if (!this.TryCellOf(p, out var x, out var z))
+                return false;
+            var c = (z * this.w) + x;
+            var penalty = 1f;
+            if (this.risky[c])
+            {
+                penalty = DangerStepPenalty;
+                if (this.speed > 0f && this.dangerIn[c] <= ((fromLength + (sub * s)) / this.speed) + ArrivalSlack)
+                    penalty = LethalStepPenalty;
+            }
+            straight += sub * penalty;
+            dearest = MathF.Max(dearest, penalty);
+        }
+
+        // One cell of slack at the dearest price the line pays. Sampling a line and stepping a grid disagree by
+        // about a cell, and on lethal ground a cell is a thousand yalms of cost: without this, escaping the
+        // ground underfoot (where the path and the line cross the same danger) was chopped into cell-sized
+        // steps. A real crossing of a puddle is many cells deep and still loses.
+        return straight <= (this.cost[toIndex] - fromCost) + (this.cell * dearest);
     }
 
     /// <summary>Is the straight line between these two points clear of anything solid?</summary>

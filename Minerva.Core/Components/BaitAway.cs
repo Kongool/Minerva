@@ -15,8 +15,15 @@ public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysD
     /// will kill the party if mishandled.</summary>
     public PlayerPriority BaiterPriority = PlayerPriority.Interesting;
 
-    public struct Bait(Actor source, Actor target, AOEShape shape, DateTime activation = default, BitMask forbidden = default, Angle? customRotation = null, int maxCasts = 1, WDir offset = default)
+    public struct Bait(Actor source, Actor target, AOEShape shape, DateTime activation = default, BitMask forbidden = default, Angle? customRotation = null, int maxCasts = 1, WDir offset = default, int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = true)
     {
+        /// <summary>Floor this bait belongs to, for BossmodReborn parity. Inert: see <see cref="ModuleComponent.ArenaProjectionLayer"/>.</summary>
+        public int? ArenaProjectionLayer = arenaProjectionLayer;
+        public bool? RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
+
+        /// <summary>The explicit floor, else the target's. Always null without floors.</summary>
+        public readonly int? ResolveArenaProjectionLayer(ModuleBase module) => this.ArenaProjectionLayer ?? module.ResolveArenaProjectionLayer(this.Target);
+
         public Angle? CustomRotation = customRotation;
         public AOEShape Shape = shape;
         public Actor Source = source;

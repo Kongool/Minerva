@@ -259,7 +259,7 @@ public static class ArenaPathfinder
         // cell sixteen yalms away -- nearly three seconds of walking. It was caught in transit, three times
         // in one pull. A person steps out of the circle that is about to go off and deals with the next one
         // next, which is exactly what a nearer deadline asks for.
-        foreach (var soon in ActivationsBefore(hints, deadline, solveNow))
+        foreach (var soon in ActivationsBefore(hints, deadline, now))
             if (TryNearestSafe(hints, soon, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
                 return Settle(hints, soon, player, spot, cellSize, safetyMargin);
 
@@ -274,7 +274,7 @@ public static class ArenaPathfinder
         // whole floor within the five-second horizon, and the dodge stood in the first wave for three
         // seconds reporting "no safe spot" while a cell four yalms away was clear of it. Every frame
         // re-solves, so the second wave is dodged from wherever the first was dodged to, as a person does.
-        foreach (var earlier in ActivationsBefore(hints, deadline, solveNow))
+        foreach (var earlier in ActivationsBefore(hints, deadline, now))
             if (TryNearestSafe(hints, earlier, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
                 return Settle(hints, earlier, player, spot, cellSize, safetyMargin);
 
@@ -358,7 +358,14 @@ public static class ArenaPathfinder
     }
 
     /// <summary>Distinct activation instants inside the horizon, latest first: each is a candidate deadline
-    /// for a dodge that clears what lands by then and leaves the rest to the next frames.</summary>
+    /// for a dodge that clears what lands by then and leaves the rest to the next frames.
+    /// <para>Counted from the real clock, not the lead-shifted one the rest of the solve uses. The lead makes a
+    /// zone count as landed early so the character leaves early; it must not also stop the zone being a stage.
+    /// Quarried Away, 2026-09-13: two waves of cones three seconds apart covered every direction. Korha stood
+    /// in a gap of the first wave with 0.97s left, inside a second-wave cone. With a one-second lead the first
+    /// wave's activation fell before the shifted now, so it was never offered as a stage, and the last-resort
+    /// search sent the character twelve yalms through a first-wave cone. Counted from now, the first wave is
+    /// a stage, the gap is clear of it, and the answer is to hold until it fires.</para></summary>
     private static List<DateTime> ActivationsBefore(AIHints hints, DateTime deadline, DateTime now)
     {
         var times = new List<DateTime>();

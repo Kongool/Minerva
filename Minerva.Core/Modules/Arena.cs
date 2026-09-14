@@ -8,6 +8,18 @@ namespace Minerva;
 /// </summary>
 public abstract class Arena
 {
+    /// <summary>
+    /// Draw what follows on one floor, for BossmodReborn parity; dispose to leave it. A no-op without floors.
+    /// <inheritdoc cref="ModuleComponent.ArenaProjectionLayer"/>
+    /// </summary>
+    public IDisposable WorldProjectionLayer(int? layer, bool? restrictToLayer) => NoFloor.Instance;
+
+    private sealed class NoFloor : IDisposable
+    {
+        public static readonly NoFloor Instance = new();
+        public void Dispose() { }
+    }
+
     public WPos Center;
     public ArenaBounds Bounds = new ArenaBoundsCircle(20f);
 
