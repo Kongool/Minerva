@@ -193,6 +193,19 @@ public sealed class AIManager
         }
 
         var lead = Math.Clamp(this.config.AutoDodgeClearanceLead, 0f, 5f);
+
+        // Publish a cast budget the steering branch below will honour. That branch cancels a hardcast the moment
+        // this spot is imminent within horizon + lead; MaxCastTime above only prices the ground, so on its own it
+        // offered casts that were cancelled a frame after they began -- a Pictomancer starting and losing cast
+        // after cast through a dense dodge phase (2026-09-14). See CastBudget. Only where that cancel can happen:
+        // auto-dodge on and a real controller installed, the same conditions the cancel itself runs under.
+        // Placed after the zone module's hints on purpose, so a field hazard shortens the budget too.
+        if (this.config.AutoDodgeEnabled && this.movement is not NullMovementController)
+            this.MaxCastTime = CastBudget.Reconcile(
+                this.MaxCastTime,
+                this.hints.SecondsUntilDangerAt(pc.Position, now, margin),
+                horizon + lead);
+
         this.Current = ArenaPathfinder.Solve(this.hints, now, horizonSeconds: horizon, safetyMargin: margin, goal: goal, moveSpeed: moveSpeed, clearanceLead: lead);
         // the hold has to judge safety on the same clock the solve did, or it keeps a target the solve rejected
         this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed);

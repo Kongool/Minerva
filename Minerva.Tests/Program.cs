@@ -1099,6 +1099,52 @@ t.Section("Auto-dodge pathfinding");
     t.True("inside the uptime band -> nothing to regain",
         !ArenaPathfinder.Solve(satisfied, now, goal: new UptimeGoal(center, default, 2.6f)).NeedToMove);
 
+    // THE CAST BUDGET HAS TO AGREE WITH THE CAST CANCEL (2026-09-14, Pictomancer stutter-stepping under heavy
+    // dodging). Two clocks in AIManager answered the same question differently. MaxCastTime prices the ground:
+    // time until the AOE lands, less the walk out. The cast-cancel in the steering branch looks further ahead:
+    // it calls GameData.CancelCast() the moment this spot is InImminentDanger within horizon (5s) + clearance
+    // lead (default 1s). So an AOE landing five seconds out published a ~4.7s budget -- Daedalus started a 2.5s
+    // cast against it -- and the very next frame Minerva cancelled that cast and stepped. With AOEs arriving
+    // every few seconds that is a cast started and cancelled over and over: the stutter step.
+    {
+        const float margin = 1f, dodgeLookahead = 5f + 1f;          // Configuration defaults: margin 1y, lead 1s
+        const float castWindow = 2.5f + 0.5f;                       // a caster GCD plus Daedalus's own margin
+        var stutter = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f) };
+        stutter.PlayerPosition = center + new WDir(5.5f, 0f);       // half a yalm inside a 6y circle
+        stutter.AddForbiddenZone(new AOEShapeCircle(6f), center + new WDir(11f, 0f), default, now.AddSeconds(5));
+
+        var geometric = stutter.MaxCastTime(now, margin, ArenaPathfinder.DefaultMoveSpeed);
+        t.True("the geometric budget alone admits a caster GCD", geometric >= castWindow);
+        t.True("...while the cancel rule already fires on this spot",
+            stutter.InImminentDanger(stutter.PlayerPosition, now.AddSeconds(dodgeLookahead), margin));
+
+        // The fix: publish the smaller of the two. That cast is now refused before it starts.
+        var budget = CastBudget.Reconcile(geometric,
+            stutter.SecondsUntilDangerAt(stutter.PlayerPosition, now, margin), dodgeLookahead);
+        t.True("reconciled, the budget no longer admits a cast the dodge would cancel", budget < castWindow);
+
+        // Where a cast does fit, it fits exactly up to the cancel and no further -- same zone, landing later.
+        var laterZone = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f) };
+        laterZone.PlayerPosition = stutter.PlayerPosition;
+        laterZone.AddForbiddenZone(new AOEShapeCircle(6f), center + new WDir(11f, 0f), default, now.AddSeconds(10));
+        var fits = CastBudget.Reconcile(
+            laterZone.MaxCastTime(now, margin, ArenaPathfinder.DefaultMoveSpeed),
+            laterZone.SecondsUntilDangerAt(laterZone.PlayerPosition, now, margin), dodgeLookahead);
+        t.Near("the budget is the time until the cancel rule would fire", fits, 10f - dodgeLookahead, 0.05f);
+        t.True("a cast ending just inside that budget is never cancelled",
+            !laterZone.InImminentDanger(laterZone.PlayerPosition, now.AddSeconds(fits - 0.05f + dodgeLookahead), margin));
+        t.True("and one running just past it would have been",
+            laterZone.InImminentDanger(laterZone.PlayerPosition, now.AddSeconds(fits + 0.05f + dodgeLookahead), margin));
+
+        // Nothing pending here keeps the budget unlimited, and a long walk out still wins when it is the smaller.
+        t.True("with nothing coming the budget stays unlimited",
+            CastBudget.Reconcile(float.MaxValue, float.MaxValue, dodgeLookahead) == float.MaxValue);
+        t.Near("the walk-out cost still wins when it is the tighter limit",
+            CastBudget.Reconcile(3f, 20f, dodgeLookahead), 3f);
+        t.Near("a spot already inside the look-ahead affords no cast at all",
+            CastBudget.Reconcile(9f, 4f, dodgeLookahead), 0f);
+    }
+
     // The safety margin is a configurable knob (Configuration.AutoDodgeSafetyMargin, default 1y).
     // At 0 the dodge stops the moment it leaves the shape — geometrically safe, but with no allowance
     // for hitbox radius or latency, which is what the UI warning is about.
