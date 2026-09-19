@@ -68,11 +68,8 @@ public sealed class ReplayValidator
             if (this.Hits.Count > 0)
             {
                 b.AppendLine($"  Hits on {this.PovName}: {this.Hits.Count}");
-                foreach (var h in this.Hits)
-                {
-                    var name = names?.ActionName(h.Action) is { Length: > 0 } n ? $"{n} ({h.Action})" : h.Action.ToString();
-                    b.AppendLine($"    {h.Seconds,6:0.0}s  {name} from {h.Caster}: {h.Why}");
-                }
+                foreach (var line in HitLines(this.Hits, names))
+                    b.AppendLine(line);
             }
             if (this.GazeNote.Length > 0)
                 b.AppendLine("  " + this.GazeNote);
@@ -80,6 +77,59 @@ public sealed class ReplayValidator
                 b.Append(d);
             return b.ToString();
         }
+    }
+
+    /// <summary>How many of the same thing, said the same way, before the list says it once with a count.</summary>
+    private const int CollapseFrom = 3;
+
+    /// <summary>
+    /// The hits, one line each -- except where the same cast from the same caster is explained the same way over and
+    /// over, which is collapsed to a single counted line. A Bozja night on 2026-09-17 reported about a thousand hits
+    /// of which 924 were trash auto-attacking the tank, each correctly called expected damage and each on its own
+    /// line: the four that were worth reading were somewhere in the middle of it.
+    /// </summary>
+    public static List<string> HitLines(IReadOnlyList<Hit> hits, INameResolver? names = null)
+    {
+        var lines = new List<string>();
+        var order = new List<(uint Action, string Caster, string Why)>();
+        var groups = new Dictionary<(uint, string, string), (int Count, double First, double Last)>();
+        foreach (var h in hits)
+        {
+            var key = (h.Action, h.Caster, h.Why);
+            if (groups.TryGetValue(key, out var g))
+            {
+                groups[key] = (g.Count + 1, g.First, h.Seconds);
+            }
+            else
+            {
+                groups[key] = (1, h.Seconds, h.Seconds);
+                order.Add(key);
+            }
+        }
+
+        var collapsed = new HashSet<(uint, string, string)>();
+        foreach (var key in order)
+            if (groups[key].Count >= CollapseFrom)
+                collapsed.Add(key);
+
+        var written = new HashSet<(uint, string, string)>();
+        foreach (var h in hits)
+        {
+            var key = (h.Action, h.Caster, h.Why);
+            var name = names?.ActionName(h.Action) is { Length: > 0 } n ? $"{n} ({h.Action})" : h.Action.ToString();
+            if (!collapsed.Contains(key))
+            {
+                lines.Add($"    {h.Seconds,6:0.0}s  {name} from {h.Caster}: {h.Why}");
+                continue;
+            }
+
+            if (!written.Add(key))
+                continue;
+            var g = groups[key];
+            lines.Add($"    {g.Count,5}x  {name} from {h.Caster}, {g.First:0.0}s to {g.Last:0.0}s: {h.Why}");
+        }
+
+        return lines;
     }
 
     /// <summary>
@@ -138,6 +188,14 @@ public sealed class ReplayValidator
 
         /// <summary>The guesser draws this cast (a ground shape from the sheet, smaller than a raidwide).</summary>
         public bool Guessed { get; init; }
+
+        /// <summary>The game's sheet calls this cast single-target: a tankbuster or an auto-attack, which lands on
+        /// whoever holds it and is not ground anybody could have walked off.</summary>
+        public bool SheetSingleTarget { get; init; }
+
+        /// <summary>The game's sheet gives this cast a circle too big to be ground anyone could leave -- the arena and
+        /// then some. Undrawable by design, in Minerva and in BossmodReborn both.</summary>
+        public bool SheetRaidwide { get; init; }
 
         /// <summary>What the game's sheet says the cast is: the shape expression when guessed, else
         /// "single-target", "raidwide", or empty when the sheet gives no ground shape.</summary>
@@ -208,6 +266,16 @@ public sealed class ReplayValidator
                         ? (this.Decision.Turning ? "Minerva was turning you away and the turn did not take." : "Minerva flagged the gaze but Face is off, so it only warned.")
                         : "the decision log carries no gaze flag (recorded before facing was logged, or the module never raised one).") + gave;
                 }
+                // A module that draws nothing for a cast the sheet calls single-target has not missed a zone: there
+                // is none. The Thunder God, 2026-09-15: 35 auto-attacks and 12 tankbuster hits on the tank were all
+                // reported as module gaps, which buried the four hits that were really about the dodge.
+                if (!this.Drawn && !this.Watched && this.SheetSingleTarget)
+                    return $"the game's sheet says this is single-target (a tankbuster or an auto-attack), expected on whoever holds it.{gave}";
+                // and neither has it missed one for a circle that covers the arena: Ultima the High Seraph's Ultimate
+                // Illusion (2026-09-15) is a range-80 circle, which no module draws, here or in BossmodReborn. Whether
+                // there is a shelter to stand in is a question about the fight, not about this cast's shape.
+                if (!this.Drawn && !this.Watched && this.SheetRaidwide)
+                    return $"the game's sheet gives this a circle bigger than the arena, so there is no edge to walk out of: expected damage, unless the fight has a shelter to stand in and the module never pointed at it.{gave}";
                 if (this.Watched)
                     return this.StatusID != 0
                         ? $"the module watches this as a non-AOE (raidwide, tankbuster, knockback) and draws no zone for it, yet it gave you status {this.StatusID}: if that is a vulnerability, the zone is missing (module gap)."
@@ -303,6 +371,7 @@ public sealed class ReplayValidator
         // up to forty-eight players in the actor table, so counting them all meant a raidwide never once
         // qualified and nine of them were reported as module gaps (2026-09-06, Imbalanced Diet).
         var partySeen = new HashSet<ulong>();
+        var alivePartyAt = new List<(long Ticks, HashSet<ulong> Ids)>(); // living party members at each enemy event
         var povStatuses = new List<(long Ticks, uint Status, ulong Source)>(); // statuses the POV gained, to attach late ones to their hit
         var castStarts = new Dictionary<(ulong Caster, uint Action), long>(); // when each enemy cast began
         foreach (var (ticks, op) in timeline.Ops)
@@ -312,17 +381,30 @@ public sealed class ReplayValidator
             // the hit changed.
             if (pov != 0 && op is ActorState.OpCastEvent mine && mine.InstanceID == pov && mine.Value is { } my)
                 myActions.Add((ticks, my.Action.ID));
-            if (op is ActorState.OpCastEvent any && any.Value is { } anyEv && world.Actors.Find(any.InstanceID) is { Type: not (ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy) })
+            if (op is ActorState.OpCastEvent any && any.Value is { } anyEv && world.Actors.Find(any.InstanceID) is { IsAlly: false, Type: not (ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy) })
             {
                 var hitPlayers = new HashSet<ulong>();
                 foreach (var t in anyEv.Targets)
                     if (playersSeen.Contains(t.ID))
                         hitPlayers.Add(t.ID);
                 if (hitPlayers.Count > 0)
+                {
                     enemyEvents.Add((ticks, anyEv.Action.ID, hitPlayers));
+                    // who could have been hit at all: a raidwide passes over the dead, and "it hit everyone"
+                    // has to mean everyone it could reach (Ultima the High Seraph, 2026-09-15: one corpse in
+                    // the party and all 38 ticks of Ultimate Illusion read as module gaps)
+                    var aliveNow = new HashSet<ulong>();
+                    foreach (var id in partySeen)
+                        if (world.Actors.Find(id) is { IsDead: false })
+                            aliveNow.Add(id);
+                    alivePartyAt.Add((ticks, aliveNow));
+                }
             }
             if (pov != 0 && op is ActorState.OpCastEvent cev && cev.Value is { } ev && !autos.Contains(ev.Action.ID) && HitsPov(ev, pov, out var statusID)
                 && world.Actors.Find(cev.InstanceID) is { } src
+                // an allied NPC's spell is not a mechanic: the Scions heal and shield you through a solo duty, and
+                // every Succor and Helios was counted as a hit (The Bozja Incident, 2026-09-15: 20 of Varis's 44)
+                && !src.IsAlly
                 && src.Type is not (ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy))
             {
                 var me = world.Actors.Find(pov);
@@ -330,6 +412,9 @@ public sealed class ReplayValidator
                 var noModule = module == null;
                 var guessed = false;
                 var sheetText = "";
+                var kindHint = shapes?.Resolve(ev.Action.ID);
+                var singleTarget = kindHint is { Kind: ShapeKind.SingleTarget };
+                var sheetRaidwide = kindHint is { Kind: ShapeKind.Circle } big && !AutoHints.Draws(big);
                 if (noModule && shapes != null)
                 {
                     var sheet = shapes.Resolve(ev.Action.ID);
@@ -408,7 +493,7 @@ public sealed class ReplayValidator
                     Spread = isSpread, Stack = isStack, Mine = onMe, Owner = owner,
                     Knockback = knockbacks.Contains(ev.Action.ID),
                     Incapacitated = Incapacitation.Blocking(me) ?? "",
-                    NoModule = noModule, Guessed = guessed, Sheet = sheetText,
+                    NoModule = noModule, Guessed = guessed, Sheet = sheetText, SheetSingleTarget = singleTarget, SheetRaidwide = sheetRaidwide,
                 });
             }
             // detect the start of an enemy/helper cast (players are ignored — their skills aren't mechanics)
@@ -603,7 +688,18 @@ public sealed class ReplayValidator
             foreach (var e in enemyEvents)
                 if (e.Action == h.Action && Math.Abs(e.Ticks - at) <= TimeSpan.TicksPerSecond / 2)
                     union.UnionWith(e.Players);
-            var everyone = partySeen.Count >= 2 ? partySeen : playersSeen;
+            var alive = partySeen;
+            var nearest = long.MaxValue;
+            foreach (var snapshot in alivePartyAt)
+            {
+                var gap = Math.Abs(snapshot.Ticks - at);
+                if (gap < nearest && snapshot.Ids.Count >= 2)
+                {
+                    nearest = gap;
+                    alive = snapshot.Ids;
+                }
+            }
+            var everyone = alive.Count >= 2 ? alive : playersSeen;
             var hitOfThem = 0;
             foreach (var id in everyone)
                 if (union.Contains(id))
@@ -646,7 +742,8 @@ public sealed class ReplayValidator
         if (aid is not { IsEnum: true })
             yield break;
         foreach (var name in Enum.GetNames(aid))
-            if (name.StartsWith("AutoAttack", StringComparison.OrdinalIgnoreCase) || name.EndsWith("Auto", StringComparison.Ordinal))
+            // "AutoAttack", and the prefixed forms every port uses: BossAutoAttack, HelperAutoAttack, EphemeralAuto
+            if (name.Contains("AutoAttack", StringComparison.OrdinalIgnoreCase) || name.EndsWith("Auto", StringComparison.Ordinal))
                 yield return Convert.ToUInt32(Enum.Parse(aid, name)); // AutoAttack, or an add's like AwzdeiAuto (Aw'aern, 2026-09-06: six "module gap" hits that were the tank tanking)
     }
 

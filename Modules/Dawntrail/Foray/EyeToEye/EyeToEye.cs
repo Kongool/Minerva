@@ -49,7 +49,7 @@ sealed class EyeToEyeStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 2075u, PrimaryActorOID = (uint)OID.EvilSeer, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
+[ModuleInfo(Group = ModuleGroup.ForayFATE, GroupID = 1093u, CFCID = 1093u, NameID = 2075u, PrimaryActorOID = (uint)OID.EvilSeer, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
 // BMR derives this from OpenWorldFate, which follows the boss and gates activation on being within 30y.
 // Minerva takes a fixed centre, so this is the centre of the cast locations across a full pull

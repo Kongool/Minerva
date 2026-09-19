@@ -20,6 +20,17 @@ public sealed class ReplayRecorder : IDisposable
     /// </summary>
     public const int Version = 2;
 
+    /// <summary>
+    /// How much this recorder captures, as a number that only goes up. **Bump it whenever the recorder starts
+    /// writing something it did not write before** -- a new op, a new field on an existing one, a wider snapshot.
+    /// <para>The format <see cref="Version"/> answers "can this still be read"; this answers "is this still worth
+    /// keeping". As more of the fight is exposed, a recording made before that exposure cannot answer the questions
+    /// the current one can, and the purge can retire it on that basis rather than on its age.</para>
+    /// <para>1: the first stamped recorder (2026-09-18). Recordings without the stamp read as 0 -- everything made
+    /// before the POV, the cast-event targets, the dodge-decision snapshot and the rest arrived piecemeal.</para>
+    /// </summary>
+    public const int Revision = 1;
+
     private readonly WorldState ws;
     private readonly TextWriter writer;
     private readonly EventSubscription subscription;
@@ -45,7 +56,8 @@ public sealed class ReplayRecorder : IDisposable
         // recording was made from -- the party is all there, unlabelled -- and Party.Player() falls back to
         // the first resolvable member, which is a different person whenever the game's party list is not
         // ordered self-first.
-        writer.WriteLine($"{Magic} {Version} {ws.QPF} {Quote(ws.GameVersion)} {localPlayerId:X}");
+        // the revision goes last and is additive: a reader that predates it simply stops after the POV
+        writer.WriteLine($"{Magic} {Version} {ws.QPF} {Quote(ws.GameVersion)} {localPlayerId:X} {Revision}");
 
         // snapshot current state first, so a mid-fight recording is self-contained
         foreach (var op in ws.CompareToInitial())

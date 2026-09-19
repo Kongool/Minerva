@@ -148,6 +148,21 @@ public sealed class Configuration : IPluginConfiguration
     /// open-field content. Your own character and party are kept. On by default.</summary>
     public bool RecordExcludeOtherPlayers { get; set; } = true;
 
+    /// <summary>The main window was last left in its compact state, so the next open returns to it.</summary>
+    public bool MiniWindowActive { get; set; }
+
+    /// <summary>Delete recordings older than this many days, when the plugin loads and after each recording ends.
+    /// Zero keeps them forever, which is the default: a recording is the evidence behind every diagnosis.</summary>
+    public int ReplayKeepDays { get; set; }
+
+    /// <summary>Keep the recordings folder under this many megabytes, deleting the oldest first. Zero: no cap.</summary>
+    public int ReplayMaxTotalMB { get; set; }
+
+    /// <summary>Delete recordings made before the recorder captured what it captures today
+    /// (<see cref="ReplayRecorder.Revision"/>). Off by default; this is the rule that matches how the pile actually
+    /// goes stale, rather than age or size.</summary>
+    public bool ReplayPurgeObsolete { get; set; }
+
     /// <summary>Saved dodge presets. The built-in Default is not stored here — it is always available.</summary>
     public List<DodgePreset> Presets { get; set; } = [];
 

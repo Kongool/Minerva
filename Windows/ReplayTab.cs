@@ -92,8 +92,61 @@ public sealed class ReplayTab
             this.replay.RevealFile(this.replay.PlaybackPath);
         UiKit.Tip("Show this recording in Explorer.");
 
+        this.DrawHousekeeping(cfg);
+
         UiKit.EndCard(fill: true);
     }
+
+    /// <summary>
+    /// How much disk the recordings are using, and the limits that trim them. Both limits are off by default: a
+    /// recording is the evidence behind every diagnosis here, so nothing deletes one until it is asked to.
+    /// </summary>
+    private void DrawHousekeeping(Configuration cfg)
+    {
+        var (count, bytes) = this.replay.RecordingsOnDisk();
+        var obsolete = this.replay.ObsoleteOnDisk();
+        ImGui.Spacing();
+        ImGui.TextDisabled(ReplayRetention.Describe(count, bytes) + (obsolete > 0 ? $"; {obsolete} predate the current recorder" : ""));
+
+        var obsoleteGoes = cfg.ReplayPurgeObsolete;
+        if (ImGui.Checkbox("Delete recordings older than the current recorder", ref obsoleteGoes))
+        {
+            cfg.ReplayPurgeObsolete = obsoleteGoes;
+            cfg.Save();
+        }
+        UiKit.Tip("As more of a fight is exposed to recording, an older log cannot answer what a new one can. This retires those, whatever their age.");
+
+        var days = cfg.ReplayKeepDays;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("Keep for days (0 = forever)", ref days))
+        {
+            cfg.ReplayKeepDays = Math.Max(0, days);
+            cfg.Save();
+        }
+        UiKit.Tip("Older recordings are deleted when the plugin loads and after each recording ends.");
+
+        var cap = cfg.ReplayMaxTotalMB;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("Keep under MB (0 = no cap)", ref cap))
+        {
+            cfg.ReplayMaxTotalMB = Math.Max(0, cap);
+            cfg.Save();
+        }
+        UiKit.Tip("Over the cap, the oldest go first.");
+
+        if (ImGui.Button("Purge now"))
+            this.purgeResult = this.replay.Purge();
+        UiKit.Tip(cfg.ReplayKeepDays == 0 && cfg.ReplayMaxTotalMB == 0
+            ? "Nothing to do until one of the limits above is set. The newest recording, and the one being written, are never deleted."
+            : "Applies the limits above right now. The newest recording, and the one being written, are never deleted.");
+        if (this.purgeResult != null)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled(this.purgeResult);
+        }
+    }
+
+    private string? purgeResult;
 
     private void DrawReport()
     {

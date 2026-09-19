@@ -161,7 +161,7 @@ sealed class RagingThrallStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 2074u, PrimaryActorOID = (uint)OID.Machetaur, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
+[ModuleInfo(Group = ModuleGroup.ForayFATE, GroupID = 1093u, CFCID = 1093u, NameID = 2074u, PrimaryActorOID = (uint)OID.Machetaur, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
 // BMR derives this from OpenWorldFate, which follows the boss and gates activation on the player being
 // within 30y. Minerva takes a fixed centre, so this is the centre of 44 mechanic casts across both halves

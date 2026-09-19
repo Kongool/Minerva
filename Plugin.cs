@@ -35,6 +35,7 @@ public sealed class Plugin : IDalamudPlugin
     private ModuleBase? lastModule; // tracks the active-module transition for auto-show/hide of the radar
     private readonly WindowSystem windowSystem = new("Minerva");
     private readonly MainWindow mainWindow;
+    private readonly MiniWindow miniWindow;
     private readonly WorldStateDebugWindow debugWindow;
 
     /// <summary>Named dodge-behaviour presets; also the slot another plugin can claim.</summary>
@@ -71,11 +72,13 @@ public sealed class Plugin : IDalamudPlugin
         this.encounterConfig = new EncounterConfigStore(ConfigRoot.Instance, Service.PluginInterface.ConfigDirectory.FullName);
 
         this.mainWindow = new MainWindow(this, this.modules, this.ai, this.replay);
+        this.miniWindow = new MiniWindow(this, this.modules, this.ai, this.replay);
         this.debugWindow = new WorldStateDebugWindow(this.World);
         this.sandboxWindow = new DebugRadarWindow();
         this.arenaWindow = new ArenaOverlayWindow(this, this.modules, this.ai, this.Config);
         this.encounterSettingsWindow = new EncounterSettingsWindow(ConfigRoot.Instance);
         this.windowSystem.AddWindow(this.mainWindow);
+        this.windowSystem.AddWindow(this.miniWindow);
         this.windowSystem.AddWindow(this.debugWindow);
         this.windowSystem.AddWindow(this.sandboxWindow);
         this.windowSystem.AddWindow(this.arenaWindow);
@@ -114,8 +117,10 @@ public sealed class Plugin : IDalamudPlugin
             var recordingResult = this.replay.UpdateRecording(framework.UpdateDelta);
             if (recordingResult != null)
             {
+                // Chat only. Auto-recording is meant to be unattended: the window used to open itself when a
+                // recording started and again when it finished, which un-minimises it over the game in the middle
+                // of a pull and has to be put back every time. Anything the user asked for by hand still opens it.
                 Service.ChatGui.Print("[Minerva] " + recordingResult);
-                this.mainWindow.Open("Record");
             }
             this.replay.UpdatePlayback(framework.UpdateDelta);
             this.SyncRadarVisibility();
@@ -161,11 +166,11 @@ public sealed class Plugin : IDalamudPlugin
         switch (args.Trim().ToLowerInvariant())
         {
             case "radar": this.ToggleRadar(); break;
-            case "settings" or "menu" or "console" or "tabs": this.mainWindow.Open("Settings"); break;
-            case "modules" or "bosses": this.mainWindow.Open("Modules"); break;
+            case "settings" or "menu" or "console" or "tabs": this.OpenPage("Settings"); break;
+            case "modules" or "bosses": this.OpenPage("Modules"); break;
             // "record" shows the recorder rather than arming it: typing a word should show you where you
             // are, not silently start capturing. The button on that tab still toggles.
-            case "record" or "recordings" or "replay": this.mainWindow.Open("Record"); break;
+            case "record" or "recordings" or "replay": this.OpenPage("Record"); break;
             case "record now": this.ToggleRecording(); break;
             case "strats" or "strategies": this.ToggleEncounterSettings(); break;
             case "debug": this.ToggleDebug(); break;
@@ -185,8 +190,39 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ToggleDebug() => this.debugWindow.Toggle();
 
-    /// <summary>The main window (settings, modules, recordings) — what a bare /mine toggles.</summary>
-    public void ToggleMenu() => this.mainWindow.Toggle();
+    /// <summary>The main window (settings, modules, recordings) — what a bare /mine toggles. Returns to whichever
+    /// size it was left in: shrinking it is a preference, not a one-off.</summary>
+    public void ToggleMenu()
+    {
+        if (this.Config.MiniWindowActive)
+            this.miniWindow.Toggle();
+        else
+            this.mainWindow.Toggle();
+    }
+
+    /// <summary>Shrink to the compact window (the full window's title-bar button).</summary>
+    public void SwitchToMiniWindow()
+    {
+        this.mainWindow.IsOpen = false;
+        this.miniWindow.IsOpen = true;
+        this.RememberWindowSize(true);
+    }
+
+    /// <summary>Back to the full window (the compact window's expand button).</summary>
+    public void SwitchToFullWindow()
+    {
+        this.miniWindow.IsOpen = false;
+        this.mainWindow.IsOpen = true;
+        this.RememberWindowSize(false);
+    }
+
+    private void RememberWindowSize(bool mini)
+    {
+        if (this.Config.MiniWindowActive == mini)
+            return;
+        this.Config.MiniWindowActive = mini;
+        this.Config.Save();
+    }
 
     public void ToggleEncounterSettings() => this.encounterSettingsWindow.Toggle();
 
@@ -236,11 +272,27 @@ public sealed class Plugin : IDalamudPlugin
     {
         Service.ChatGui.Print("[Minerva] " + this.replay.Toggle());
         if (showRecord)
-            this.mainWindow.Open("Record");
+            this.OpenPage("Record");
     }
 
-    /// <summary>The server-bar click and Dalamud's own open-config/open-main entries all land on Settings.</summary>
-    private void OpenMain() => this.mainWindow.Open("Settings");
+    /// <summary>The server-bar click and Dalamud's own open-config/open-main entries all land on Settings -- unless
+    /// the window was left compact, in which case that is what "show me Minerva" means.</summary>
+    private void OpenMain()
+    {
+        if (this.Config.MiniWindowActive)
+            this.miniWindow.IsOpen = true;
+        else
+            this.OpenPage("Settings");
+    }
+
+    /// <summary>Show a page of the full window. Naming a page asks for the full window, so the compact one steps
+    /// aside and stays aside until it is asked for again.</summary>
+    private void OpenPage(string page)
+    {
+        this.miniWindow.IsOpen = false;
+        this.mainWindow.Open(page);
+        this.RememberWindowSize(false);
+    }
 
     public void Dispose()
     {

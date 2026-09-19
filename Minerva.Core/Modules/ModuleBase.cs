@@ -543,15 +543,7 @@ public abstract class ModuleBase : IDisposable
     /// <para>Helpers are excluded: they are the invisible actors that cast AOEs on the boss's behalf, and
     /// telling a rotation to attack one is telling it to attack nothing.</para>
     /// </summary>
-    private void SeedPotentialTargets(AIHints hints)
-    {
-        foreach (var a in this.World.Actors)
-        {
-            if (a.Type != ActorType.Enemy || a.IsAlly || a.IsDeadOrDestroyed || !a.IsTargetable)
-                continue;
-            hints.PotentialTargets.Add(new AIHints.Enemy(a, a.InCombat ? 0 : AIHints.Enemy.PriorityUndesirable));
-        }
-    }
+    private void SeedPotentialTargets(AIHints hints) => hints.SeedPotentialTargets(this.World.Actors);
 
     // --- helpers used by components/modules ---
     /// <summary>When a cast lands; <paramref name="fallback"/> (default, which reads as "already active")

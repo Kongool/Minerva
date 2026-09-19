@@ -91,6 +91,30 @@ public sealed class ReplayParser
         return new ReplayTimeline { QPF = qpf, GameVersion = gameVersion, Ops = ops, PlayerInstanceID = pov };
     }
 
+    /// <summary>The recorder revision a log was written by, from its first line: how much of the fight it holds.
+    /// Zero for a log written before the stamp existed, and for anything that is not a Minerva replay.</summary>
+    public static int RevisionOf(string headerLine)
+    {
+        try
+        {
+            var r = new OpTokenReader(headerLine);
+            if (r.FourCC != ReplayRecorder.Magic)
+                return 0;
+            r.SkipTag();
+            r.NextInt();    // format
+            r.NextU64();    // qpf
+            if (!r.HasMore) return 0;
+            r.NextString(); // game version
+            if (!r.HasMore) return 0;
+            r.NextHex64();  // pov
+            return r.HasMore ? r.NextInt() : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private static (ulong qpf, string version, int format, ulong pov) ParseHeader(string header)
     {
         var r = new OpTokenReader(header);

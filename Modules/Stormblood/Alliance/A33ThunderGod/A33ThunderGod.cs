@@ -9,30 +9,14 @@ using Minerva;
 
 namespace Minerva.Stormblood.Alliance.A33ThunderGod;
 
-class HallowedBolt(ModuleBase module) : Components.ConcentricAOEs(module, _shapes)
-{
-    private static readonly AOEShape[] _shapes = [new AOEShapeCircle(15f), new AOEShapeDonut(15f, 30f)];
-
-    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
-    {
-        if (spell.Action.ID == (uint)AID.HallowedBolt1)
-            AddSequence(spell.LocXZ, Module.CastFinishAt(spell));
-    }
-
-    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
-    {
-        if (Sequences.Count != 0)
-        {
-            var order = spell.Action.ID switch
-            {
-                (uint)AID.HallowedBolt1 => 0,
-                (uint)AID.HallowedBolt2 => 1,
-                _ => -1
-            };
-            AdvanceSequence(order, spell.LocXZ, World.FutureTime(2d));
-        }
-    }
-}
+// Both rings carry their own five-second cast, and the fight fires them in either order: on 2026-09-15 at 186.8s two
+// bullseyes started with the circle while a third started with the donut. BossmodReborn draws this as a concentric
+// sequence started by the circle only, so a donut-first bullseye left a donut zone that had already fired and never
+// cleared -- three of them stood on the radar by 300s, the arena read as forbidden, and the toons walked to the last
+// clear spot and stayed there. Two timed AOEs need no sequence: each ring is drawn from its own cast and removed when
+// that cast resolves, and the dodge's own staging is what steps from the safe ring into the spent one.
+sealed class HallowedBoltCircle(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.HallowedBolt1, 15f);
+sealed class HallowedBoltDonut(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.HallowedBolt2, new AOEShapeDonut(15f, 30f));
 
 [ModuleInfo(CFCID = 636u, NameID = 7899u, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (ported from BMR)")] //7917
 public class A33ThunderGod(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(-600, -600), arena)

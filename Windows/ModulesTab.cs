@@ -46,8 +46,32 @@ public sealed class ModulesTab
 
     /// <summary>The name a boss module goes by: its BNpcName, else its class name spaced out.</summary>
     public static string BossName(ModuleRegistry.Info info)
-        => (info.Attr.Group is ModuleGroup.CriticalEngagement or ModuleGroup.BozjaDuel ? ResolveEventName(info.Attr.NameID) : ResolveBossName(info.Attr.NameID))
+        => (info.Attr.Group switch
+            {
+                ModuleGroup.CriticalEngagement or ModuleGroup.BozjaDuel => ResolveEventName(info.Attr.NameID),
+                ModuleGroup.ForayFATE or ModuleGroup.Fate => ResolveFateName(info.Attr.NameID),
+                _ => ResolveBossName(info.Attr.NameID),
+            })
             ?? Prettify(info.ModuleType.Name);
+
+    // a FATE's NameID is a Fate row: looked up as a BNpcName, Inconstant Gardener (2079) came out as "Ishgardian Light
+    // Infantry" (2026-09-14)
+    internal static string? ResolveFateName(uint fateId)
+    {
+        if (fateId == 0)
+            return null;
+        try
+        {
+            var sheet = Service.DataManager.GetExcelSheet<Fate>();
+            if (sheet != null && sheet.TryGetRow(fateId, out var row))
+            {
+                var n = row.Name.ExtractText();
+                return string.IsNullOrWhiteSpace(n) ? null : n;
+            }
+        }
+        catch { /* sheet/layout mismatch -- fall back to the class name */ }
+        return null;
+    }
 
     // a critical engagement's NameID is a DynamicEvent row, not a BNpcName (BossmodReborn's convention), which is
     // why "CE211LostontheWind" was being spelled out from its class name

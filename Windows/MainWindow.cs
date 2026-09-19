@@ -42,6 +42,15 @@ public sealed class MainWindow : Window, IDisposable
         };
         this.Size = new Vector2(780, 580);
         this.SizeCondition = ImGuiCond.FirstUseEver;
+
+        // Shrink rather than close: the state is why the window is open, and minimising the whole thing hides it.
+        this.TitleBarButtons.Add(new TitleBarButton
+        {
+            Icon = Dalamud.Interface.FontAwesomeIcon.WindowMinimize,
+            IconOffset = new Vector2(2f, 1f),
+            Click = _ => plugin.SwitchToMiniWindow(),
+            ShowTooltip = () => ImGui.SetTooltip("Shrink to the compact window"),
+        });
     }
 
     private (int Colors, int Vars) theme;

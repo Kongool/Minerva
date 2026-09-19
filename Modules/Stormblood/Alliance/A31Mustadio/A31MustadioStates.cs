@@ -21,6 +21,7 @@ class A31MustadioStates : StateMachineBuilder
             .ActivateOnEnter<RightHandgonne>()
             .ActivateOnEnter<SatelliteBeam>()
             .ActivateOnEnter<Compress>()
-            .ActivateOnEnter<BallisticSpread>();
+            .ActivateOnEnter<BallisticSpread>()
+            .ActivateOnEnter<Analysis>();
     }
 }

@@ -811,6 +811,83 @@ public sealed class AIHints
         return room;
     }
 
+    /// <summary>
+    /// Every enemy worth considering this frame: targetable, hostile and alive, at ordinary priority while it is in
+    /// combat and <see cref="Enemy.PriorityUndesirable"/> while it is not, so nothing here ever reads as "go and pull
+    /// that". BossmodReborn scores its own list the same way (aggro table or attacking the party, else passive).
+    /// <para>Modules seed this so their priority calls have something to act on; trash seeds it so the walk back to
+    /// uptime has a target at all.</para>
+    /// </summary>
+    public void SeedPotentialTargets(IEnumerable<Actor> actors)
+    {
+        foreach (var a in actors)
+        {
+            if (a.Type != ActorType.Enemy || a.IsAlly || a.IsDeadOrDestroyed || !a.IsTargetable)
+                continue;
+            this.PotentialTargets.Add(new Enemy(a, a.InCombat ? 0 : Enemy.PriorityUndesirable));
+        }
+    }
+
+    /// <summary>
+    /// Distances closer than this count as the same distance when choosing between targets. Veyn's BossMod clamps at
+    /// three yalms for exactly one reason, stated in its own comment: without it the choice flips between two mobs
+    /// standing near each other, sometimes every frame, and the character shuffles between them instead of fighting.
+    /// </summary>
+    public const float SameDistance = 3f;
+
+    /// <summary>
+    /// Which enemy the character should be on: the highest priority anything raised above the default, and among
+    /// those the nearest -- with distances under <see cref="SameDistance"/> counted as equal, the character's own
+    /// target winning that tie, and the previous choice winning it next. Null when nothing is raised, so an ordinary
+    /// boss fight still keys on the primary actor.
+    /// </summary>
+    public Actor? BestPrioritisedTarget(WPos player, ulong currentTargetID, ulong previousChoiceID)
+        => this.BestTarget(player, currentTargetID, previousChoiceID, 1);
+
+    /// <summary>
+    /// The same choice among everything already in the fight, whatever its priority: what to walk to in trash, where
+    /// nothing raises anything and there may be no target of one's own. Out-of-combat enemies are never candidates,
+    /// so this cannot start a pull. BossmodReborn's AI answers the same question the same way -- current target if it
+    /// is still worth hitting, else the nearest.
+    /// </summary>
+    public Actor? BestEngagedTarget(WPos player, ulong currentTargetID, ulong previousChoiceID)
+        => this.BestTarget(player, currentTargetID, previousChoiceID, 0);
+
+    private Actor? BestTarget(WPos player, ulong currentTargetID, ulong previousChoiceID, int floor)
+    {
+        var top = int.MinValue;
+        foreach (var e in this.PotentialTargets)
+            if (e.Priority > Enemy.PriorityInvincible && !e.Actor.IsDeadOrDestroyed)
+                top = Math.Max(top, e.Priority);
+        if (top < floor)
+            return null;
+
+        Actor? best = null;
+        var bestDistance = float.MaxValue;
+        var bestIsCurrent = false;
+        var bestIsPrevious = false;
+        foreach (var e in this.PotentialTargets)
+        {
+            if (e.Priority != top || e.Actor.IsDeadOrDestroyed)
+                continue;
+            var distance = MathF.Max(SameDistance, (e.Actor.Position - player).Length() - e.Actor.HitboxRadius);
+            var isCurrent = e.Actor.InstanceID == currentTargetID;
+            var isPrevious = e.Actor.InstanceID == previousChoiceID;
+            var better = best == null
+                || distance < bestDistance - 0.01f
+                || (distance <= bestDistance + 0.01f && ((isCurrent && !bestIsCurrent) || (isCurrent == bestIsCurrent && isPrevious && !bestIsPrevious)));
+            if (better)
+            {
+                best = e.Actor;
+                bestDistance = distance;
+                bestIsCurrent = isCurrent;
+                bestIsPrevious = isPrevious;
+            }
+        }
+
+        return best;
+    }
+
     public bool InImminentDanger(WPos p, DateTime deadline, float margin)
     {
         if (this.InObstacle(p))
@@ -848,6 +925,40 @@ public sealed class AIHints
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Which forbidden zones make this point imminent danger, by the same test as
+    /// <see cref="InImminentDanger(WPos, DateTime, float)"/>: one bit per zone, by its index in
+    /// <see cref="ForbiddenZones"/>. Zones past the 64th share the last bit, so beyond that two zones can be
+    /// mistaken for one; obstacles are not included.
+    /// </summary>
+    public ulong ImminentZonesAt(WPos p, DateTime deadline, float margin)
+    {
+        var mask = 0ul;
+        for (var k = 0; k < this.ForbiddenZones.Count; ++k)
+        {
+            var z = this.ForbiddenZones[k];
+            if (z.Activation > deadline)
+                continue;
+
+            bool inside;
+            if (z.ShapeDistance is not SDShapeCheck)
+            {
+                inside = z.ShapeDistance.Distance(p) <= margin;
+            }
+            else
+            {
+                inside = z.Contains(p);
+                for (var i = 0; !inside && margin > 0f && i < 8; ++i)
+                    inside = z.Contains(p + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * margin));
+            }
+
+            if (inside)
+                mask |= 1ul << Math.Min(k, 63);
+        }
+
+        return mask;
     }
 }
 

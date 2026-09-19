@@ -328,7 +328,7 @@ sealed class RegnantChimeraStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 2076u, PrimaryActorOID = (uint)OID.RegnantChimera, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
+[ModuleInfo(Group = ModuleGroup.ForayFATE, GroupID = 1093u, CFCID = 1093u, NameID = 2076u, PrimaryActorOID = (uint)OID.RegnantChimera, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
 // BMR derives this from OpenWorldFate, which follows the boss and gates activation on the player being
 // within 30y. Minerva takes a fixed centre, so the FATE's own centre (from a recording of the fight) plus

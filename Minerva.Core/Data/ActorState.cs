@@ -403,10 +403,13 @@ public sealed class ActorState : IEnumerable<Actor>
         public readonly ActorStatus Value = value;
         protected override void ExecActor(WorldState ws, Actor actor)
         {
-            var had = actor.Statuses[this.Index].ID != default;
+            var prev = actor.Statuses[this.Index];
             // fire StatusLose while the lost status is still in the slot, so handlers reading it by
             // ref see the details (matches BMR); StatusGain fires after the new status is written.
-            if (this.Value.ID == default && had)
+            // A slot overwritten by a different status (or the same one from another source) has lost
+            // the old one too, as BossmodReborn counts it: the game swaps Forward March for Forced March
+            // in place, and a forced march queued on the first was never cleared (Iambe, 2026-09-14).
+            if (prev.ID != default && (prev.ID != this.Value.ID || prev.SourceID != this.Value.SourceID))
                 ws.Actors.StatusLose.Fire(actor, this.Index);
             actor.Statuses[this.Index] = this.Value;
             if (this.Value.ID != default)

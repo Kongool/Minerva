@@ -80,6 +80,7 @@ public sealed class ReplayService : IDisposable
         this.actorDeathSubscription = world.Actors.IsDeadChanged.Subscribe(this.OnActorDeath);
         Service.DutyState.DutyCompleted += this.OnDutyCompleted;
         this.LoadMostRecent(); // so the last recording survives a plugin reload
+        this.Purge();          // whatever the limits say, once per load
     }
 
     // load the newest saved recording for playback (filenames are timestamped, so the last sorts newest)
@@ -195,6 +196,7 @@ public sealed class ReplayService : IDisposable
             Service.Log.Error(ex, "Minerva: failed to load recording for playback.");
         }
 
+        this.Purge(); // after the rename and the load, so the fight just recorded is the newest and is kept
         return opCount;
     }
 
@@ -355,6 +357,99 @@ public sealed class ReplayService : IDisposable
     }
 
     /// <summary>Saved recordings, newest first (so an accidental record toggle can't hide an older one).</summary>
+    /// <summary>What the folder holds: how many recordings and how much disk, for the window that offers to trim it.</summary>
+    public (int Count, long Bytes) RecordingsOnDisk()
+    {
+        var count = 0;
+        var bytes = 0L;
+        foreach (var e in this.OnDisk())
+        {
+            ++count;
+            bytes += e.Bytes;
+        }
+
+        return (count, bytes);
+    }
+
+    /// <summary>
+    /// Delete what <see cref="ReplayRetention"/> says to, and report it. Runs on load and after each recording ends;
+    /// the window calls it too. Does nothing at all until a limit is set.
+    /// </summary>
+    public string Purge()
+    {
+        var doomed = ReplayRetention.Plan(
+            this.OnDisk(),
+            this.config.ReplayKeepDays,
+            this.config.ReplayMaxTotalMB,
+            DateTime.UtcNow,
+            this.currentPath,
+            this.config.ReplayPurgeObsolete ? ReplayRecorder.Revision : 0);
+        if (doomed.Count == 0)
+            return "Nothing to delete.";
+
+        var gone = 0;
+        var freed = 0L;
+        foreach (var d in doomed)
+        {
+            try
+            {
+                File.Delete(d.Path);
+                ++gone;
+                freed += d.Bytes;
+                Service.Log.Information($"Minerva: deleted recording {Path.GetFileName(d.Path)} ({d.Reason}).");
+            }
+            catch (Exception ex)
+            {
+                Service.Log.Warning(ex, $"Minerva: could not delete {d.Path}.");
+            }
+        }
+
+        // the playback tab may have been pointing at one of them
+        if (this.PlaybackPath != null && !File.Exists(this.PlaybackPath))
+        {
+            this.Player = null;
+            this.PlaybackPath = null;
+        }
+
+        return $"Deleted {gone} recording{(gone == 1 ? "" : "s")}, freeing {freed / (double)ReplayRetention.BytesPerMB:0.#} MB.";
+    }
+
+    private List<ReplayRetention.Entry> OnDisk()
+    {
+        var entries = new List<ReplayRetention.Entry>();
+        try
+        {
+            foreach (var path in Directory.GetFiles(this.directory, "minerva-*.log"))
+            {
+                var info = new FileInfo(path);
+                entries.Add(new ReplayRetention.Entry(path, info.Length, info.LastWriteTimeUtc, RevisionOf(path)));
+            }
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Warning(ex, "Minerva: could not read the recordings folder.");
+        }
+
+        return entries;
+    }
+
+    /// <summary>The recorder revision that wrote a log, from its first line alone -- the file may be hundreds of MB.</summary>
+    private static int RevisionOf(string path)
+    {
+        try
+        {
+            using var reader = new StreamReader(path);
+            return ReplayParser.RevisionOf(reader.ReadLine() ?? string.Empty);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>How many recordings predate what the recorder captures today.</summary>
+    public int ObsoleteOnDisk() => ReplayRetention.CountObsolete(this.OnDisk(), ReplayRecorder.Revision);
+
     public IReadOnlyList<string> ListRecordings()
     {
         try

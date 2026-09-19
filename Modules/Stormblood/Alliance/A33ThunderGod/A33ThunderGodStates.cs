@@ -14,6 +14,7 @@ class A33ThunderGodStates : StateMachineBuilder
     public A33ThunderGodStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
-                .ActivateOnEnter<HallowedBolt>();
+                .ActivateOnEnter<HallowedBoltCircle>()
+                .ActivateOnEnter<HallowedBoltDonut>();
     }
 }

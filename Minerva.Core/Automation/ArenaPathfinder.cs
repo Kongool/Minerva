@@ -213,6 +213,10 @@ public static class ArenaPathfinder
     /// <summary>Unsprinted run speed, yalms per second — what reachability is judged against.</summary>
     public const float DefaultMoveSpeed = 6f;
 
+    /// <summary>How far past the horizon a dodge's destination should preferably stay clear, in seconds. About one
+    /// wave interval of the staggered mechanics seen so far (Blot's columns are two seconds apart).</summary>
+    private const float LookPastHorizon = 3f;
+
     public static SafeSpot Solve(AIHints hints, DateTime now, float horizonSeconds = 3f, float cellSize = 1f, float safetyMargin = 0f, UptimeGoal? goal = null, float moveSpeed = DefaultMoveSpeed, float clearanceLead = 0f)
     {
         // Solve as though it were already clearanceLead seconds later. One shift buys both halves of being
@@ -244,7 +248,27 @@ public static class ArenaPathfinder
         // Prefer somewhere we can actually reach before the cast lands. If nothing qualifies, widen rather
         // than freeze: partially clearing a zone beats standing in it because the ideal spot was too far.
         var budget = TimeUntilDanger(hints, player, deadline, solveNow);
-        if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
+
+        // Among places to go, prefer one that is still clear a little past the horizon. Forbidden Folios,
+        // 2026-09-14: leaving a column of circles, the nearer side was the next column to fire, 1.5s past the
+        // horizon, so it scored the same as the far side -- and once it entered the horizon, every way off it
+        // crossed the column that fired first. Only where to go changes; nothing past the horizon becomes a reason
+        // to move, and where nothing reachable stays clear that long, the horizon alone decides as before.
+        if (TryNearestSafe(hints, deadline.AddSeconds(LookPastHorizon), solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
+            return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
+        if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
+            return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
+
+        // The lead is clearance to spare, and it came off the budget above. Before settling for a stage, take ground
+        // clear of the whole horizon that can still be reached in real time, by a walk nothing fires on first.
+        // Forbidden Folios, 2026-09-14: clear of the next column of circles and inside the one after, with a gap clear
+        // of both 14 yalms away and 3.2s to walk it. Minus the lead, the budget was 13 yalms, so the stage below
+        // answered "you are clear of the next column, stay" -- a hold that protected from nothing -- and the walk out
+        // started two seconds later and fell 3.9 yalms short. A hold is right when leaving means crossing the wave
+        // about to fire (the cone waves below); the walk check keeps that case a hold.
+        if (clearanceLead > 0f
+            && TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, TimeUntilDanger(hints, player, deadline, now), out spot)
+            && RouteIsClear(hints, player, spot, solveNow, safetyMargin, moveSpeed))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
 
         // Nothing reachable is clear of the whole horizon. Before considering somewhere further away, ask
@@ -259,9 +283,25 @@ public static class ArenaPathfinder
         // cell sixteen yalms away -- nearly three seconds of walking. It was caught in transit, three times
         // in one pull. A person steps out of the circle that is about to go off and deals with the next one
         // next, which is exactly what a nearer deadline asks for.
+        //
+        // A stage has to protect from something: the character is in its danger, or it is a hold and the walk to ground
+        // clear of everything would cross the stage (the cone waves). Lost on the Wind, 2026-09-14: out of reach of the
+        // only ground clear of Wind Blade, two small wind arcs the character was nowhere near were offered as stages,
+        // and the answers were "stand in the cone" and "walk to the middle of it". Skipping them leaves the search
+        // below to head for the safe ground.
+        bool? leavingIsClear = null;
         foreach (var soon in ActivationsBefore(hints, deadline, now))
-            if (TryNearestSafe(hints, soon, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
-                return Settle(hints, soon, player, spot, cellSize, safetyMargin);
+        {
+            if (!TryNearestSafe(hints, soon, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
+                continue;
+            var staged = Settle(hints, soon, player, spot, cellSize, safetyMargin);
+            if (staged.NeedToMove ? hints.InImminentDanger(player, soon, safetyMargin) : !(leavingIsClear ??= LeavingIsClear()))
+                return staged;
+        }
+
+        bool LeavingIsClear()
+            => TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out var clear)
+                && RouteIsClear(hints, player, clear, solveNow, safetyMargin, moveSpeed);
 
         if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
@@ -507,6 +547,23 @@ public static class ArenaPathfinder
     /// a 1.5-yalm margin, held there for two seconds, and the game (radius plus hitbox, plus a snapshot
     /// taken early) hit at 8.5.</para>
     /// </summary>
+    /// <summary>Is every leg of the spot's route walkable before anything on it fires? Each leg is timed from when
+    /// the walk reaches its start.</summary>
+    private static bool RouteIsClear(AIHints hints, WPos player, SafeSpot spot, DateTime now, float margin, float moveSpeed)
+    {
+        var from = player;
+        var elapsed = 0f;
+        foreach (var corner in spot.Route ?? [spot.Target])
+        {
+            if (!hints.WalkIsClear(from, corner, now.AddSeconds(elapsed), margin, moveSpeed))
+                return false;
+            elapsed += moveSpeed > 0f ? (corner - from).Length() / moveSpeed : 0f;
+            from = corner;
+        }
+
+        return true;
+    }
+
     private static SafeSpot Settle(AIHints hints, DateTime deadline, WPos player, SafeSpot spot, float cellSize, float margin)
         => (spot.Target - player).LengthSq() <= cellSize * cellSize && !hints.InImminentDanger(player, deadline, margin) && !hints.Misplaced(player)
             ? SafeSpot.Stay
@@ -672,8 +729,20 @@ public static class ArenaPathfinder
             return false;
         }
 
-        var waypoint = grid.Waypoint(player, best);
-        spot = new SafeSpot(true, true, best, (waypoint - player).Normalized(), waypoint, grid.Route(player, best));
+        // Steer at the route's first corner. This used to be the furthest path cell with no wall in the way, which
+        // cut through the same puddles the route keeps clear of. The cell the player stands in can be kept as a
+        // corner of its own; steering at that would be steering at your feet.
+        var route = grid.Route(player, best);
+        var waypoint = route[^1];
+        foreach (var corner in route)
+        {
+            if ((corner - player).Length() > cellSize * 0.5f)
+            {
+                waypoint = corner;
+                break;
+            }
+        }
+        spot = new SafeSpot(true, true, best, (waypoint - player).Normalized(), waypoint, route);
         return true;
     }
 }

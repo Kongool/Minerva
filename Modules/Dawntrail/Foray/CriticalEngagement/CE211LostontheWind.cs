@@ -63,6 +63,98 @@ sealed class Hurricane(ModuleBase module) : Components.RaidwideCastDelay(module,
 [SkipLocalsInit]
 sealed class Aerosnare(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Aerosnare, new AOEShapeCone(60f, 30f.Degrees()), 3);
 
+// Wind Blade from the edge, drawn from the teleport instead of the cast. In every pull recorded (five, nine times) a
+// teleport that carries the Abductor out to the edge -- always 16 yalms from the centre, due north, south, east or
+// west -- is followed by Wind Blade from there, facing the centre: half the arena and every player near where the boss
+// had been. The cast gives five seconds; walking round behind it from the far side is 34 yalms, and on 2026-09-14
+// the whole melee group was hit 5.6 yalms short. Waiting for the cast loses the two seconds that make the walk.
+//
+// Teleports to the centre (before Hurricane and Aerosnare) look the same when they start, and replays do not record
+// where one lands, so an edge teleport is recognised in flight: the boss moving away from the centre, at least 3
+// yalms out. It covers the arena at about 40 yalms a second, so that is about a second after the teleport. The edge
+// point is the travel direction (the teleport's rotation) snapped to the nearest cardinal.
+//
+// Teleport to Wind Blade landing measured 7.11 to 7.86 seconds; the earliest is used.
+[SkipLocalsInit]
+sealed class WindBladeFromEdge(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly WPos arenaCentre = new(-150f, -860f);
+    private const float EdgeDistance = 16f;
+    private const float LeavingCentreAt = 3f;
+    private const double TeleportToHit = 7.1d;
+    private const double GiveUpAfter = 3d;
+    private static readonly AOEShapeCone cone = new(60f, 90f.Degrees());
+
+    private DateTime teleportAt;
+    private Angle travel;
+    private float lastDistance;
+    private AOEInstance[] predicted = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => predicted;
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.Teleport && caster == Module.PrimaryActor)
+        {
+            teleportAt = World.CurrentTime;
+            travel = spell.Rotation;
+            lastDistance = (caster.Position - arenaCentre).Length();
+            predicted = [];
+        }
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        // the cast is drawn by WindBlade from here, at its real timing
+        if (spell.Action.ID == (uint)AID.WindBlade)
+            predicted = [];
+    }
+
+    public override void Update()
+    {
+        if (predicted.Length != 0 && World.CurrentTime > predicted[0].Activation.AddSeconds(1d))
+            predicted = [];
+        if (teleportAt == default)
+            return;
+        if (World.CurrentTime > teleportAt.AddSeconds(GiveUpAfter))
+        {
+            teleportAt = default;
+            return;
+        }
+
+        var distance = (Module.PrimaryActor.Position - arenaCentre).Length();
+        if (distance >= LeavingCentreAt && distance > lastDistance + 0.01f)
+        {
+            var edge = travel.Round(90f);
+            var origin = arenaCentre + (edge.ToDirection() * EdgeDistance);
+            var facing = edge + 180f.Degrees();
+            predicted = [new(cone, origin, facing, teleportAt.AddSeconds(TeleportToHit), shapeDistance: cone.Distance(origin, facing))];
+            teleportAt = default;
+        }
+
+        lastDistance = distance;
+    }
+}
+
+// The death wall: the ring from 24 to 30 yalms that ticks about once a second for the whole fight. The port had no
+// component for it, so leaving the arena was never danger. On 2026-09-14 the character ran out to 25.5 yalms seven
+// seconds in; the dodge looked and had nothing to do, and the wall hit on its next tick. It is drawn from the wall's
+// first tick, because before that players are still arriving from outside the ring.
+[SkipLocalsInit]
+sealed class Deathwall(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeDonut ring = new(24f, 30f);
+    private AOEInstance[] aoe = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => aoe;
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (aoe.Length == 0 && spell.Action.ID == (uint)AID.Deathwall)
+            aoe = [new(ring, caster.Position, default, default, shapeDistance: ring.Distance(caster.Position, default))];
+    }
+}
+
 [SkipLocalsInit]
 sealed class Buffet(ModuleBase module) : Components.GenericKnockback(module)
 {
@@ -308,6 +400,8 @@ sealed class CE211LostontheWindStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<WindBlade>()
+            .ActivateOnEnter<WindBladeFromEdge>()
+            .ActivateOnEnter<Deathwall>()
             .ActivateOnEnter<CyclonicRing>()
             .ActivateOnEnter<Splinter>()
             .ActivateOnEnter<Skydive>()
@@ -319,7 +413,7 @@ sealed class CE211LostontheWindStates : StateMachineBuilder
     }
 }
 
-[ModuleInfo(CFCID = 1093u, NameID = 61u, PrimaryActorOID = (uint)OID.Abductor, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
+[ModuleInfo(Group = ModuleGroup.CriticalEngagement, GroupID = 1093u, CFCID = 1093u, NameID = 61u, PrimaryActorOID = (uint)OID.Abductor, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
 public sealed class CE211LostontheWind(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(-150f, -860f).Quantized(), new ArenaBoundsCircle(24f))
 {

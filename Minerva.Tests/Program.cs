@@ -149,6 +149,22 @@ t.Section("WorldState op stream");
     t.NotNull("player has status", ws.Actors.Find(player)!.FindStatus(1871u));
     t.Eq("statusGain fired", statusGain, 1);
 
+    // The game replaces a status in place, with no removal in between: Iambe's Forward March becomes Forced March in
+    // the same slot (recording 2026-08-24). BossmodReborn counts the replaced status as lost; Minerva did not, so a
+    // forced march queued on Forward March was never cleared and held the dodge still (Inconstant Gardener, 2026-09-14).
+    {
+        var lostIds = new List<uint>();
+        var slotWorld = new WorldState(10_000_000, "test");
+        slotWorld.Execute(new WorldState.OpFrameStart(Frame(slotWorld, 0), TimeSpan.Zero));
+        slotWorld.Execute(new ActorState.OpCreate(0x10000001, 0x2000, 0, "Marcher", 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, default, true, true, 0));
+        using var lostSub = slotWorld.Actors.StatusLose.Subscribe((a, i) => lostIds.Add(a.Statuses[i].ID));
+        slotWorld.Execute(new ActorState.OpStatus(0x10000001, 7, new ActorStatus(5142, 0, slotWorld.FutureTime(5), 0x40000001)));
+        slotWorld.Execute(new ActorState.OpStatus(0x10000001, 7, new ActorStatus(1257, 1, slotWorld.FutureTime(2), 0x40000001)));
+        t.True($"a status replaced in its slot counts as lost (lost: {string.Join(",", lostIds)})", lostIds.Count == 1 && lostIds[0] == 5142);
+        slotWorld.Execute(new ActorState.OpStatus(0x10000001, 7, new ActorStatus(1257, 2, slotWorld.FutureTime(2), 0x40000001)));
+        t.True("the same status refreshed in its slot is not lost", lostIds.Count == 1);
+    }
+
     // snapshot round-trip: rebuild a fresh WorldState from CompareToInitial ops
     var snapshot = ws.CompareToInitial();
     var ws2 = new WorldState(ws.QPF, ws.GameVersion);
@@ -289,6 +305,19 @@ t.Section("Replay round-trip");
             w.Execute(new ActorState.OpMove(bossId, new Vector4(0, 0, 2, 0)));
         }
         var flog = fsw.ToString();
+
+        // A recording started mid-dodge carries the dodge in progress. Rows are written only when the decision changes,
+        // so a steer already under way when recording began left no row at all: Lost on the Wind, 2026-09-14, the
+        // radar showed the dodge's marker while the recording showed nothing for the first seven seconds.
+        var dodging = new WorldState(10_000_000, "test");
+        dodging.Execute(new WorldState.OpFrameStart(Frame(dodging, 0), TimeSpan.Zero));
+        dodging.Execute(new OpDodgeDecision(new DodgeDecision(true, true, new WPos(3f, 4f), DodgeReason.Danger, DodgeBlocker.None, true)));
+        var dsw = new System.IO.StringWriter();
+        using (new ReplayRecorder(dodging, dsw))
+        {
+        }
+        t.True("a recording started mid-dodge begins with the dodge in progress", dsw.ToString().Contains(" DODG "));
+
         t.True("filter keeps the boss", flog.Contains(bossId.ToString("X")));
         t.True("filter keeps the local player", flog.Contains(meId.ToString("X")));
         t.True("filter drops other players (create + moves)", !flog.Contains(randoId.ToString("X")));
@@ -353,6 +382,34 @@ t.Section("Replay round-trip");
     t.True("outside the drawn core with many hit is a proximity AOE", hit(true, false, 16, proximity: true).Why.Contains("proximity"));
     t.True("outside everything drawn with few hit is a shape too small", hit(true, false, 2).Why.Contains("smaller than the real one"));
     t.True("inside the drawn zone still asks the decision", hit(true, true, 2).Why.Contains("margin"));
+
+    // The same thing said over and over buries what is worth reading: a Bozja night reported about a thousand hits,
+    // 924 of them trash auto-attacking the tank, each on its own line.
+    {
+        ReplayValidator.Hit At(double seconds, uint action, bool drawn)
+            => new(seconds, action, "mob", drawn, safeDecision, 0f, false, 0u, 180f, false) { SheetSingleTarget = !drawn, TargetsHit = 1 };
+        var many = new List<ReplayValidator.Hit>();
+        for (var i = 0; i < 20; ++i)
+            many.Add(At(10d + i, 111u, false));
+        many.Insert(7, At(16.5d, 222u, true));      // the one worth reading, in the middle of them
+        var lines = ReplayValidator.HitLines(many);
+        t.Eq("twenty of the same become one line, plus the one that differs", lines.Count, 2);
+        t.True($"the collapsed line counts them and spans their time ({lines[0].Trim()})",
+            lines[0].Contains("20x") && lines[0].Contains("10.0s to 29.0s"));
+        t.True("and the different one is still written in full", lines[1].Contains("16.5s"));
+
+        // two of a kind stay as they are: a count would say less than the two lines do
+        var few = new List<ReplayValidator.Hit> { At(1d, 111u, false), At(2d, 111u, false) };
+        t.Eq("a pair is not worth collapsing", ReplayValidator.HitLines(few).Count, 2);
+    }
+
+    // A module draws no zone for a cast that has none. The Thunder God, 2026-09-15: 35 auto-attacks and 12 tankbuster
+    // hits on the tank were reported as module gaps, which buried the four hits that were about the dodge.
+    var tankbuster = hit(false, false, 1) with { SheetSingleTarget = true };
+    t.True($"a single-target hit is not a module gap ({tankbuster.Why})", tankbuster.Why.Contains("single-target") && !tankbuster.Why.Contains("module gap"));
+    var arenaWide = hit(false, false, 1) with { SheetRaidwide = true };
+    t.True("a circle bigger than the arena is not a module gap either", arenaWide.Why.Contains("no edge to walk out of") && !arenaWide.Why.Contains("module gap"));
+    t.True("a cast with a real shape the module missed is still a module gap", hit(false, false, 1).Why.Contains("module gap"));
 
     // analyzer mined the cast + objects
     t.NotNull("analysis attached", analysis);
@@ -604,7 +661,51 @@ t.Section("Auto-dodge pathfinding");
         var melee = UptimeGoal.For(target, Role.Melee);
 
         // nothing in the way: walk back
-        t.True("uptime walks back when the way is clear",
+        // Which enemy to be on, in trash. Veyn's BossMod counts anything within three yalms as equally close and breaks
+    // the tie on "is this what you are already fighting", because otherwise the pick flips between two mobs standing
+    // together, sometimes every frame. BossmodReborn is stickier still: it keeps its current target while that target
+    // is still worth hitting.
+    {
+        static Actor Mob(ulong id, float x, float z, bool combat = true)
+            => new(id, 0x100u, (int)id, "mob", 0u, ActorType.Enemy, new Vector4(x, 0f, z, 0f), 1f) { InCombat = combat };
+        var me = new WPos(0f, 0f);
+        var near = Mob(1, 2f, 0f);
+        var alsoNear = Mob(2, 0f, 3.4f);
+        var far = Mob(3, 20f, 0f);
+
+        var pack = new AIHints();
+        pack.SeedPotentialTargets([near, alsoNear, far]);
+        t.Eq("every mob in combat is a potential target", pack.PotentialTargets.Count, 3);
+        var idle = new AIHints();
+        idle.SeedPotentialTargets([Mob(4, 1f, 1f, combat: false)]);
+        t.Eq("a mob out of combat is not one to pull", idle.PotentialTargets[0].Priority, AIHints.Enemy.PriorityUndesirable);
+
+        // nothing raised above the default: the caller keeps its own boss
+        t.True("no priorities means no answer", pack.BestPrioritisedTarget(me, 0ul, 0ul) == null);
+
+        foreach (var e in pack.PotentialTargets)
+            e.Priority = 1;
+        t.Eq("with no target of your own, the nearest wins", pack.BestPrioritisedTarget(me, 0ul, 0ul)!.InstanceID, near.InstanceID);
+        t.Eq("the one you are already fighting wins a tie inside three yalms", pack.BestPrioritisedTarget(me, alsoNear.InstanceID, 0ul)!.InstanceID, alsoNear.InstanceID);
+        t.Eq("and the previous choice wins it next", pack.BestPrioritisedTarget(me, 0ul, alsoNear.InstanceID)!.InstanceID, alsoNear.InstanceID);
+        t.Eq("but a mob far away does not win it, whatever you have targeted", pack.BestPrioritisedTarget(me, far.InstanceID, far.InstanceID)!.InstanceID, near.InstanceID);
+
+        // the clamp is what stops the flapping: a step that changes which mob is nearest must not change the answer
+        var stepped = new WPos(0f, 2.9f);
+        t.Eq("a step that swaps which is nearest does not swap the target", pack.BestPrioritisedTarget(stepped, 0ul, near.InstanceID)!.InstanceID, near.InstanceID);
+
+        // and in trash nothing raises anything, so "who is already fighting us" is the question that has an answer
+        var trash = new AIHints();
+        trash.SeedPotentialTargets([near, alsoNear, far, Mob(9, 1f, 1f, combat: false)]);
+        t.True("no priorities still means no prioritised target", trash.BestPrioritisedTarget(me, 0ul, 0ul) == null);
+        t.Eq("but the nearest mob already in the fight is one to walk to", trash.BestEngagedTarget(me, 0ul, 0ul)!.InstanceID, near.InstanceID);
+        t.Eq("keeping the one you are on", trash.BestEngagedTarget(me, alsoNear.InstanceID, 0ul)!.InstanceID, alsoNear.InstanceID);
+        var passiveOnly = new AIHints();
+        passiveOnly.SeedPotentialTargets([Mob(10, 2f, 2f, combat: false)]);
+        t.True("a mob minding its own business is never walked to", passiveOnly.BestEngagedTarget(me, 0ul, 0ul) == null);
+    }
+
+    t.True("uptime walks back when the way is clear",
             ArenaPathfinder.Solve(back, now, goal: melee).NeedToMove);
 
         // a wall of fire across the middle, firing before the character could be through it
@@ -877,6 +978,38 @@ t.Section("Auto-dodge pathfinding");
             !answer.NeedToMove);
     }
 
+    // ...but only when holding protects you. Forbidden Folios' Blot, 2026-09-14 (Saar): columns of 15-yalm circles
+    // fire two seconds apart. Saar stood clear of the next column and inside the one after it, and a gap clear of
+    // both was 14 yalms away -- 2.3s of walking with 3.2s left. The one-second lead cut the budget to 13 yalms,
+    // so the staged rung answered "you are clear of the next column, stay", and the walk out of the column after
+    // it started two seconds too late: 3.9 yalms short. Geometry from the recording, relative to the arena centre.
+    {
+        var folio = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(24.5f), PlayerPosition = new WPos(13.5f, -2.3f) };
+        foreach (var z in new[] { -15f, 0f, 15f })
+        {
+            folio.AddForbiddenZone(new AOEShapeCircle(15f), new WPos(-15f, z), default, now.AddSeconds(1.13d));   // the next column
+            folio.AddForbiddenZone(new AOEShapeCircle(15f), new WPos(15f, z), default, now.AddSeconds(3.18d));    // the one after
+        }
+        var blot = ArenaPathfinder.Solve(folio, now, horizonSeconds: 5f, safetyMargin: 1f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"clear of the next wave and inside the one after, the dodge walks to ground clear of both (target {blot.Target.X:0.0},{blot.Target.Z:0.0}, move {blot.NeedToMove})",
+            blot.NeedToMove && blot.Found && !folio.InImminentDanger(blot.Target, now.AddSeconds(5d)));
+
+        // Earlier in the same pull, 99.4s: leaving the centre column (5.5s), west was 12.5 yalms and east 17.5. West
+        // is the next column (7.5s), just past the horizon, so it looked as good, and it was a trap: once that column
+        // entered the horizon there was no way off it that did not cross the centre column first.
+        var early = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(24.5f), PlayerPosition = new WPos(-3.6f, -0.6f) };
+        foreach (var z in new[] { -15f, 0f, 15f })
+        {
+            early.AddForbiddenZone(new AOEShapeCircle(15f), new WPos(0f, z), default, now.AddSeconds(5.51d));
+            early.AddForbiddenZone(new AOEShapeCircle(15f), new WPos(-15f, z), default, now.AddSeconds(7.53d));
+        }
+        var side = ArenaPathfinder.Solve(early, now, horizonSeconds: 5f, safetyMargin: 1f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"between two sides, the dodge takes the one that is not about to fire next (target {side.Target.X:0.0},{side.Target.Z:0.0})",
+            side.Found && !early.InImminentDanger(side.Target, now.AddSeconds(8d)));
+    }
+
     // Shortening a route must not undo the detour the route was made of. Cursed Resurgence, 2026-09-13: the
     // grid went round a standing puddle, then the simplifier -- which only asked whether a straight line hit a
     // wall -- replaced the whole path with one straight step through the puddle, and the navmesh walked it.
@@ -911,6 +1044,79 @@ t.Section("Auto-dodge pathfinding");
             prev = q;
         }
         t.True($"open ground still simplifies to a straight walk ({walked:0.00}y for 10)", walked <= 10.2f);
+    }
+
+    // A stage only counts if it protects from something. Lost on the Wind, 2026-09-14: Wind Blade from the arena edge
+    // covers everything but the band behind the boss, 35 yalms from the melee group -- not reachable in the budget.
+    // Two small wind arcs landing sooner were offered as stages; the character was in neither, and the staged answer
+    // was "clear of the arcs": a spot in the middle of the cone. The search with no budget, which would at least have
+    // headed for the band, was never reached. Geometry from the recording, relative to the arena centre.
+    {
+        var wind = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(24f), PlayerPosition = new WPos(-1f, 15.8f) };
+        wind.AddForbiddenZone(new AOEShapeCone(60f, 90f.Degrees()), new WPos(0f, -16f), default, now.AddSeconds(5.4d));   // Wind Blade, facing the centre
+        wind.AddForbiddenZone(new AOEShapeDonut(24f, 30f), new WPos(0f, 0f));                                            // the death wall
+        wind.AddForbiddenZone(new AOEShapeCircle(4f), new WPos(18f, 4f), default, now.AddSeconds(1.1d));                 // wind arcs, elsewhere
+        wind.AddForbiddenZone(new AOEShapeCircle(4f), new WPos(18f, 4f), default, now.AddSeconds(3d));
+        var blade = ArenaPathfinder.Solve(wind, now, horizonSeconds: 5f, safetyMargin: 1.5f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"out of reach of safety, the dodge heads for it rather than answering a stage it is not in (target {blade.Target.X:0.0},{blade.Target.Z:0.0})",
+            blade.Found && !wind.InImminentDanger(blade.Target, now.AddSeconds(6d)));
+    }
+
+    // Outside the arena, the way back in crosses ground outside the arena. Lost on the Wind, 2026-09-14: 1.8 yalms into
+    // the death wall, every cell around the character was out of bounds and so solid to the route, nothing inside was
+    // reachable, and the dodge answered with the character's own spot.
+    {
+        var outside = new WPos(25.5f, 0f);
+        var wallHints = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(24f), PlayerPosition = outside };
+        wallHints.AddForbiddenZone(new AOEShapeDonut(24f, 30f), new WPos(0f, 0f));
+        var back = ArenaPathfinder.Solve(wallHints, now, horizonSeconds: 5f, safetyMargin: 1f,
+            moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"a character outside the arena is walked back in (target {back.Target.X:0.0},{back.Target.Z:0.0}, found {back.Found})",
+            back.NeedToMove && back.Found && (back.Target - new WPos(0f, 0f)).Length() < 23f);
+    }
+
+    // The same, while escaping something that fires before the walk is over. Claret Dragon, 2026-09-14: Rosa
+    // ran out of a breath cone through the edge of a standing haze. Every yalm of that escape is priced as
+    // lethal, so a straight line that trades cone ground for haze ground cost the simplifier nothing, and one
+    // cell of slack at the lethal price let it through. Geometry from the recording, relative to where she stood.
+    {
+        var start = new WPos(0f, 0f);
+        var hazeAt = new WPos(2.3f, -10.1f);
+        var escape = new AIHints { Center = start, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = start };
+        escape.AddForbiddenZone(new AOEShapeCircle(14f), start, default, now.AddSeconds(0.2d));   // the breath, as a solve with a 1s lead sees it
+        foreach (var at in new[] { hazeAt, new WPos(12.3f, 0f), new WPos(22.3f, -10.1f), new WPos(2.3f, -20.1f), new WPos(12.3f, -20.1f) })
+            escape.AddForbiddenZone(new AOEShapeCircle(5f), at);                                  // standing hazes
+        var escapeGrid = new RouteGrid(escape, now.AddSeconds(5d), start, 1f, 1f, now, ArenaPathfinder.DefaultMoveSpeed);
+        var escapeRoute = escapeGrid.Route(start, new WPos(9f, -12.4f));
+
+        var closest = float.MaxValue;
+        var prevPoint = start;
+        foreach (var q in escapeRoute)
+        {
+            for (var k = 1; k <= 40; ++k)
+                closest = MathF.Min(closest, (prevPoint + ((q - prevPoint) * (k / 40f)) - hazeAt).Length() - 5f);
+            prevPoint = q;
+        }
+        t.True($"escaping lethal ground does not cut through a puddle on the way out ({escapeRoute.Count} point(s), closest {closest:0.0}y from its edge)", closest > 0f);
+
+        // and the search itself: here the shortest way out of a band that is about to fire runs through a haze
+        // inside it, and with both priced lethal at the same rate the search went that way, 2.9 yalms deep
+        var straightOut = new AIHints { Center = start, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = start };
+        var hazeAhead = new WPos(0f, -5f);
+        straightOut.AddForbiddenZone(new AOEShapeRect(8f, 30f, 8f), start, default, now.AddSeconds(0.2d));
+        straightOut.AddForbiddenZone(new AOEShapeCircle(3f), hazeAhead);
+        var outGrid = new RouteGrid(straightOut, now.AddSeconds(5d), start, 1f, 1f, now, ArenaPathfinder.DefaultMoveSpeed);
+        var outRoute = outGrid.Route(start, new WPos(0f, -16f));
+        closest = float.MaxValue;
+        prevPoint = start;
+        foreach (var q in outRoute)
+        {
+            for (var k = 1; k <= 40; ++k)
+                closest = MathF.Min(closest, (prevPoint + ((q - prevPoint) * (k / 40f)) - hazeAhead).Length() - 3f);
+            prevPoint = q;
+        }
+        t.True($"ground under two lethal zones costs more than ground under one ({outRoute.Count} point(s), closest {closest:0.0}y from the haze)", closest > 0f);
     }
 
     // A route may cross a telegraph that fires long after you are through it, and must not cross one that
@@ -2980,6 +3186,115 @@ t.Section("Replay validation");
     t.True("helper cast, unhandled -> uncovered mechanic (likely missed)", result.UncoveredMechanics.Contains(102u));
     t.True("environment object spawned -> arena-change warning", result.ArenaNote != null && result.ArenaNote.Contains("⚠"));
     Console.WriteLine("\n--- validation ---\n" + result.Render());
+
+
+// ---------------------------------------------------------------------------
+// 9e. Recording retention: what a purge may and may not delete
+// ---------------------------------------------------------------------------
+t.Section("Recording retention");
+{
+    var now = new DateTime(2026, 9, 18, 12, 0, 0, DateTimeKind.Utc);
+    ReplayRetention.Entry Rec(string name, int daysOld, int mb)
+        => new(name, mb * ReplayRetention.BytesPerMB, now.AddDays(-daysOld));
+    var folder = new List<ReplayRetention.Entry>
+    {
+        Rec("oldest.log", 40, 100),
+        Rec("old.log", 30, 100),
+        Rec("recent.log", 5, 100),
+        Rec("newest.log", 0, 100),
+    };
+
+    t.Eq("no limits set deletes nothing", ReplayRetention.Plan(folder, 0, 0, now).Count, 0);
+
+    var byAge = ReplayRetention.Plan(folder, 14, 0, now);
+    t.Eq("by age, only what is older than the limit goes", byAge.Count, 2);
+    t.True("oldest first", byAge[0].Path == "oldest.log" && byAge[1].Path == "old.log");
+    t.True("and it says why", byAge[0].Reason.Contains("14 days"));
+
+    // 400 MB in the folder, capped at 250: the two oldest go and the rest stays
+    var bySize = ReplayRetention.Plan(folder, 0, 250, now);
+    t.Eq("by size, oldest go until it fits", bySize.Count, 2);
+    t.True("the cap is the reason", bySize[0].Reason.Contains("250 MB"));
+
+    // the guards
+    t.True("the newest recording is never deleted",
+        ReplayRetention.Plan(folder, 1, 1, now).All(d => d.Path != "newest.log"));
+    var everythingIsOld = new List<ReplayRetention.Entry> { Rec("only.log", 400, 900) };
+    t.Eq("a folder with one recording keeps it", ReplayRetention.Plan(everythingIsOld, 1, 1, now).Count, 0);
+    t.True("the recording being written is never deleted",
+        ReplayRetention.Plan(folder, 1, 1, now, inUse: "recent.log").All(d => d.Path != "recent.log"));
+
+    // a file is never listed twice, however many rules would take it
+    var both = ReplayRetention.Plan(folder, 14, 150, now);
+    t.Eq("no recording is deleted twice", both.Select(d => d.Path).Distinct().Count(), both.Count);
+    t.Eq("size describes the folder", ReplayRetention.Describe(2, 3 * ReplayRetention.BytesPerMB), "2 recordings, 3 MB");
+
+    // The rule that matches how the pile really goes stale: a recording made before the recorder captured what it
+    // captures today cannot answer what a new one can, whatever its age.
+    ReplayRetention.Entry Stamped(string name, int daysOld, int mb, int revision)
+        => new(name, mb * ReplayRetention.BytesPerMB, now.AddDays(-daysOld), revision);
+    var mixed = new List<ReplayRetention.Entry>
+    {
+        Stamped("ancient.log", 9, 10, 0),   // written before the stamp existed
+        Stamped("old-rev.log", 8, 10, 1),
+        Stamped("current.log", 7, 10, 2),
+        Stamped("newest.log", 0, 10, 2),
+    };
+    var stale = ReplayRetention.Plan(mixed, 0, 0, now, currentRevision: 2);
+    t.Eq("only what predates the current recorder goes", stale.Count, 2);
+    t.True("oldest first, and it says which revision wrote it",
+        stale[0].Path == "ancient.log" && stale[0].Reason.Contains("before the recorder was stamped") && stale[1].Reason.Contains("revision 1"));
+    t.True("a recording from the current recorder is kept", stale.All(d => d.Path != "current.log"));
+    t.Eq("and the count is offered before anything is deleted", ReplayRetention.CountObsolete(mixed, 2), 2);
+    t.Eq("with every recording obsolete, the newest still survives",
+        ReplayRetention.Plan(mixed, 0, 0, now, currentRevision: 9).Count, 3);
+    t.Eq("revision off changes nothing", ReplayRetention.Plan(mixed, 0, 0, now).Count, 0);
+
+    // the header carries it, and a log written before the stamp reads as revision 0
+    t.Eq("the recorder stamps its revision", ReplayParser.RevisionOf($"MINERVA-REPLAY 2 10000000 ver 1005B68F {ReplayRecorder.Revision}"), ReplayRecorder.Revision);
+    t.Eq("an unstamped header reads as nothing", ReplayParser.RevisionOf("MINERVA-REPLAY 2 10000000 ver 1005B68F"), 0);
+    t.Eq("a header with no POV either reads as nothing", ReplayParser.RevisionOf("MINERVA-REPLAY 1 10000000 ver"), 0);
+    t.Eq("and something that is not a replay is not one", ReplayParser.RevisionOf("hello"), 0);
+}
+
+    // A raidwide cannot hit the dead, and "everyone" meant every party member seen. Ultima the High Seraph,
+    // 2026-09-15: Ultimate Illusion ticked 38 times on 16 players at once with one party member dead, and every
+    // tick was reported as a module gap.
+    {
+        const ulong pov = 0x10000AA1, mate = 0x10000AA2, corpse = 0x10000AA3;
+        var raid = new List<(long, WorldState.Operation)>();
+        void Raid(WorldState.Operation op) => raid.Add((t0.Ticks, op));
+        Raid(new WorldState.OpFrameStart(new FrameState(t0, 0UL, 0u, 0f, 0f, 1f), TimeSpan.Zero));
+        Raid(new WorldState.OpZoneChange(1234, 999));
+        Raid(new ActorState.OpCreate(boss, 0xABCD, 0, "Boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 5f, default, true, false, 0));
+        var slot = 0;
+        foreach (var id in new[] { pov, mate, corpse })
+        {
+            Raid(new ActorState.OpCreate(id, 0x2000, slot + 3, "P" + slot, 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, new ActorHPMP(9000, 9000, 0, 0, 0), true, true, 0));
+            Raid(new PartyState.OpModify(slot, new PartyState.Member((ulong)(0xC0FFEE + slot), id)));
+            ++slot;
+        }
+        Raid(new ActorState.OpDead(corpse, true));
+        var damage = new ulong[ActorCastEvent.Target.MaxEffects];
+        damage[0] = (ulong)ActionEffectType.Damage | (5000UL << 48);
+        var wide = new ActorCastEvent(ActionID.MakeSpell(103u), boss, default, default, 7u);
+        wide.Targets.Add(new ActorCastEvent.Target(pov, damage));
+        wide.Targets.Add(new ActorCastEvent.Target(mate, damage));
+        Raid(new ActorState.OpCastEvent(boss, wide));
+
+        // An allied NPC healing you is not a hit. The Bozja Incident, 2026-09-15: the Scions' Succor and Helios
+        // accounted for 20 of Varis yae Galvus's 44 "hits".
+        var friend = 0x40000C99UL;
+        Raid(new ActorState.OpCreate(friend, 0x2D7A, 9, "Alphinaud", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 0.5f, default, true, true, 0));
+        var heal = new ActorCastEvent(ActionID.MakeSpell(104u), pov, default, default, 8u);
+        heal.Targets.Add(new ActorCastEvent.Target(pov, damage));
+        Raid(new ActorState.OpCastEvent(friend, heal));
+
+        var raidResult = ReplayValidator.Validate(new ReplayTimeline { QPF = 10_000_000, GameVersion = "test", Ops = raid, PlayerInstanceID = pov }, reg);
+        t.Eq("an allied NPC's spell on you is not a hit", raidResult.Hits.Count, 1);
+        t.True("a raidwide that spared only the dead is still a raidwide (" + (raidResult.Hits.Count > 0 ? raidResult.Hits[0].Why : "") + ")",
+            raidResult.Hits.Count > 0 && raidResult.Hits[0].Why.Contains("raidwide"));
+    }
 }
 
 // ---------------------------------------------------------------------------

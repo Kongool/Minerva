@@ -43,9 +43,15 @@ public enum AID : uint
     AutoAttack = 21263, // ForthLegionGunship->player, no cast, single-target
     GarleanFire = 21246, // ForthLegionGunship->location, 3.0s cast, range 5 circle
     SnowsOfBozja = 21274, // Smok->location, 2.5s cast, range 5 circle
+    Overcharge = 21244, // ForthLegionVanguard->self, 2.7s cast, range 10 120-degree cone
 }
 
 sealed class PyreticEruptionPyroscatter(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.PyreticEruption, (uint)AID.Pyroscatter], 8f);
+
+// The escorting Vanguards' own cone, which nothing drew: it caught the character at 70.8s on 2026-09-17. Their casts
+// are not the boss's, but they land on whoever is fighting them, and while this module is up the cast-bar guesser is
+// not. Shape from the game's own sheet.
+sealed class Overcharge(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Overcharge, new AOEShapeCone(10f, 60f.Degrees()));
 sealed class TridirectionalFlame(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.TridirectionalFlame, new AOEShapeRect(60f, 4f));
 sealed class Pyroburst(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Pyroburst, 10f);
 sealed class GrandCrossflame(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GrandCrossflame, new AOEShapeCross(40f, 9f));
@@ -64,6 +70,7 @@ sealed class PyromancerSupremeStates : StateMachineBuilder
             .ActivateOnEnter<GrandCrossflame>()
             .ActivateOnEnter<Firestarter>()
             .ActivateOnEnter<GarleanFireSnowsOfBozja>()
+            .ActivateOnEnter<Overcharge>()
             .DeactivateOnEnter<ThermalShock>()
             .Raw.Update = () => module.PrimaryActor.IsDeadOrDestroyed || !module.PrimaryActor.IsTargetable;
     }

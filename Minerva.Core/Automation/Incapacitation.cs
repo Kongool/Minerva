@@ -24,6 +24,7 @@ public static class Incapacitation
         (610u, "petrified"),     // named Petrification by several ported enums (Echidna, Ferdiad)
         (3007u, "petrified"),    // seen: Eye to Eye, 2026-09-05
         (1958u, "terrified"),
+        (4235u, "rooted by your own Rage"),   // seen: Phantom Berserker's Rage, ten seconds, Forbidden Folios 2026-09-14
     ];
 
     /// <summary>The state this actor is stuck in ("stunned", "bound", ...), or null when it can move.</summary>

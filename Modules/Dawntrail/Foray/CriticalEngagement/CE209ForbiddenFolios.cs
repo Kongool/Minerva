@@ -32,6 +32,7 @@ public enum AID : uint
     BookDropCast = 47319, // Arbatel->self, 3.0s cast, single-target
 
     BookDrop = 47322, // 4BD8->self, 8.0s cast, range 3 circle, tower
+    BookDropPair = 47321, // ->self, 7.7s cast, range 3 circle, tower for two (Saar's recording, 2026-09-14)
     BigBurst = 47323, // Helper->self, 1.0s cast, ???, tower fail
 
     ThunderII = 47324, // Helper->self, 4.0s cast, range 50 width 5 rect
@@ -94,6 +95,13 @@ sealed class Marginalia(ModuleBase module) : Components.RaidwideCast(module, (ui
 sealed class UnboundInk(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.UnboundInk, 9f);
 [SkipLocalsInit]
 sealed class BookDrop(ModuleBase module) : Components.CastTowersOpenWorld(module, (uint)AID.BookDrop, 3f, 3, 5);
+
+// The other tower the fight casts, missing from BossmodReborn, so it was never drawn and nobody went to soak it. Saar's
+// 2026-09-14 pull cast only these: six burst (Big Burst on the whole party) with 0 or 1 soakers and two held with 2 and
+// 3, so two is the minimum. In five earlier pulls with only 47322 towers, two soakers always burst and three always
+// held, which matches the 3 above. The maximum here is a guess: no recording shows one of these over-soaked.
+[SkipLocalsInit]
+sealed class BookDropPair(ModuleBase module) : Components.CastTowersOpenWorld(module, (uint)AID.BookDropPair, 3f, 2, 4);
 [SkipLocalsInit]
 sealed class ThunderII(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ThunderII, new AOEShapeRect(50f, 2.5f), 10);
 [SkipLocalsInit]
@@ -268,6 +276,7 @@ sealed class CE209ForbiddenFoliosStates : StateMachineBuilder
             .ActivateOnEnter<CoverToCover>()
             .ActivateOnEnter<UnboundInk>()
             .ActivateOnEnter<BookDrop>()
+            .ActivateOnEnter<BookDropPair>()
             .ActivateOnEnter<ThunderII>()
             .ActivateOnEnter<FireII>()
             .ActivateOnEnter<QuadRule>()

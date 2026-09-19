@@ -51,66 +51,18 @@ sealed class Pheromones(ModuleBase module) : Components.Voidzone(module, 4f, Get
     private static List<Actor> GetVoidzones(ModuleBase module) => module.Enemies((uint)OID.Pheromones);
 }
 
-sealed class DeadLeaves(ModuleBase module) : Components.GenericAOEs(module, default, "Go to different color!")
-{
-    private BitMask _tenderStatuses;
-    private BitMask _jealousStatuses;
-    private readonly List<AOEInstance> _tenderAOEs = [];
-    private readonly List<AOEInstance> _jealousAOEs = [];
-
-    private static readonly AOEShapeCone _shape = new(30f, 45f.Degrees());
-
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
-    {
-        return CollectionsMarshal.AsSpan(_tenderStatuses[slot] ? _tenderAOEs : _jealousStatuses[slot] ? _jealousAOEs : []);
-    }
-
-    public override void OnStatusGain(Actor actor, ref ActorStatus status)
-    {
-        switch (status.ID)
-        {
-            case (uint)SID.TenderAnaphylaxis:
-                _tenderStatuses[Raid.FindSlot(actor.InstanceID)] = true;
-                break;
-            case (uint)SID.JealousAnaphylaxis:
-                _jealousStatuses[Raid.FindSlot(actor.InstanceID)] = true;
-                break;
-        }
-    }
-
-    public override void OnStatusLose(Actor actor, ref ActorStatus status)
-    {
-        switch (status.ID)
-        {
-            case (uint)SID.TenderAnaphylaxis:
-                _tenderStatuses[Raid.FindSlot(actor.InstanceID)] = false;
-                break;
-            case (uint)SID.JealousAnaphylaxis:
-                _jealousStatuses[Raid.FindSlot(actor.InstanceID)] = false;
-                break;
-        }
-    }
-
-    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
-    {
-        List<AOEInstance>? CastersForAction(ActionID action) => action.ID switch
-        {
-            (uint)AID.TenderAnaphylaxis => _tenderAOEs,
-            (uint)AID.JealousAnaphylaxis => _jealousAOEs,
-            _ => null
-        };
-        CastersForAction(spell.Action)?.Add(new(_shape, spell.LocXZ, spell.Rotation, Module.CastFinishAt(spell)));
-    }
-
-    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
-    {
-        if (spell.Action.ID is (uint)AID.TenderAnaphylaxis or (uint)AID.JealousAnaphylaxis)
-        {
-            _tenderAOEs.Clear();
-            _jealousAOEs.Clear();
-        }
-    }
-}
+// Tender and Jealous Anaphylaxis: four cones on a four-second cast, two of each colour. Two corrections, both
+// measured on the 2026-09-17 Peerifool recording.
+//
+// The width. Players were damaged up to 27 degrees off a cone's centre and spared from 31 degrees out: 60 degrees
+// wide, not the 90 the port drew. At 90 the four of them cover the arena and the dodge reports no safe spot at all.
+//
+// The colours. The port showed a player only its own colour's cones, keyed on the Tender/Jealous status. That status
+// is applied BY the hit and runs about nine seconds -- which expires on the very tick the next round lands. So at the
+// moment of damage nobody holds anything: 31 of 42 hits were on players holding no status, and the character here was
+// hit by a Tender cone while it had held Jealous through the whole cast. The colour decides nothing about who is
+// caught, so every cone is drawn for everybody.
+sealed class DeadLeaves(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.TenderAnaphylaxis, (uint)AID.JealousAnaphylaxis], new AOEShapeCone(30f, 30f.Degrees()));
 
 sealed class AnaphylacticShock(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AnaphylacticShock, new AOEShapeRect(30f, 1f));
 sealed class SplashBomb(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SplashBombAOE, 6f);

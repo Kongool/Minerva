@@ -631,6 +631,10 @@ public sealed class AIManager
             : this.PrioritisedTarget(pc)
             ?? (module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.Forbidden(boss) ? boss
             : this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } t ? t
+            // Trash, with nothing targeted: follow whatever is already fighting us, as BossmodReborn's AI does. Only
+            // reached without a module and without a target of one's own -- a boss fight keys on its primary actor,
+            // and anybody with a target keeps it.
+            : module == null ? this.EngagedTarget(pc)
             : null);
         return target != null && InTheFight(module, pc, target) ? target : null;
     }
@@ -645,29 +649,23 @@ public sealed class AIManager
     /// </summary>
     private Actor? PrioritisedTarget(Actor pc)
     {
-        var top = int.MinValue;
-        foreach (var e in this.hints.PotentialTargets)
-            if (e.Priority > AIHints.Enemy.PriorityInvincible && !e.Actor.IsDeadOrDestroyed)
-                top = Math.Max(top, e.Priority);
-        if (top <= 0)
-            return null;
-        Actor? best = null;
-        var bestDist = float.MaxValue;
-        foreach (var e in this.hints.PotentialTargets)
-        {
-            if (e.Priority != top || e.Actor.IsDeadOrDestroyed)
-                continue;
-            if (e.Actor.InstanceID == pc.TargetID)
-                return e.Actor;
-            var d = (e.Actor.Position - pc.Position).LengthSq();
-            if (d < bestDist)
-            {
-                bestDist = d;
-                best = e.Actor;
-            }
-        }
+        var best = this.hints.BestPrioritisedTarget(pc.Position, pc.TargetID, this.lastPrioritised);
+        this.lastPrioritised = best?.InstanceID ?? 0ul;
         return best;
     }
+
+    /// <summary>The enemy this picked last frame, so a tie between two mobs standing together stays where it was.</summary>
+    private ulong lastPrioritised;
+
+    /// <summary>What to walk to in trash when nothing is targeted: the nearest thing already in the fight.</summary>
+    private Actor? EngagedTarget(Actor pc)
+    {
+        var best = this.hints.BestEngagedTarget(pc.Position, pc.TargetID, this.lastEngaged);
+        this.lastEngaged = best?.InstanceID ?? 0ul;
+        return best;
+    }
+
+    private ulong lastEngaged;
 
     /// <summary>The module says not to attack this one (invincible, or forbidden outright): no uptime to regain on it.</summary>
     private bool Forbidden(Actor a)
@@ -1056,8 +1054,12 @@ public sealed class AIManager
     /// </summary>
     private bool BuildTrashHints(Actor pc)
     {
-        // a gaze is worth answering even when there is nothing on the ground to walk out of
-        if (!this.config.AutoHintsForTrash || this.autoHints is not { } guess || (guess.Count == 0 && guess.GazeCount == 0))
+        // Built every frame trash mode is on, whether or not anything is telegraphed. It used to stand down when the
+        // guesser had nothing to draw -- which is most of a trash pack -- and standing down meant no arena, no enemy
+        // list and no uptime goal, so the character simply stopped where it was. BossmodReborn and veyn's BossMod both
+        // keep a goal on the current target every frame, which is what makes them follow a mob around; this is the
+        // same thing, inside the leash that <see cref="InTheFight"/> already applies.
+        if (!this.config.AutoHintsForTrash || this.autoHints is not { } guess)
             return false;
 
         this.hints.Clear();
@@ -1084,8 +1086,17 @@ public sealed class AIManager
         // seconds is much the cheaper mistake.
         this.hints.WalkableGround = this.knownGround;
 
-        this.autoHints.AddForbiddenZones(this.hints);
-        this.autoHints.AddForbiddenDirections(this.hints, pc.Position);
+        // Who there is to fight. Nothing else fills this without a module, so the walk back to uptime had only the
+        // character's own game target to work from and modules' priority calls had nothing to act on. Enemies out of
+        // combat come in as undesirable, so this can never read as "go and pull that".
+        this.hints.SeedPotentialTargets(this.world.Actors);
+
+        if (guess.Count != 0 || guess.GazeCount != 0)
+        {
+            this.autoHints.AddForbiddenZones(this.hints);
+            this.autoHints.AddForbiddenDirections(this.hints, pc.Position);
+        }
+
         this.ApplyKnownVoids();
         return true;
     }

@@ -92,6 +92,10 @@ public sealed class WorldState
         ops.AddRange(this.Waymarks.CompareToInitial());
         ops.AddRange(this.Actors.CompareToInitial());
         ops.AddRange(this.Party.CompareToInitial());
+        // the dodge in progress: its rows are written only on change, so without this a steer already under way when
+        // a recording starts leaves no trace until it changes (Lost on the Wind, 2026-09-14)
+        if (this.LastDodge.Known)
+            ops.Add(new OpDodgeDecision(this.LastDodge));
         return ops;
     }
 
