@@ -201,14 +201,24 @@ public sealed class Polygon(WPos center, float radius, int edges, Angle rotation
     public readonly int Edges = edges;
     public readonly Angle Rotation = rotation;
 
+    private WPos[]? vertices;
+
+    /// <summary>
+    /// Built once and kept: the shape cannot change, and the pathfinder asks <see cref="Contains"/> for
+    /// every cell of the grid on every rung of every frame. Rebuilding meant 128 sine-cosine pairs and a
+    /// kilobyte of garbage per cell test -- 4 microseconds against a circle's 0.01, which is why a
+    /// critical engagement (whose arena is always a many-sided polygon) solved in 48ms and ran at 15fps.
+    /// </summary>
     private WPos[] Vertices()
     {
+        if (this.vertices != null)
+            return this.vertices;
         var n = Math.Max(this.Edges, 3);
         var pts = new WPos[n];
         var step = Angle.TwoPI / n;
         for (var i = 0; i < n; ++i)
             pts[i] = this.Center + new Angle(this.Rotation.Rad + step * i).ToDirection() * this.Radius;
-        return pts;
+        return this.vertices = pts;
     }
 
     public override bool Contains(WPos p) => InPolygon(this.Vertices(), p);
