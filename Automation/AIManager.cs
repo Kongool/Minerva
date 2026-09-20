@@ -38,6 +38,11 @@ public sealed class AIManager
     private bool turningForGaze;      // inside a turn episode: the log and the auto-attack stop fire on entry, not per frame
     private int gazeFaceIssues;       // how many times this episode re-issued the facing (a spin shows up as a big number)
     private DateTime gazeTurnStarted;
+    private SafeSpot lastSolve;           // the answer the pathfinder last gave, reused while it still stands
+    private DateTime lastSolveAt;
+    private ulong lastSolveZones;
+    private WPos lastSolvePlayer;
+    private bool haveLastSolve;
     private Angle gazeTurnFrom;      // facing when the episode opened, so a turn that never happened says so
     private Angle gazeTurnNow;       // facing this frame, for the same reason: EndGazeTurn has no actor to ask
     private ushort voidsZone;
@@ -208,7 +213,7 @@ public sealed class AIManager
                 this.hints.SecondsUntilDangerAt(pc.Position, now, margin),
                 horizon + lead);
 
-        this.Current = ArenaPathfinder.Solve(this.hints, now, horizonSeconds: horizon, safetyMargin: margin, goal: goal, moveSpeed: moveSpeed, clearanceLead: lead);
+        this.Current = this.SolveOrReuse(pc, now, horizon, margin, goal, moveSpeed, lead);
         // the hold has to judge safety on the same clock the solve did, or it keeps a target the solve rejected
         this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed);
         this.Current = this.RejectFloorless(pc, this.Current, now, margin, goal, horizon);
@@ -885,6 +890,72 @@ public sealed class AIManager
     /// where you look, so this runs alongside the pathfinder rather than through it. Turning is only
     /// issued when the current facing is actually unsafe, so a correct facing is never nudged.</para>
     /// </summary>
+    /// <summary>How long an unchanged answer may be reused before it is worked out again.</summary>
+    private const double ResolveInterval = 0.08d;
+
+    /// <summary>How far the character may drift from where a solve was made before it is redone.</summary>
+    private const float ResolveDrift = 1.5f;
+
+    /// <summary>
+    /// The pathfinder's answer, worked out afresh only when something that could change it has changed.
+    ///
+    /// <para>Solving is by far the most expensive thing Minerva does per frame, and it scales with the
+    /// square of the arena and the number of zones: Familiar Tactics, 2026-09-19, eight rolling puddles
+    /// publishing three lookahead sweeps each -- 36 zones over a 29.5y arena -- costs 31ms a frame, and
+    /// there are two clients on the machine. Re-deriving the same answer sixty times a second is what
+    /// makes a mechanic-heavy pull unplayable, not the answer itself.</para>
+    ///
+    /// <para>What forces a fresh solve is anything that can make the old one wrong: a zone appearing,
+    /// resolving or changing hands, the character drifting away from where the answer was worked out, or
+    /// the chosen spot no longer being safe. Failing all of those it is redone on a deadline anyway, so a
+    /// reused answer is never more than a fraction of a second old -- less than the clearance lead the
+    /// dodge already leaves itself, and far less than the frame it buys back.</para>
+    /// </summary>
+    private SafeSpot SolveOrReuse(Actor pc, DateTime now, float horizon, float margin, UptimeGoal? goal, float moveSpeed, float lead)
+    {
+        var zones = ZoneSignature(this.hints, now);
+        var reuse = this.haveLastSolve
+            && zones == this.lastSolveZones
+            && (now - this.lastSolveAt).TotalSeconds < ResolveInterval
+            && (pc.Position - this.lastSolvePlayer).LengthSq() < ResolveDrift * ResolveDrift
+            && !(this.lastSolve.Found && this.hints.InImminentDanger(this.lastSolve.Target, now.AddSeconds(horizon + lead), margin));
+
+        if (!reuse)
+        {
+            this.lastSolve = ArenaPathfinder.Solve(this.hints, now, horizonSeconds: horizon, safetyMargin: margin, goal: goal, moveSpeed: moveSpeed, clearanceLead: lead);
+            this.lastSolveAt = now;
+            this.lastSolveZones = zones;
+            this.lastSolvePlayer = pc.Position;
+            this.haveLastSolve = true;
+        }
+
+        return this.lastSolve;
+    }
+
+    /// <summary>
+    /// A cheap stand-in for "the danger has not changed": how many zones there are, roughly how long each
+    /// has left, and who owns it. It deliberately does not read the shapes, which are rebuilt every frame
+    /// and would never compare equal; a zone that only moves is caught by the deadline instead.
+    ///
+    /// <para>Time left, not the activation itself. Plenty of components stamp their activation from the
+    /// clock on every frame -- Familiar Tactics' puddles publish <c>World.FutureTime(1.5)</c> each time
+    /// they are asked -- so an absolute activation is a different number every frame and nothing would
+    /// ever match. Quarter-second buckets of the remaining time hold still for those, and still tick over
+    /// for a zone whose activation really is fixed, which is the one that needs re-deciding as it nears.</para>
+    /// </summary>
+    private static ulong ZoneSignature(AIHints hints, DateTime now)
+    {
+        var s = 1469598103934665603ul ^ (ulong)hints.ForbiddenZones.Count;
+        for (var i = 0; i < hints.ForbiddenZones.Count; ++i)
+        {
+            var z = hints.ForbiddenZones[i];
+            var left = Math.Clamp((z.Activation - now).TotalSeconds, -1d, 60d);
+            s = (s ^ (ulong)(long)(left * 4d + 8d)) * 1099511628211ul;
+            s = (s ^ z.Source) * 1099511628211ul;
+        }
+        return s;
+    }
+
     private void ResolveFacing(Actor pc, DateTime deadline)
     {
         this.gazeTurnNow = pc.Rotation;
