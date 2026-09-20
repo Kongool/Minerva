@@ -314,6 +314,15 @@ public sealed class AIHints
     public bool MustNotMove(DateTime now) => this.ActiveSpecialMode(now) is SpecialMode.Pyretic or SpecialMode.NoMovement;
 
     /// <summary>
+    /// True while standing still would punish -- the other half of a stop-and-go mechanic.
+    ///
+    /// <para>Shinryu Paradox hands out both icons at once and the dodge only ever answered the stop half:
+    /// the move half was recorded and dropped, so a character told to keep moving stood there, because
+    /// nothing about the ground it was on was dangerous.</para>
+    /// </summary>
+    public bool MustKeepMoving(DateTime now) => this.ActiveSpecialMode(now) == SpecialMode.Freezing;
+
+    /// <summary>
     /// When the next window that punishes acting begins, or null if none is known.
     /// <para>The boolean above is present tense, and a rotation that only reads present tense reacts one
     /// GCD too late: it has already committed a two-and-a-half second cast that resolves inside the

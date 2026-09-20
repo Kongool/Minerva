@@ -217,6 +217,7 @@ public sealed class AIManager
         // the hold has to judge safety on the same clock the solve did, or it keeps a target the solve rejected
         this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed);
         this.Current = this.RejectFloorless(pc, this.Current, now, margin, goal, horizon);
+        this.Current = this.KeepMoving(pc, now, margin, horizon + lead);
         this.HasSolution = true;
         this.ResolveFacing(pc, now.AddSeconds(horizon));
 
@@ -955,6 +956,63 @@ public sealed class AIManager
         }
         return s;
     }
+
+    /// <summary>How far a keep-moving step goes. Far enough that the character is unambiguously walking,
+    /// short enough that it stays in the pocket of floor the dodge already judged safe.</summary>
+    private const float PacingStep = 4f;
+
+    /// <summary>Where the last pacing step was sent, so the next one goes somewhere else.</summary>
+    private WPos pacingTarget;
+
+    /// <summary>
+    /// Walk on the spot when the mechanic punishes standing still.
+    ///
+    /// <para>This is the other half of a stop-and-go pair. The stop half has always worked, because
+    /// holding position is what the dodge does when told not to move; the move half was recorded as a
+    /// special mode and then ignored, so the character stood through it -- nothing about the ground was
+    /// dangerous, so the solve said stay, and standing is exactly what kills you.</para>
+    ///
+    /// <para>Only when the solve has nothing better to do: real danger still decides where to go, and a
+    /// dodge already under way is already movement. Steps are short and re-aimed as each is reached, and
+    /// every candidate is tested against the same danger and bounds the solve used -- pacing must not walk
+    /// anyone into an AOE to satisfy a debuff.</para>
+    /// </summary>
+    private SafeSpot KeepMoving(Actor pc, DateTime now, float margin, float lookahead)
+    {
+        if (!this.hints.MustKeepMoving(now) || this.Current.NeedToMove)
+            return this.Current;
+
+        var deadline = now.AddSeconds(lookahead);
+        var arrived = this.pacingTarget != default && (pc.Position - this.pacingTarget).LengthSq() < 1f;
+        if (this.pacingTarget != default && !arrived && this.Walkable(this.pacingTarget, deadline, margin))
+            return new SafeSpot { NeedToMove = true, Found = true, Target = this.pacingTarget };
+
+        // Eight headings, furthest-from-here first so the character actually travels rather than shuffling
+        // between two touching cells.
+        var best = default(WPos);
+        var bestScore = float.MinValue;
+        for (var i = 0; i < 8; ++i)
+        {
+            var candidate = pc.Position + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * PacingStep);
+            if (!this.Walkable(candidate, deadline, margin))
+                continue;
+            var score = this.pacingTarget == default ? 1f : (candidate - this.pacingTarget).Length();
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        if (bestScore == float.MinValue)
+            return this.Current;   // boxed in: standing still is bad, walking into an AOE is worse
+
+        this.pacingTarget = best;
+        return new SafeSpot { NeedToMove = true, Found = true, Target = best };
+    }
+
+    private bool Walkable(WPos p, DateTime deadline, float margin)
+        => this.hints.Bounds.Contains(this.hints.Center, p) && !this.hints.InImminentDanger(p, deadline, margin);
 
     private void ResolveFacing(Actor pc, DateTime deadline)
     {

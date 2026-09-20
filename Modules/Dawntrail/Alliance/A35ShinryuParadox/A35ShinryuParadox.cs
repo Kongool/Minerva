@@ -248,6 +248,11 @@ class TwilightNebula(ModuleBase module) : FloorAOE(module, (uint)AID.TwilightNeb
         {
             NumCasts++;
             Casters.Clear();
+
+            // The debuffs are handed out afresh each round and a player can be sent the other way the
+            // second time. Keeping the first round assignment would then send them to the floor that
+            // kills them, with the module sounding as confident as ever.
+            Array.Fill(colors, -1);
         }
     }
 }
@@ -260,69 +265,67 @@ class StarflareTimeGroups(ModuleBase module) : Components.SimpleAOEGroupsByTimew
     [(uint)AID.StarflareP1Fast, (uint)AID.StarflareP1Slow], new AOEShapeRect(60, 5), expectedNumCasters: 5);
 
 // Icon to look at the boss
-class VortexLook(ModuleBase module) : Components.GenericGaze(module)
+/// <summary>
+/// Cataclysmic Vortex marks each player with one of two icons: look at the boss, or look away from it.
+///
+/// <para>The ported pair of components never filled the list they read, so <c>ActiveEyes</c> always
+/// returned nothing and neither half ever fired -- the fight has been running with no gaze at all. They
+/// are one component now, as upstream has it, because the two icons are one mechanic and the eye is the
+/// same boss either way; only which way you face it differs. The eye is taken at the boss position when
+/// the icon lands, so a boss that drifts afterwards does not drag the required facing with it.</para>
+/// </summary>
+class VortexGaze(ModuleBase module) : Components.GenericGaze(module)
 {
-    private DateTime _activation;
-    private readonly List<Actor> _affected = [];
+    /// <summary>Icon to resolution, measured upstream.</summary>
+    private const double Delay = 7.1d;
+
+    private readonly bool[] look = new bool[PartyState.MaxAllies];
+    private readonly bool[] lookAway = new bool[PartyState.MaxAllies];
+    private Eye[] eyeLook = [];
+    private Eye[] eyeLookAway = [];
 
     public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
     {
-        var count = _affected.Count;
-
-        if (count == 0 || World.CurrentTime < _activation.AddSeconds(-10d))
+        if (slot < 0 || slot >= this.look.Length)
             return [];
-        var eyes = new Eye[count];
-        for (var i = 0; i < count; ++i)
-            // inverted: true to look towards the eye.
-            eyes[i] = new(_affected[i].Position, _activation, inverted: true);
-        return eyes;
+        if (this.look[slot])
+            return this.eyeLook;
+        if (this.lookAway[slot])
+            return this.eyeLookAway;
+        return [];
     }
 
     public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
     {
-        if ((IconID)iconID == IconID.Look)
+        switch ((IconID)iconID)
         {
-            _activation = World.FutureTime(7);
+            case IconID.Look:
+                Mark(this.look, ref this.eyeLook, inverted: true);
+                break;
+            case IconID.NoLook:
+                Mark(this.lookAway, ref this.eyeLookAway, inverted: false);
+                break;
+        }
+
+        void Mark(bool[] marked, ref Eye[] eye, bool inverted)
+        {
+            var slot = Raid.FindSlot(actor.InstanceID);
+            if (slot >= 0 && slot < marked.Length)
+                marked[slot] = true;
+            if (eye.Length == 0)
+                eye = [new(Module.PrimaryActor.Position.Quantized(), World.FutureTime(Delay), inverted: inverted)];
         }
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if ((AID)spell.Action.ID is AID.CataclysmicVortexVisual1 or AID.CataclysmicBladeVisual)
-            _affected.Clear();
-    }
-}
-
-// Icon to look away from the boss
-class VortexNoLook(ModuleBase module) : Components.GenericGaze(module)
-{
-    private DateTime _activation;
-    private readonly List<Actor> _affected = [];
-
-    public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
-    {
-        var count = _affected.Count;
-
-        if (count == 0 || World.CurrentTime < _activation.AddSeconds(-10d))
-            return [];
-        var eyes = new Eye[count];
-        for (var i = 0; i < count; ++i)
-            eyes[i] = new(_affected[i].Position, _activation);
-        return eyes;
-    }
-
-    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
-    {
-        if ((IconID)iconID == IconID.NoLook)
         {
-            _activation = World.FutureTime(7);
+            Array.Clear(this.look);
+            Array.Clear(this.lookAway);
+            this.eyeLook = [];
+            this.eyeLookAway = [];
         }
-    }
-
-    public override void OnEventCast(Actor caster, ActorCastEvent spell)
-    {
-        if ((AID)spell.Action.ID is AID.CataclysmicVortexVisual1 or AID.CataclysmicBladeVisual)
-            _affected.Clear();
     }
 }
 
@@ -541,8 +544,7 @@ class A35ShinryuParadoxStates : StateMachineBuilder
             .ActivateOnEnter<TwilightNebula>()
             .ActivateOnEnter<StarflareTimeGroups>()
             .ActivateOnEnter<VortexStayMove>()
-            .ActivateOnEnter<VortexLook>()
-            .ActivateOnEnter<VortexNoLook>()
+            .ActivateOnEnter<VortexGaze>()
             .ActivateOnEnter<UpDownCounter>()
             .ActivateOnEnter<DarkNova>()
             .ActivateOnEnter<CelestialTrail>()
