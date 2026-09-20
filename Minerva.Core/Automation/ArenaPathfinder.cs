@@ -23,7 +23,7 @@ public enum Positional
 /// <para>Bundled rather than passed loose because these four always travel together, and a solver taking
 /// four bare positional arguments invites the caller to transpose two of them.</para>
 /// </summary>
-public readonly record struct UptimeGoal(WPos Target, Angle Rotation, float Range, Positional Positional = Positional.Any, float BoundaryMarginDeg = 15f)
+public readonly record struct UptimeGoal(WPos Target, Angle Rotation, float Range, Positional Positional = Positional.Any, float BoundaryMarginDeg = 15f, float MinRange = 0f)
 {
     // the two lines that separate the three sides, measured off the target's facing
     private const float FrontFlankEdge = 45f;
@@ -43,13 +43,38 @@ public readonly record struct UptimeGoal(WPos Target, Angle Rotation, float Rang
     public static float ReachFor(Role role) => role is Role.Tank or Role.Melee ? MeleeReach : RangedReach;
 
     /// <summary>
+    /// How far a backline job wants to stay OFF the hitbox. Uptime used to be a band with no floor, so standing on
+    /// top of the boss satisfied it as well as standing at range did: nothing walked a caster back out once a dodge,
+    /// a knockback or another plugin had put it there, and under the boss every centred AOE nudges you again -- the
+    /// user's report, 2026-09-19, was a Pictomancer at zero taking micro-adjustments and casting nothing.
+    /// <para>Off by default: a caster under the boss is still in range, and how much that costs depends on the fight
+    /// and on who else is standing there.</para>
+    /// </summary>
+    public const float MaxBacklineStandoff = 3f;
+
+    /// <summary>
+    /// The smallest standoff worth asking for. Under a yalm the character is still effectively on the hitbox and
+    /// every action needs the same hand-holding it did at zero (the user, 2026-09-19), so anything between the two is
+    /// rounded up rather than offered: the setting is off, or it is at least this.
+    /// </summary>
+    public const float MinBacklineStandoff = 1f;
+
+    /// <summary>What this role keeps between itself and the target's hitbox at the near side. Melee hug regardless:
+    /// their range IS the hitbox.</summary>
+    public static float FloorFor(Role role, float standoff)
+        => role is Role.Tank or Role.Melee || standoff <= 0f
+            ? 0f
+            : Math.Clamp(standoff, MinBacklineStandoff, MaxBacklineStandoff);
+
+    /// <summary>
     /// The goal for keeping a given player useful against a given target.
     /// <para>Roles do not share a definition of uptime, and treating them as if they did is what drags a
     /// Black Mage into a boss's melee band to shave a yard off a dodge. An unknown role is treated as
     /// ranged: standing too far back costs damage, standing too close costs the pull.</para>
     /// </summary>
-    public static UptimeGoal For(Actor target, Role role, Positional positional = Positional.Any, float boundaryMarginDeg = 15f)
-        => new(target.Position, target.Rotation, target.HitboxRadius + ReachFor(role), positional, boundaryMarginDeg);
+    public static UptimeGoal For(Actor target, Role role, Positional positional = Positional.Any, float boundaryMarginDeg = 15f, float backlineStandoff = 0f)
+        => new(target.Position, target.Rotation, target.HitboxRadius + ReachFor(role), positional, boundaryMarginDeg,
+            FloorFor(role, backlineStandoff) is var floor && floor > 0f ? target.HitboxRadius + floor : 0f);
 
     /// <summary>
     /// How far outside the useful band this point is, in yalms. Zero anywhere inside it.
@@ -60,8 +85,10 @@ public readonly record struct UptimeGoal(WPos Target, Angle Rotation, float Rang
     /// </summary>
     public float ExcessRange(WPos p)
     {
-        var d = (p - this.Target).Length() - this.Range;
-        return d > 0f ? d : 0f;
+        var d = (p - this.Target).Length();
+        if (d > this.Range)
+            return d - this.Range;
+        return d < this.MinRange ? this.MinRange - d : 0f;   // too close is out of position too, for a backline job
     }
 
     /// <summary>
@@ -454,7 +481,8 @@ public static class ArenaPathfinder
     {
         if (goal is not { } g || g.Range <= 0f)
             return SafeSpot.Stay;
-        if ((player - g.Target).Length() <= g.Range && g.Satisfied(player))
+        var standing = (player - g.Target).Length();
+        if (standing <= g.Range && standing >= g.MinRange && g.Satisfied(player))
             return SafeSpot.Stay;
 
         // Two passes rather than a penalty. Returning to the boss is a walk we are making anyway, and the
@@ -468,9 +496,14 @@ public static class ArenaPathfinder
         // extra arc at melee radius. Measured on a samurai switching rear to flank, the nearest-on-side
         // pass parked it one cell past the border, and the boss's next turn put it back on the rear. The
         // nearest cell past the floor is still what wins, so the switch stays as short as the floor allows.
-        var pick = Nearest(hints, deadline, player, cellSize, margin, g, SideRule.Inside)
-            ?? Nearest(hints, deadline, player, cellSize, margin, g, SideRule.OnSide)
-            ?? Nearest(hints, deadline, player, cellSize, margin, g, SideRule.Any);
+        // Walking out of the boss's lap aims past the floor rather than at it. The nearest cell that satisfies a
+        // floor sits exactly on it, and the boss taking one step then puts the character back inside -- which is the
+        // micro-adjustment loop a caster cannot cast through (reported 2026-09-19). Only when walking out: coming
+        // back from too far away still stops at the first cell that restores the band.
+        var aim = standing < g.MinRange ? g with { MinRange = g.MinRange + FloorHysteresis } : g;
+        var pick = Nearest(hints, deadline, player, cellSize, margin, aim, SideRule.Inside)
+            ?? Nearest(hints, deadline, player, cellSize, margin, aim, SideRule.OnSide)
+            ?? Nearest(hints, deadline, player, cellSize, margin, aim, SideRule.Any);
         if (pick is not { } back)
             return SafeSpot.Stay;
 
@@ -486,6 +519,11 @@ public static class ArenaPathfinder
     }
 
     /// <summary>How strictly a regain pass reads the positional.</summary>
+    /// <summary>How far past the floor to stand when stepping out of it, so the next step the boss takes does not
+    /// put the character back inside and start the walk again. Kept to a yalm: the floor is already close in, and
+    /// the point is to stop the twitching, not to walk anybody across the arena.</summary>
+    private const float FloorHysteresis = 1f;
+
     private enum SideRule
     {
         Any,
@@ -506,8 +544,9 @@ public static class ArenaPathfinder
             for (var z = center.Z - reach; z <= center.Z + reach; z += cellSize)
             {
                 var p = new WPos(x, z);
-                if ((p - g.Target).Length() > g.Range)
-                    continue;                                  // only cells that actually restore range
+                var reachOf = (p - g.Target).Length();
+                if (reachOf > g.Range || reachOf < g.MinRange)
+                    continue;                                  // only cells that actually restore the band
                 if (rule == SideRule.OnSide && !g.Satisfied(p))
                     continue;
                 if (rule == SideRule.Inside && !g.SatisfiedInside(p))

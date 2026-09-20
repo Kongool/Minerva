@@ -38,6 +38,8 @@ public sealed class AIManager
     private bool turningForGaze;      // inside a turn episode: the log and the auto-attack stop fire on entry, not per frame
     private int gazeFaceIssues;       // how many times this episode re-issued the facing (a spin shows up as a big number)
     private DateTime gazeTurnStarted;
+    private Angle gazeTurnFrom;      // facing when the episode opened, so a turn that never happened says so
+    private Angle gazeTurnNow;       // facing this frame, for the same reason: EndGazeTurn has no actor to ask
     private ushort voidsZone;
     private WPos? committedTarget;
     private DateTime committedAt;
@@ -174,7 +176,7 @@ public sealed class AIManager
         // scoring both against melee reach is what walks a caster into the boss to save a yard of travel.
         var target = this.UptimeTarget(module, pc);
         UptimeGoal? goal = target != null
-            ? UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f))
+            ? UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.config.CasterStandoff)
             : null;
         // A zone hazard adds to an encounter rather than replacing it, so this runs after the boss
         // module has filled its zones -- and runs even when there is no boss, which is the whole point:
@@ -885,6 +887,8 @@ public sealed class AIManager
     /// </summary>
     private void ResolveFacing(Actor pc, DateTime deadline)
     {
+        this.gazeTurnNow = pc.Rotation;
+
         if (this.hints.ForbiddenDirections.Count == 0)
         {
             this.EndGazeTurn();
@@ -922,6 +926,7 @@ public sealed class AIManager
             this.turningForGaze = true;
             this.gazeFaceIssues = 0;
             this.gazeTurnStarted = this.world.CurrentTime;
+            this.gazeTurnFrom = pc.Rotation;
             Service.Log.Information($"Minerva gaze: turning away from {this.hints.ForbiddenDirections.Count} arc(s) to {facing.Deg:0} degrees ({(gazesHit > 0 ? $"no clear heading, {gazesHit} still on us" : "clear heading")}).");
         }
 
@@ -943,7 +948,8 @@ public sealed class AIManager
             return;
         this.turningForGaze = false;
         var held = (this.world.CurrentTime - this.gazeTurnStarted).TotalSeconds;
-        Service.Log.Information($"Minerva gaze: facing released after {held:0.0}s; the heading was re-issued {this.gazeFaceIssues} time(s).");
+        var turned = Math.Abs((this.gazeTurnNow - this.gazeTurnFrom).Normalized().Deg);
+        Service.Log.Information($"Minerva gaze: facing released after {held:0.0}s; the heading was re-issued {this.gazeFaceIssues} time(s) and the character turned {turned:0} degree(s).");
     }
 
     /// <summary>

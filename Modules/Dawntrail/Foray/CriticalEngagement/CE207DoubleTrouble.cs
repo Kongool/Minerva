@@ -102,31 +102,26 @@ sealed class DualCut(ModuleBase module) : Components.GenericAOEs(module)
             {
                 var isFirst = id == (uint)AID.DualCut1;
                 var c1 = caster1.Value;
-                AddAOE(isFirst ? pos : c1.Item1, isFirst ? rot : c1.Item2, isFirst ? act : c1.Item3, false);
-                AddAOE(isFirst ? c1.Item1 : pos, isFirst ? c1.Item2 : rot, isFirst ? c1.Item3 : act, true);
+                AddAOE(isFirst ? pos : c1.Item1, isFirst ? rot : c1.Item2, isFirst ? act : c1.Item3);
+                AddAOE(isFirst ? c1.Item1 : pos, isFirst ? c1.Item2 : rot, isFirst ? c1.Item3 : act);
                 caster1 = null;
             }
         }
-        void AddAOE(WPos position, Angle rotation, DateTime activation, bool isSecond)
+        // BossmodReborn pushes the second cone 5y along its own facing and pulls it back once the first
+        // lands, for a boss that closes the distance between the cuts. This one does not move: both casts
+        // report the same origin, and the guessed offset carved a safe-looking pocket behind the apex.
+        // Double Trouble, 2026-09-19: Saar stood in that pocket, took the cut it said was clear, and died
+        // to the pair. Both halves are drawn where the cast says they land.
+        void AddAOE(WPos position, Angle rotation, DateTime activation)
         {
-            var pos2 = isSecond ? position + 5f * rotation.ToDirection() : position;
-            _aoes.Add(new(cone, pos2, rotation, activation, shapeDistance: cone.Distance(pos2, rotation)));
+            _aoes.Add(new(cone, position, rotation, activation, shapeDistance: cone.Distance(position, rotation)));
         }
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
-        if (_aoes.Count is var count && count != 0 && spell.Action.ID is (uint)AID.DualCut1 or (uint)AID.DualCut2)
-        {
+        if (_aoes.Count != 0 && spell.Action.ID is (uint)AID.DualCut1 or (uint)AID.DualCut2)
             _aoes.RemoveAt(0);
-            if (count == 2)
-            {
-                ref var aoe2 = ref _aoes.Ref(0);
-                var rot = aoe2.Rotation;
-                aoe2.Origin -= 5f * rot.ToDirection();
-                aoe2.ShapeDistance = cone.Distance(aoe2.Origin, rot);
-            }
-        }
     }
 }
 

@@ -136,6 +136,17 @@ t.Section("WorldState op stream");
     t.Near("cast elapsed ~3s after 3 frames", bossActor.CastInfo!.ElapsedTime, 3f, 0.001f);
     t.Near("cast remaining ~2s", bossActor.CastInfo!.RemainingTime, 2f, 0.001f);
 
+    // a hitching client re-reports the same cast with the progress jumped forward -- the sync sends a
+    // fresh cast-info for it, and treating that as a second cast start makes every component draw its
+    // zone twice. Double Trouble, 2026-09-19: one Dual Cut pair arrived three times at 15 fps.
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(36158u), TargetID = player, TotalTime = 5f, ElapsedTime = 3.6f, Rotation = bossActor.Rotation }));
+    t.Eq("a jumped elapsed time is the same cast, not a new one", castStarted, 1);
+    t.Near("the jump is taken", bossActor.CastInfo!.ElapsedTime, 3.6f, 0.001f);
+
+    // the same action starting over does announce itself: the progress goes back to the beginning
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(36158u), TargetID = player, TotalTime = 5f, ElapsedTime = 0f, Rotation = bossActor.Rotation }));
+    t.Eq("a restarted cast is a new cast", castStarted, 2);
+
     // cast resolves: fire snapshot event, then clear cast
     ws.Execute(new ActorState.OpCastEvent(boss, new ActorCastEvent(ActionID.MakeSpell(36158u), player, bossActor.Rotation, new Vector3(100, 0, 100), 42)));
     ws.Execute(new ActorState.OpCastInfo(boss, null));
@@ -659,6 +670,41 @@ t.Section("Auto-dodge pathfinding");
         var back = new AIHints { Center = boss, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = knocked };
         var target = new Actor(0x20, 32, 0, "boss", 0, ActorType.Enemy, new Vector4(boss.X, 0f, boss.Z, 0f));
         var melee = UptimeGoal.For(target, Role.Melee);
+
+        // A backline job standing on top of the boss used to satisfy uptime as well as standing at range did, so
+        // nothing walked it back out once a dodge, a knockback or another plugin had put it there -- and under the
+        // boss every centred AOE nudges it again, which is a caster casting nothing (user, 2026-09-19: "PCT is
+        // standing under the mob", "once at 0 micro adjustments cause no dps").
+        {
+            var hitbox = target.HitboxRadius;
+            var caster = UptimeGoal.For(target, Role.Ranged, backlineStandoff: 1f);
+            t.Eq("the standoff is off unless asked for", UptimeGoal.For(target, Role.Ranged).MinRange, 0f);
+            t.Eq("under a yalm is rounded up to one, not honoured as it is",
+                UptimeGoal.FloorFor(Role.Ranged, 0.4f), UptimeGoal.MinBacklineStandoff);
+            t.Eq("and it never exceeds the maximum", UptimeGoal.FloorFor(Role.Ranged, 99f), UptimeGoal.MaxBacklineStandoff);
+            t.Eq("melee never keep a standoff, whatever it is set to", UptimeGoal.FloorFor(Role.Melee, 3f), 0f);
+            t.True($"a caster's band has a floor ({caster.MinRange:0.0}y) and a ceiling ({caster.Range:0.0}y)",
+                caster.MinRange > hitbox && caster.Range > caster.MinRange + 5f);
+            t.Near("the floor sits that far off the hitbox", caster.MinRange - hitbox, 1f);
+            t.Eq("melee has no floor", UptimeGoal.For(target, Role.Melee).MinRange, 0f);
+            t.True("standing on the boss is out of position for a caster", caster.ExcessRange(boss) > 0f);
+            t.True("and in position for melee", melee.ExcessRange(boss) == 0f);
+
+            SafeSpot Walk(WPos from, UptimeGoal g)
+            {
+                var h = new AIHints { Center = boss, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = from };
+                return ArenaPathfinder.Solve(h, now, goal: g, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+            }
+
+            var under = Walk(boss + new WDir(0.5f, 0f), caster);
+            var outTo = (under.Target - boss).Length();
+            t.True($"a caster under the boss walks back out (to {outTo:0.0}y, floor {caster.MinRange:0.0})",
+                under.NeedToMove && under.Found && outTo >= caster.MinRange);
+            t.True($"and stands past the floor, not on it, so the boss's next step does not start it again ({outTo:0.0} vs {caster.MinRange:0.0})",
+                outTo >= caster.MinRange + 0.9f);
+            t.True("a caster already at range stays", !Walk(boss + new WDir(0f, 11f), caster).NeedToMove);
+            t.True("a melee on the boss stays", !Walk(boss + new WDir(0.5f, 0f), melee).NeedToMove);
+        }
 
         // nothing in the way: walk back
         // Which enemy to be on, in trash. Veyn's BossMod counts anything within three yalms as equally close and breaks
@@ -2935,9 +2981,10 @@ t.Section("Uptime is a band, not a point");
     t.Near("a big hitbox pushes melee range out with it", UptimeGoal.For(fatBoss, Role.Melee).Range, 10.6f);
     t.Near("and ranged too", UptimeGoal.For(fatBoss, Role.Ranged).Range, 23f);
 
-    // inside the band every cell is equally good for uptime, so the dodge spends its budget on safety
+    // inside the band every cell is equally good for uptime, so the dodge spends its budget on safety. This goal is
+    // built by hand and so has no floor; the one UptimeGoal.For gives a backline job does (see the caster tests).
     var caster = new UptimeGoal(boss, default, 15f);
-    t.Near("dead on the boss is inside a caster's band", caster.ExcessRange(boss), 0f);
+    t.Near("with no floor, dead on the boss is inside a caster's band", caster.ExcessRange(boss), 0f);
     t.Near("so is 14 yalms out", caster.ExcessRange(new WPos(0f, 14f)), 0f);
     t.Near("the band edge is still inside it", caster.ExcessRange(new WPos(0f, 15f)), 0f);
     t.Near("and 20 yalms is five outside", caster.ExcessRange(new WPos(0f, 20f)), 5f);

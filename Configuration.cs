@@ -148,6 +148,11 @@ public sealed class Configuration : IPluginConfiguration
     /// open-field content. Your own character and party are kept. On by default.</summary>
     public bool RecordExcludeOtherPlayers { get; set; } = true;
 
+    /// <summary>How far a backline job (caster, ranged, healer) keeps off the target's hitbox, in yalms. Zero -- the
+    /// default -- lets them stand wherever uptime allows, including on top of the boss; up to three walks them back
+    /// out when something puts them under it.</summary>
+    public float CasterStandoff { get; set; }
+
     /// <summary>The main window was last left in its compact state, so the next open returns to it.</summary>
     public bool MiniWindowActive { get; set; }
 

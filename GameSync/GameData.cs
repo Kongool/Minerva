@@ -8,6 +8,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.InstanceContent;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.System.Framework;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
 
 namespace Minerva.GameSync;
@@ -250,7 +251,21 @@ internal static unsafe class GameData
         var (sin, cos) = MathF.SinCos(directionRad);
         var pos = obj->Position;
         var target = new Vector3(pos.X + sin, pos.Y, pos.Z + cos);
+
+        // The routine is the game's own "turn to face what you are about to hit", and it checks the
+        // character config for it before doing anything. With "Automatically face target when using an
+        // action" switched off -- which is how these characters are set up -- the call returns having done
+        // nothing at all. Eye to Eye, 2026-09-19: a stationary character was handed a heading every frame
+        // for 4.9 seconds and rotated 0.0 degrees, on two boxes independently, and was petrified for it.
+        // Turn the option on for the one call and put it back, as BossmodReborn does around the same call.
+        var fwk = Framework.Instance();
+        var option = fwk != null ? fwk->SystemConfig.GetConfigOption((uint)ConfigOption.AutoFaceTargetOnAction) : null;
+        var wasOn = option != null ? option->Value.UInt : 0u;
+        if (option != null)
+            option->Value.UInt = 1u;
         am->AutoFaceTargetPosition(&target);
+        if (option != null)
+            option->Value.UInt = wasOn;
         // The routine only sets the facing; the game keeps interpolating rotation toward its own desired
         // rotation -- for a melee, the target it is hitting -- and turns the character back next frame.
         // Eye to Eye, 2026-09-05: five seconds facing the boss through See No Evil, petrified, and the log

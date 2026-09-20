@@ -328,10 +328,26 @@ public sealed class ActorState : IEnumerable<Actor>
             var prev = actor.CastInfo;
             actor.CastInfo = this.Value;
             if (this.Value != null)
-                ws.Actors.CastStarted.Fire(actor);
+            {
+                // A cast whose progress jumps -- a hitched frame, or the server correcting the elapsed
+                // time -- arrives as a fresh cast-info for a cast already in flight. Firing CastStarted
+                // for it makes every component add its zone a second time. Double Trouble, 2026-09-19:
+                // one Dual Cut pair arrived three times, so six 60y half-planes covered the arena, four
+                // of them never cleared because only two cast events came back to remove them, and the
+                // pair-matching lost which cone was which. The same cast is the same action at the same
+                // target for the same length, with progress that has not gone backwards; a genuine
+                // re-cast resets the elapsed time, and a finished one clears the cast info first.
+                if (prev == null || !SameCast(prev, this.Value))
+                    ws.Actors.CastStarted.Fire(actor);
+            }
             else if (prev != null)
                 ws.Actors.CastFinished.Fire(actor, prev);
         }
+
+        private static bool SameCast(ActorCastInfo before, ActorCastInfo now)
+            => before.Action == now.Action && before.TargetID == now.TargetID
+            && Math.Abs(before.TotalTime - now.TotalTime) < 0.01f
+            && now.ElapsedTime >= before.ElapsedTime - 0.2f;
         public override void Write(OperationOutput o)
         {
             if (this.Value is { } c)
