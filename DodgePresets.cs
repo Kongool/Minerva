@@ -159,6 +159,31 @@ public sealed class DodgePresets(Configuration config)
     }
 
     /// <summary>
+    /// Turn auto-dodge on for a plugin that is driving, and off again.
+    /// <para>The slot's rule applies unchanged: turning it on claims the slot, a plugin cannot take it from
+    /// another that already holds it, and turning it off is <see cref="Release"/> — so the user's Default
+    /// comes back rather than whatever the driver happened to leave behind.</para>
+    /// <para>This exists because a duty runner wants one thing ("fight this, then stop") and has nothing to
+    /// say about clearance or positional arcs. Making it name a preset would force every caller to create
+    /// one in Minerva first, and a caller that writes <c>AutoDodgeEnabled</c> directly is indistinguishable
+    /// from the user's own config drifting, which is the thing the owned slot exists to prevent.</para>
+    /// </summary>
+    public bool SetAutoDodge(string owner, bool on)
+    {
+        if (string.IsNullOrWhiteSpace(owner))
+            return false;
+        if (!on)
+            return this.Release(owner);
+        if (this.Owner is { } held && !string.Equals(held, owner, StringComparison.Ordinal))
+            return false; // someone else is driving; two managers fighting over the slot is the failure mode
+
+        this.Owner = owner;
+        this.config.AutoDodgeEnabled = true;
+        this.config.Save();
+        return true;
+    }
+
+    /// <summary>
     /// Give the slot back. Only the holder may release it: a caller that has already been superseded must
     /// not undo whatever replaced it, or two managers end up fighting over the slot several times a second.
     /// </summary>

@@ -75,6 +75,8 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<string> activePreset;
     private readonly ICallGateProvider<string, string, bool> applyPreset;
     private readonly ICallGateProvider<string, bool> releasePreset;
+    private readonly ICallGateProvider<string, bool, bool> setAutoDodge;
+    private readonly ICallGateProvider<bool> isAutoDodgeEnabled;
 
     public MinervaIpc(IDalamudPluginInterface pi, AIManager ai, Modules.ModuleManager modules, DodgePresets presets)
     {
@@ -252,6 +254,17 @@ internal sealed class MinervaIpc : IDisposable
         // only the holder may release, so a superseded caller cannot undo whatever replaced it
         this.releasePreset = pi.GetIpcProvider<string, bool>("Minerva.ReleasePreset");
         this.releasePreset.RegisterFunc(presets.Release);
+
+        // The whole preset for callers that have an opinion about clearance; this for the ones that do not.
+        // A duty runner (Odysseus) wants "fight this, then stop" and nothing more, and making it name a
+        // preset would force it to create one in Minerva first. Same ownership either way: true means the
+        // slot is ours now, false means someone else is driving, and off hands the slot back.
+        this.setAutoDodge = pi.GetIpcProvider<string, bool, bool>("Minerva.SetAutoDodge");
+        this.setAutoDodge.RegisterFunc((owner, on) => presets.SetAutoDodge(owner, on));
+
+        // So a caller can verify by re-reading rather than trusting its own return value.
+        this.isAutoDodgeEnabled = pi.GetIpcProvider<bool>("Minerva.IsAutoDodgeEnabled");
+        this.isAutoDodgeEnabled.RegisterFunc(() => presets.Current().AutoDodgeEnabled);
     }
 
     /// <summary>Republish the per-frame flags. Called once per framework tick, after the AI update.</summary>
@@ -268,6 +281,8 @@ internal sealed class MinervaIpc : IDisposable
         this.mustNotAct[0] = false;
         this.mustNotMove[0] = false;
         this.mustNotTurn[0] = false;
+        this.setAutoDodge.UnregisterFunc();
+        this.isAutoDodgeEnabled.UnregisterFunc();
         this.isConnected.UnregisterFunc();
         this.mustNotActGate.UnregisterFunc();
         this.mustNotMoveGate.UnregisterFunc();
