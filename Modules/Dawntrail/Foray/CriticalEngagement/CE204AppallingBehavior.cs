@@ -343,7 +343,26 @@ sealed class CE204AppallingBehaviorStates : StateMachineBuilder
 
 [ModuleInfo(Group = ModuleGroup.CriticalEngagement, CFCID = 1093u, NameID = 59u, PrimaryActorOID = (uint)OID.Pallmagia, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Gynorhino (ported from BMR)")]
 [SkipLocalsInit]
-public sealed class CE204AppallingBehavior(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(807f, -562f).Quantized(), new ArenaBoundsCircle(20f))
+public sealed class CE204AppallingBehavior(WorldState ws, Actor primary)
+    : ModuleBase(ws, primary, new WPos(807f, -562f).Quantized(), new ArenaBoundsCircle(SafeRadius))
 {
+    /// <summary>
+    /// The floor the dodge may use, which is deliberately smaller than the ring BossmodReborn draws.
+    ///
+    /// <para>The boundary here is not scenery: actor 0x4D91 sits at the centre and pulses Deathwall
+    /// (49771) about once a second for the whole fight, and it kills. 2026-09-19, one pull, three deaths:
+    /// a toon stood still at 19.0y for a second and a half and was killed; the same toon had stood at
+    /// 19.8y a minute earlier through two pulses and lived; a third died at 21.6y. No circle centred
+    /// anywhere fits those three, so the true edge is not the 20y ring either fork assumes -- and at 20y
+    /// the dodge was parking people with no margin at all against an instant kill.</para>
+    ///
+    /// <para>Eighteen is a yalm inside the closest death we have seen and still inside every part of the
+    /// ground the party actually walked. Where a boundary is guessed, guess it toward more danger: the
+    /// cost of being wrong is a lost yalm of uptime one way and a corpse the other.</para>
+    /// </summary>
+    private const float SafeRadius = 18f;
+
+    /// <summary>Activation is judged against the real ring, not the shrunken floor: someone standing at
+    /// 19y when the engagement starts is in this fight and needs the module.</summary>
     protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InCircle(Module.Center, 20f);
 }

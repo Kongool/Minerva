@@ -77,6 +77,20 @@ public sealed class MiniWindow : Window
             this.plugin.ToggleRecording(showRecord: false);
         UiKit.Tip(recording ? "Stop recording and analyse it." : "Start recording this fight.");
 
+        // The one setting that can start a recording on its own, next to the button it arms: minimised to
+        // this window is exactly when a recording gets started or missed without anyone opening the Record
+        // page to check.
+        ImGui.SameLine(0f, 8f);
+        var auto = cfg.AutoRecordEncounters;
+        if (UiKit.Toggle("Auto", auto, UiKit.Alpha(UiKit.Red, 0.18f), UiKit.Alpha(UiKit.Red, 0.7f)))
+        {
+            cfg.AutoRecordEncounters = !auto;
+            cfg.Save();
+        }
+        UiKit.Tip(auto
+            ? "Recording starts by itself when a boss is engaged, and stops when the fight ends. Click to stop doing that."
+            : "Start a recording by itself whenever a boss is engaged, module or not.");
+
         ImGui.SameLine(0f, 8f);
         var radar = ImGui.Button("Radar");
         UiKit.Tip("Show the radar.");
