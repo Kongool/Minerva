@@ -55,6 +55,48 @@ public abstract class ArenaBounds(float radius)
         return len <= reach ? offset : dir * reach;
     }
 
+    private bool[]? outsideMask;
+    private WPos maskCenter, maskOrigin;
+    private float maskCell;
+    private int maskW, maskH;
+
+    /// <summary>
+    /// Fill <paramref name="into"/> with "this cell is off the floor", for a grid of
+    /// <paramref name="w"/> x <paramref name="h"/> cells of <paramref name="cell"/> yalms starting at
+    /// <paramref name="origin"/>.
+    ///
+    /// <para>Worked out once and kept. The shape cannot change -- a module that opens or closes part of its
+    /// floor swaps the whole bounds object, which brings a fresh cache with it -- while the pathfinder asks
+    /// for this on every grid it builds, four of them per solve, on every frame. Against a many-sided
+    /// polygon that was a point-in-polygon test per cell per grid, which is the single biggest fixed cost
+    /// in a critical engagement.</para>
+    /// </summary>
+    public void CopyOutsideMask(WPos center, WPos origin, float cell, int w, int h, bool[] into)
+    {
+        if (this.outsideMask == null || this.maskW != w || this.maskH != h || this.maskCell != cell
+            || !this.maskCenter.AlmostEqual(center, 0.01f) || !this.maskOrigin.AlmostEqual(origin, 0.01f))
+        {
+            var mask = new bool[w * h];
+            for (var z = 0; z < h; ++z)
+            {
+                for (var x = 0; x < w; ++x)
+                {
+                    var p = new WPos(origin.X + (x * cell), origin.Z + (z * cell));
+                    mask[(z * w) + x] = !this.Contains(center, p);
+                }
+            }
+
+            this.outsideMask = mask;
+            this.maskCenter = center;
+            this.maskOrigin = origin;
+            this.maskCell = cell;
+            this.maskW = w;
+            this.maskH = h;
+        }
+
+        Array.Copy(this.outsideMask, into, Math.Min(this.outsideMask.Length, into.Length));
+    }
+
     public abstract bool Contains(WPos center, WPos point);
 
     /// <summary>

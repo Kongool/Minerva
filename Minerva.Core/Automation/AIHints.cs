@@ -730,20 +730,33 @@ public sealed class AIHints
         }
 
         return soonest;
+    }
 
-        static bool Touches(in ForbiddenZone z, WPos at, float m)
-        {
-            if (z.ShapeDistance is not SDShapeCheck)
-                return z.ShapeDistance.Distance(at) <= m;
-            if (z.Contains(at))
-                return true;
-            if (m <= 0f)
-                return false;
-            for (var i = 0; i < 8; ++i)
-                if (z.Contains(at + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * m)))
-                    return true;
+    /// <summary>
+    /// Does this zone cover the point, allowing for the safety margin?
+    ///
+    /// <para>A shape that can measure answers directly: "within margin" is a signed distance below it. The
+    /// ring probe is only for shapes that cannot, and it costs nine evaluations per point -- on a
+    /// line-of-sight zone across a full grid search that was most of the solve. Every primitive measures
+    /// now, so what still lands there is the complex boolean combinations.</para>
+    ///
+    /// <para>Less-or-equal, not less-than. At margin 0 this has to agree with Contains, which is
+    /// "distance &lt;= 0": a cell exactly on the edge of an AOE is inside it, not clear of it. With
+    /// less-than the solver was free to stop dead on the rim of a circle whose radius happened to land on
+    /// the grid.</para>
+    /// </summary>
+    private static bool Touches(in ForbiddenZone z, WPos at, float margin)
+    {
+        if (z.ShapeDistance is not SDShapeCheck)
+            return z.ShapeDistance.Distance(at) <= margin;
+        if (z.Contains(at))
+            return true;
+        if (margin <= 0f)
             return false;
-        }
+        for (var i = 0; i < 8; ++i)
+            if (z.Contains(at + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * margin)))
+                return true;
+        return false;
     }
 
     /// <summary>
@@ -894,37 +907,52 @@ public sealed class AIHints
             return true;
 
         foreach (var z in this.ForbiddenZones)
-        {
-            if (z.Activation > deadline)
-                continue;
-
-            // A shape that can measure answers directly: "within margin" is just a signed distance below it.
-            // The ring probe below exists only for shapes that cannot, and it costs nine evaluations per
-            // point — on a line-of-sight zone across a full grid search that was most of the solve. Every
-            // primitive now measures, so what still lands here is the complex boolean combinations only.
-            if (z.ShapeDistance is not SDShapeCheck)
-            {
-                // <=, not <. At margin 0 this has to agree with Contains, which is "distance <= 0" -- and a
-                // cell exactly on an AOE's edge is inside it, not clear of it. With < the solver was free to
-                // stop dead on the rim of a circle whose radius happened to land on the grid.
-                if (z.ShapeDistance.Distance(p) <= margin)
-                    return true;
-                continue;
-            }
-
-            if (z.Contains(p))
+            if (z.Activation <= deadline && Touches(z, p, margin))
                 return true;
-            if (margin <= 0f)
+
+        return false;
+    }
+
+    /// <summary>What the route grid needs to know about one cell: whether it is dangerous by the deadline,
+    /// which zones make it so, and how long until anything at all covers it.</summary>
+    public readonly record struct CellDanger(bool Risky, ulong Zones, float SecondsUntilDanger);
+
+    /// <summary>
+    /// All three of those in one pass over the zone list.
+    ///
+    /// <para>The grid used to ask them separately -- <see cref="InImminentDanger(WPos, DateTime, float)"/>,
+    /// then <see cref="ImminentZonesAt"/>, then <see cref="SecondsUntilDangerAt(WPos, DateTime, float)"/>
+    /// -- which measured every zone against the same point up to three times, for every risky cell, on
+    /// every rung, on every frame. In a fight whose zones cover the floor that is most of the grid: 36
+    /// zones over 3,600 cells is a quarter of a million evaluations per grid, tripled.</para>
+    ///
+    /// <para>Obstacles are the caller business here: the grid already knows which cells are solid and only
+    /// asks about the ones that are not, so repeating that test per cell would be the fourth scan this
+    /// exists to remove.</para>
+    /// </summary>
+    public CellDanger DangerAt(WPos p, DateTime deadline, DateTime now, float margin)
+    {
+        var risky = false;
+        var mask = 0ul;
+        var soonest = float.MaxValue;
+        var count = this.ForbiddenZones.Count;
+        for (var k = 0; k < count; ++k)
+        {
+            var z = this.ForbiddenZones[k];
+            if (!Touches(z, p, margin))
                 continue;
-            for (var i = 0; i < 8; ++i)
+
+            var seconds = z.Activation == default ? 0f : (float)(z.Activation - now).TotalSeconds;
+            soonest = MathF.Min(soonest, MathF.Max(seconds, 0f));
+
+            if (z.Activation <= deadline)
             {
-                var dir = new Angle(i * (Angle.TwoPI / 8f)).ToDirection();
-                if (z.Contains(p + (dir * margin)))
-                    return true;
+                risky = true;
+                mask |= 1ul << Math.Min(k, 63);
             }
         }
 
-        return false;
+        return new CellDanger(risky, mask, soonest);
     }
 
     /// <summary>
@@ -939,22 +967,7 @@ public sealed class AIHints
         for (var k = 0; k < this.ForbiddenZones.Count; ++k)
         {
             var z = this.ForbiddenZones[k];
-            if (z.Activation > deadline)
-                continue;
-
-            bool inside;
-            if (z.ShapeDistance is not SDShapeCheck)
-            {
-                inside = z.ShapeDistance.Distance(p) <= margin;
-            }
-            else
-            {
-                inside = z.Contains(p);
-                for (var i = 0; !inside && margin > 0f && i < 8; ++i)
-                    inside = z.Contains(p + (new Angle(i * (Angle.TwoPI / 8f)).ToDirection() * margin));
-            }
-
-            if (inside)
+            if (z.Activation <= deadline && Touches(z, p, margin))
                 mask |= 1ul << Math.Min(k, 63);
         }
 

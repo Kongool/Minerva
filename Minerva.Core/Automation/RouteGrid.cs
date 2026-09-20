@@ -91,6 +91,11 @@ public sealed class RouteGrid
         this.length = new float[n];
         this.came = new int[n];
 
+        // The arena does not change between rungs or between frames, so the floor is rasterised once per
+        // shape and kept on the bounds itself, the way BossmodReborn keeps its pathfinding map. It was
+        // costing a full pass of point-in-polygon over the grid on each of the four grids a solve builds.
+        hints.Bounds.CopyOutsideMask(center, this.origin, this.cell, this.w, this.h, this.outside);
+
         for (var z = 0; z < this.h; ++z)
         {
             for (var x = 0; x < this.w; ++x)
@@ -102,17 +107,20 @@ public sealed class RouteGrid
                 this.came[i] = -1;
 
                 // out of bounds and inside something solid are both "cannot be here"; danger is not
-                this.outside[i] = !hints.Bounds.Contains(center, p);
                 this.solid[i] = hints.InObstacle(p);
                 this.blocked[i] = this.outside[i] || this.solid[i];
                 this.dangerIn[i] = float.MaxValue;
                 if (!this.solid[i])   // outside cells too: the way back in from outside the arena is priced like any other ground
                 {
-                    this.risky[i] = hints.InImminentDanger(p, deadline, margin);
-                    if (this.risky[i])
-                        this.zones[i] = hints.ImminentZonesAt(p, deadline, margin);
-                    if (this.risky[i] && this.speed > 0f)
-                        this.dangerIn[i] = hints.SecondsUntilDangerAt(p, now, margin);
+                    // One pass over the zones for all three answers; see AIHints.DangerAt.
+                    var danger = hints.DangerAt(p, deadline, now, margin);
+                    this.risky[i] = danger.Risky;
+                    if (danger.Risky)
+                    {
+                        this.zones[i] = danger.Zones;
+                        if (this.speed > 0f)
+                            this.dangerIn[i] = danger.SecondsUntilDanger;
+                    }
                 }
             }
         }
