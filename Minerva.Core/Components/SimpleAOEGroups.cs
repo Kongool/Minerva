@@ -18,7 +18,7 @@ public class SimpleAOEGroups(ModuleBase module, uint[] aids, AOEShape shape, int
     protected readonly uint[] AIDs = aids;
     protected readonly int ExpectedNumCasters = expectedNumCasters;
 
-    protected bool Watches(uint id)
+    protected override bool Watches(uint id)
     {
         for (var i = 0; i < this.AIDs.Length; ++i)
             if (id == this.AIDs[i])

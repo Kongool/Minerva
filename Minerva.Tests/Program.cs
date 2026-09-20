@@ -238,6 +238,23 @@ t.Section("Module framework");
     ws.Execute(new ActorState.OpCastInfo(boss, null));
     t.Eq("AOE cleared after cast finish", comp.ActiveAOEs(0, ws.Actors.Find(boss)!).Length, 0);
 
+    // A cast whose finish never arrives -- the caster despawns, a phase change moves on, the client
+    // stutters and one of two reported copies has no event left to claim -- used to leave its zone on the
+    // arena for the rest of the fight. Thunder God kept 200-second donuts alive at 380s.
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(100u), TotalTime = 5f, Location = new Vector3(100, 0, 100) }));
+    t.Eq("zone up while the cast runs", comp.ActiveAOEs(0, ws.Actors.Find(boss)!).Length, 1);
+
+    // still casting, long past its predicted resolution: a slow cast is not a stale one
+    for (var i = 0; i < 9; i++)
+        ws.Execute(new WorldState.OpFrameStart(Frame(ws, (uint)(100 + i), dtSeconds: 1f), TimeSpan.FromSeconds(1)));
+    module.Update();
+    t.Eq("a cast still in flight keeps its zone", comp.ActiveAOEs(0, ws.Actors.Find(boss)!).Length, 1);
+
+    // the caster stops casting without the zone ever being taken off: overdue, and now provably over
+    ws.Actors.Find(boss)!.CastInfo = null;
+    module.Update();
+    t.Eq("an unresolved zone is dropped once the cast is gone", comp.ActiveAOEs(0, ws.Actors.Find(boss)!).Length, 0);
+
     module.Dispose();
 }
 

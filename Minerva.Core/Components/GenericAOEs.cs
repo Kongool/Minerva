@@ -105,6 +105,51 @@ public class SimpleAOEs(ModuleBase module, uint aid, AOEShape shape, int maxCast
         return aoes[..max];
     }
 
+    /// <summary>Is this the cast this component is waiting on? Group components watch several.</summary>
+    protected virtual bool Watches(uint id) => id == this.WatchedAction;
+
+    /// <summary>
+    /// How long past its own resolution an unfinished cast is kept before it is treated as never coming.
+    /// Generous on purpose: a cast event arriving three quarters of a second late has been measured.
+    /// </summary>
+    private const double UnresolvedGrace = 3d;
+
+    /// <summary>
+    /// Drop zones whose cast resolved long ago and was never taken off the list.
+    ///
+    /// <para>A zone is removed when its cast finishes. When that event never arrives -- the caster
+    /// despawns mid-cast, a phase change takes the encounter somewhere else, the client stutters and the
+    /// same cast is reported twice so one copy has no event left to claim -- the zone stays on the arena
+    /// and in the dodge forever. Thunder God kept donuts from the 200-second mark alive at 380; one Double
+    /// Trouble pair drew six 60-yalm half-planes of which four never cleared.</para>
+    ///
+    /// <para>Age alone is not the test, because plenty of AOEs are older than their activation and still
+    /// real -- a standing voidzone is stamped when it appears and lives for minutes. The test is that the
+    /// cast is over: past its own predicted resolution by the grace period, and the caster is no longer
+    /// casting the thing we are waiting for. A slow cast is not a stale one, so a caster still mid-cast
+    /// keeps its zone however long it takes.</para>
+    /// </summary>
+    public override void Update()
+    {
+        var count = this.Casters.Count;
+        if (count == 0)
+            return;
+
+        var cutoff = this.World.CurrentTime.AddSeconds(-UnresolvedGrace);
+        for (var i = count - 1; i >= 0; --i)
+        {
+            var aoe = this.Casters[i];
+            if (aoe.Activation == default || aoe.Activation > cutoff)
+                continue;   // no resolution predicted, or not yet overdue
+
+            var caster = this.World.Actors.Find(aoe.ActorID);
+            if (caster?.CastInfo is { } inflight && this.Watches(inflight.Action.ID))
+                continue;   // still being cast: overdue is the prediction being wrong, not the zone being stale
+
+            this.Casters.RemoveAt(i);
+        }
+    }
+
     public override void OnCastStarted(Actor caster, ActorCastInfo cast)
     {
         if (cast.Action.ID != this.WatchedAction)
