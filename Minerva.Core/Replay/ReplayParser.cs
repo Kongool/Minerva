@@ -186,7 +186,7 @@ public sealed class ReplayParser
         "TETH" => new ActorState.OpTether(r.NextHex64(), new ActorTetherInfo(r.NextU32(), r.NextHex64())),
         "CST+" => BuildCastInfo(r),
         "CST-" => new ActorState.OpCastInfo(r.NextHex64(), null),
-        "CST!" => BuildCastEvent(r),
+        "CST!" => BuildCastEvent(r, format),
         "IEFF" => BuildIncomingEffect(r),
         "STA+" => BuildStatusGain(r),
         "STA-" => BuildStatusLose(r),
@@ -244,14 +244,17 @@ public sealed class ReplayParser
         return new ActorState.OpCastInfo(id, cast);
     }
 
-    private static WorldState.Operation BuildCastEvent(OpTokenReader r)
+    private static WorldState.Operation BuildCastEvent(OpTokenReader r, int format)
     {
         var id = r.NextHex64();
         var action = ActionID.MakeSpell(r.NextHex32());
         var target = r.NextHex64();
         var rotation = r.NextAngleDeg();
         var seq = r.NextU32();
-        var ev = new ActorCastEvent(action, target, rotation, default, seq);
+        // Format 3 added the caster's position at the moment it fired. Older logs go straight to the
+        // target count, so the token can only be read when the header says it is there.
+        var source = format >= 3 && r.HasMore ? r.NextVec4() : default;
+        var ev = new ActorCastEvent(action, target, rotation, default, seq, new Vector3(source.X, source.Y, source.Z));
         // targets are optional: recordings made before they were captured simply end here
         if (r.HasMore)
         {

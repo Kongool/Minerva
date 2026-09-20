@@ -18,7 +18,9 @@ public sealed class ReplayRecorder : IDisposable
     /// BossmodReborn (<c>(p1 &lt;&lt; 16) | p2</c>); a version-1 log carries the old ordering and the parser
     /// swaps it back on read, so recordings made before the fix still replay correctly.
     /// </summary>
-    public const int Version = 2;
+    /// <para>3: a cast event carries the position its caster fired from, written between the global
+    /// sequence and the target count.</para>
+    public const int Version = 3;
 
     /// <summary>
     /// How much this recorder captures, as a number that only goes up. **Bump it whenever the recorder starts
@@ -29,7 +31,10 @@ public sealed class ReplayRecorder : IDisposable
     /// <para>1: the first stamped recorder (2026-09-18). Recordings without the stamp read as 0 -- everything made
     /// before the POV, the cast-event targets, the dodge-decision snapshot and the rest arrived piecemeal.</para>
     /// </summary>
-    public const int Revision = 1;
+    /// <para>2: cast events carry the position their caster fired from (2026-09-20), so an ability that
+    /// moves its caster can be placed at all. Recordings without it cannot answer where a dashing boss
+    /// swept from.</para>
+    public const int Revision = 2;
 
     private readonly WorldState ws;
     private readonly TextWriter writer;

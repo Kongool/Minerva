@@ -187,7 +187,7 @@ public sealed class ActorCastInfo
 /// Fires when a cast resolves (snapshots). Carries the action, primary target, and location —
 /// the raw material boss modules and the module generator key off of.
 /// </summary>
-public sealed class ActorCastEvent(ActionID action, ulong mainTargetID, Angle rotation, Vector3 targetPos, uint globalSequence)
+public sealed class ActorCastEvent(ActionID action, ulong mainTargetID, Angle rotation, Vector3 targetPos, uint globalSequence, Vector3 sourcePos = default)
 {
     /// <summary>Is this a spell at all? BossmodReborn puts this on the cast rather than on the action id,
     /// and its modules call it that way.</summary>
@@ -204,6 +204,21 @@ public sealed class ActorCastEvent(ActionID action, ulong mainTargetID, Angle ro
     public readonly Angle Rotation = rotation;
     public readonly Vector3 TargetPos = targetPos;
     public readonly uint GlobalSequence = globalSequence;
+
+    /// <summary>
+    /// Where the caster stood at the instant this fired, which is not where the action was aimed and not
+    /// where the caster can be found afterwards.
+    ///
+    /// <para>An ability that moves its caster resolves from wherever the dash put it, and a replay that
+    /// looks the position up from movement alone reads whatever the last packet happened to say. Quaqua's
+    /// Rout sweeps three times with no cast bar while the boss dashes between them -- the recorded
+    /// positions (-518.0, 81.5), (-534.9, 117.5) and (-560.6, 87.1) could not be made to agree with which
+    /// sweeps hit and which missed, and that is the question this field exists to answer.</para>
+    ///
+    /// <para>Zero on recordings made before it was captured, which is not a position: treat it as unknown
+    /// and fall back to the caster's tracked position.</para>
+    /// </summary>
+    public readonly Vector3 SourcePos = sourcePos;
 
     /// <summary>
     /// Who the action actually hit, and what it did to them. The game sends this with every resolved

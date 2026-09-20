@@ -475,6 +475,13 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             this.ws.Execute(new PartyState.OpModify(slot, new PartyState.Member(contentId, instanceId)));
     }
 
+    /// <summary>The live position of the actor that just fired something, or zero when it is not tracked.</summary>
+    private Vector3 CasterPosition(ulong casterID)
+    {
+        var actor = this.ws.Actors.Find(casterID);
+        return actor == null ? default : new Vector3(actor.PosRot.X, actor.PosRot.Y, actor.PosRot.Z);
+    }
+
     private void UpdateCast(Actor act, IBattleChara chr, nint addr)
     {
         ActorCastInfo? cur = null;
@@ -631,7 +638,11 @@ public sealed unsafe class WorldStateGameSync : IDisposable
                 // BossmodReborn: PacketDecoder.IntToFloatAngle(ushort) => (rot * Inv65kDoublePI - PI).Radians()
                 new Angle(header->RotationInt * (180f / 32768f) * Angle.DegToRad - MathF.PI),
                 *targetPos,
-                header->GlobalSequence);
+                header->GlobalSequence,
+                // Where the caster is standing right now, which for an ability that moves its caster is
+                // the only moment the answer is right: a replay that reconstructs it from movement reads
+                // wherever the last packet left the actor. See ActorCastEvent.SourcePos.
+                CasterPosition(casterID));
 
             var raw = (ulong*)effects;
             var numTargets = Math.Min((int)header->NumTargets, 16); // defensive: the packet is fixed-size

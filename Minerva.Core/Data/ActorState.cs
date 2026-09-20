@@ -402,7 +402,10 @@ public sealed class ActorState : IEnumerable<Actor>
         public override void Write(OperationOutput o)
         {
             o.Tag("CST!").Emit(this.InstanceID, "X").Emit(this.Value.Action.ID, "X").Emit(this.Value.MainTargetID, "X")
-             .Emit(this.Value.Rotation).Emit(this.Value.GlobalSequence).Emit(this.Value.Targets.Count);
+             .Emit(this.Value.Rotation).Emit(this.Value.GlobalSequence)
+             // where the caster stood as it fired; see ActorCastEvent.SourcePos. Format 3 and later only.
+             .Emit(new Vector4(this.Value.SourcePos, 0f))
+             .Emit(this.Value.Targets.Count);
             // targets are appended last so a parser that stops early still reads a valid pre-targets event
             foreach (var t in this.Value.Targets)
             {
