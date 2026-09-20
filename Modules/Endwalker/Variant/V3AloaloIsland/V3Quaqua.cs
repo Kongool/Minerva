@@ -46,9 +46,15 @@ sealed class RavagingAxe(ModuleBase module) : Components.SimpleAOEs(module, (uin
 /// say the damage is already done by the time anything could draw them, and two of the three landed on
 /// the recorded character for a vulnerability stack each.</para>
 ///
-/// <para>Three angles from a single occurrence do not make a pattern -- the steps are -115, -115, then
-/// +210 -- so nothing is predicted from them yet. A recording with several Rout sets would settle whether
-/// the sweep walks a fixed step, and that is the difference between this being coverable and not.</para>
+/// <para>The angles ARE fixed: two pulls fifty minutes apart (2026-09-20 16:40 and 17:33) produced the
+/// same four to within three hundredths of a degree -- the telegraph, then 115.1 degrees back, 229.8 back
+/// and 20.0 back, at about 1.6, 3.2 and 4.9 seconds after it lands. What is not fixed is where they sweep
+/// from. The boss dashes between them: it stood at (-518.0, 81.5), then (-534.9, 117.5), then
+/// (-560.6, 87.1) during one set, and no single origin reproduces which of the three caught the recorded
+/// character and which missed. Predicting the angles from a guessed origin would draw three 45-yalm
+/// rectangles across ground that may be safe while missing the ground that is not, so they stay undrawn
+/// until a pull pins the origin -- most likely by sampling the boss at the instant each sweep fires rather
+/// than at the last movement before it.</para>
 /// </summary>
 sealed class Rout(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.Rout1, (uint)AID.Rout2], new AOEShapeRect(45f, 8f));
 sealed class ArcaneArmamentsLine(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ArcaneArmamentsLine, new AOEShapeRect(40f, 5f));
