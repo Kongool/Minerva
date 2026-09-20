@@ -242,6 +242,7 @@ public abstract class ModuleComponent(ModuleBase module)
     protected static int? ArenaProjectionLayerForAI(int? mechanicLayer, bool? restrictToLayer)
         => restrictToLayer.HasValue ? mechanicLayer : null;
 
+
     /// <summary>Contribute danger zones for the auto-dodge engine (see <see cref="AIHints"/>). The
     /// <paramref name="assignment"/> role slot (matching BMR) lets role-based positioning port unchanged.</summary>
     public virtual void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }

@@ -176,10 +176,16 @@ public sealed class AIHints
     }
 
     // --- forbidden zones ---
-    public void AddForbiddenZone(ShapeDistance shapeDistance, DateTime activation = default, ulong source = default)
+    // The arenaProjectionLayer pair is accepted and not read: a zone reaching this point has already been
+    // judged against the viewer's floor by the component that raised it (see GenericAOEs.OnViewersFloor),
+    // and hints carry no module to ask a second time. Present so BossmodReborn modules that pass a floor
+    // through port unchanged.
+    public void AddForbiddenZone(ShapeDistance shapeDistance, DateTime activation = default, ulong source = default,
+        int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = null)
         => this.AddZone(new ForbiddenZone(shapeDistance, activation, source));
 
-    public void AddForbiddenZone(AOEShape shape, WPos origin, Angle rotation = default, DateTime activation = default, ulong source = default)
+    public void AddForbiddenZone(AOEShape shape, WPos origin, Angle rotation = default, DateTime activation = default, ulong source = default,
+        int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = null)
         => this.AddZone(new ForbiddenZone(shape.Distance(origin, rotation), activation, source));
 
     public void AddForbiddenZone(in AOEInstance aoe)

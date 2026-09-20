@@ -11,7 +11,7 @@ namespace Minerva.Components;
 /// </summary>
 public abstract class GenericStackSpread(ModuleBase module, bool raidwideOnResolve = true, bool includeDeadTargets = false) : ModuleComponent(module)
 {
-    public struct Stack(Actor target, float radius, int minSize = 2, int maxSize = int.MaxValue, DateTime activation = default, BitMask forbiddenPlayers = default)
+    public struct Stack(Actor target, float radius, int minSize = 2, int maxSize = int.MaxValue, DateTime activation = default, BitMask forbiddenPlayers = default, int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = null)
     {
         public Actor Target = target;
         public float Radius = radius;
@@ -19,6 +19,14 @@ public abstract class GenericStackSpread(ModuleBase module, bool raidwideOnResol
         public int MaxSize = maxSize;
         public DateTime Activation = activation;
         public BitMask ForbiddenPlayers = forbiddenPlayers; // party members barred from this stack
+
+        /// <summary>Floor this stack belongs to. <inheritdoc cref="ModuleComponent.ArenaProjectionLayer"/></summary>
+        public int? ArenaProjectionLayer = arenaProjectionLayer;
+        public bool? RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
+
+        /// <summary>This stack's floor, falling back to whichever floor its target is standing on.</summary>
+        public readonly int? ResolveArenaProjectionLayer(ModuleBase module)
+            => this.ArenaProjectionLayer ?? module.ResolveArenaProjectionLayer(this.Target);
 
         public readonly bool IsInside(WPos pos) => pos.InCircle(this.Target.Position, this.Radius);
         public readonly bool IsInside(Actor actor) => this.IsInside(actor.Position);
@@ -38,12 +46,44 @@ public abstract class GenericStackSpread(ModuleBase module, bool raidwideOnResol
         }
     }
 
-    public struct Spread(Actor target, float radius, DateTime activation = default)
+    public struct Spread(Actor target, float radius, DateTime activation = default, int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = null)
     {
         public Actor Target = target;
         public float Radius = radius;
         public DateTime Activation = activation;
+
+        /// <summary>Floor this spread belongs to. <inheritdoc cref="ModuleComponent.ArenaProjectionLayer"/></summary>
+        public int? ArenaProjectionLayer = arenaProjectionLayer;
+        public bool? RestrictToArenaProjectionLayer = restrictToArenaProjectionLayer;
+
+        /// <summary>This spread's floor, falling back to whichever floor its target is standing on.</summary>
+        public readonly int? ResolveArenaProjectionLayer(ModuleBase module)
+            => this.ArenaProjectionLayer ?? module.ResolveArenaProjectionLayer(this.Target);
     }
+
+    /// <summary>
+    /// Does a stack or spread on its floor concern this actor? Spelled as BossmodReborn spells them, and
+    /// taking the shape rather than a pair of loose values, so its modules port without edits. On an arena
+    /// with no declared floors every one of these is yes.
+    /// </summary>
+    protected bool SpreadAppliesToArenaProjectionLayer(Actor actor, in Spread spread)
+        => this.ArenaProjectionLayerApplies(actor, spread.ResolveArenaProjectionLayer(this.Module), spread.RestrictToArenaProjectionLayer);
+
+    /// <inheritdoc cref="SpreadAppliesToArenaProjectionLayer"/>
+    protected bool SpreadParticipantAppliesToArenaProjectionLayer(Actor actor, in Spread spread)
+        => this.ArenaProjectionLayerParticipantApplies(actor, spread.ResolveArenaProjectionLayer(this.Module), spread.RestrictToArenaProjectionLayer);
+
+    /// <inheritdoc cref="SpreadAppliesToArenaProjectionLayer"/>
+    protected bool StackAppliesToArenaProjectionLayer(Actor actor, in Stack stack)
+        => this.ArenaProjectionLayerApplies(actor, stack.ResolveArenaProjectionLayer(this.Module), stack.RestrictToArenaProjectionLayer);
+
+    /// <inheritdoc cref="SpreadAppliesToArenaProjectionLayer"/>
+    protected bool StackParticipantAppliesToArenaProjectionLayer(Actor actor, in Stack stack)
+        => this.ArenaProjectionLayerParticipantApplies(actor, stack.ResolveArenaProjectionLayer(this.Module), stack.RestrictToArenaProjectionLayer);
+
+    /// <summary>Whether this component contributes its text hints. Upstream modules switch it off when they
+    /// replace the hint logic with their own.</summary>
+    public bool EnableHints = true;
 
     public readonly bool RaidwideOnResolve = raidwideOnResolve;
     public readonly bool IncludeDeadTargets = includeDeadTargets;

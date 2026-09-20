@@ -479,11 +479,14 @@ public abstract class ModuleBase : IDisposable
         return this.ResolveArenaProjectionLayer(actor) is not { } mine || mine == layer;
     }
 
-    /// <summary>Is this actor on the mechanic's floor? Always, without floors.</summary>
-    public bool ActorMatchesArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer) => true;
+    /// <summary>Is this actor on the mechanic's floor? Always, on an arena without floors.</summary>
+    public bool ActorMatchesArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer)
+        => this.MechanicAppliesToArenaProjectionLayer(actor, mechanicLayer, restrictToLayer);
 
-    /// <summary>Are these two actors on the same floor? Always, without floors.</summary>
-    public bool ActorsMatchArenaProjectionLayer(Actor first, Actor second) => true;
+    /// <summary>Are these two actors on the same floor? Always, on an arena without floors.</summary>
+    public bool ActorsMatchArenaProjectionLayer(Actor first, Actor second)
+        => this.ArenaProjectionLayerHeights.Length == 0
+        || this.ResolveArenaProjectionLayer(first) == this.ResolveArenaProjectionLayer(second);
 
     /// <summary>Called every frame until the fight starts, as BossmodReborn does. Ported modules use it to
     /// find actors they draw or hint from before anything has been cast.</summary>
