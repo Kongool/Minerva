@@ -87,10 +87,13 @@ sealed class V3KetudukeStates : StateMachineBuilder
 /// <summary>
 /// Ketuduke, a route boss of the Aloalo Island variant dungeon.
 ///
-/// <para>The arena is measured rather than guessed: 22,849 movement samples over the pull span 19.7 yalms
-/// either side of -789.8 in x and 20.0 either side of -392.5 in z, with 468 of them in corners a circle
-/// would not have -- a square of half-size twenty, which is what the criterion version of this room uses
-/// too. The extractor proposed a circle, which would have forbidden those corners.</para>
+/// <para>The arena is measured, and measured again after the first fit proved half a yalm short. Taking
+/// only the 22,154 samples from after the pull -- the approach to the room was dragging the fit north --
+/// the floor runs 21 yalms either side of (-789.6, -393.0), and the corners are populated, so it is a
+/// square and not the circle the extractor proposed. The first attempt, half-20 about (-789.8, -392.5),
+/// put 4.9% of the ground people actually stood on outside the arena, three quarters of it along the north
+/// edge; this leaves 0.7%. Half-22 would cover every last sample, which is the wrong side to err on for a
+/// boundary nobody has proven is solid.</para>
 ///
 /// <para>Left uncovered, each single-target by the sheet and each a wind-up for something else: Spring
 /// Crystals (the crystals then cast the lines that are covered), the Bubble Net and Tidal Roar visuals
@@ -101,4 +104,4 @@ sealed class V3KetudukeStates : StateMachineBuilder
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Ketuduke(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, new WPos(-789.8f, -392.5f).Quantized(), new ArenaBoundsSquare(20f));
+    : ModuleBase(ws, primary, new WPos(-789.6f, -393.0f).Quantized(), new ArenaBoundsSquare(21f));
