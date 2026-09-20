@@ -528,7 +528,7 @@ class SuperNova(ModuleBase module) : Components.StackWithIcon(module, (uint)Icon
 class StarflareTimeGroupsP2(ModuleBase module) : Components.SimpleAOEGroupsByTimewindow(module, [(uint)AID.StarflareP2Fast, (uint)AID.StarflareP2Slow], new AOEShapeRect(60, 5), expectedNumCasters: 5);
 
 [SkipLocalsInit]
-sealed class A35ShinryuParadoxStates : StateMachineBuilder
+class A35ShinryuParadoxStates : StateMachineBuilder
 {
 
     public A35ShinryuParadoxStates(A35ShinryuParadox module) : base(module)
@@ -596,6 +596,47 @@ public class A35ShinryuParadox(WorldState ws, Actor primary)
 
         hints.SetPriority(PrimaryActor, pBoss);
         hints.SetPriority(Groin, pTail);
+        NeverTheParts(this, hints);
+    }
+
+    /// <summary>
+    /// The body drags three hitbox-less "Part" actors around with it, sharing its name, its health bar and
+    /// its position, and the Hollow King brings three of its own. They show up in the enemy list as a
+    /// second and third <c>Shinryu Paradox</c> -- the U and V the party was picking between -- and
+    /// anything that chooses a target by name or by nearest is free to lock onto one.
+    /// </summary>
+    protected static void NeverTheParts(A35ShinryuParadox module, AIHints hints)
+    {
+        foreach (var part in module.Enemies((uint)OID.ShinryuAutos))
+            hints.SetPriority(part, AIHints.Enemy.PriorityInvincible);
+        foreach (var part in module.Enemies((uint)OID.HollowKingAutos))
+            hints.SetPriority(part, AIHints.Enemy.PriorityInvincible);
+    }
+}
+
+/// <summary>
+/// The second half of the same fight, as its own module because the first one cannot survive it.
+///
+/// <para>Shinryu goes untargetable when the Hollow King spawns and is then removed from the world
+/// entirely -- 2026-09-20: spawns at 253.4s, both Shinryu actors untargetable at 265.7s, despawned at
+/// 318.8s -- and <c>ModuleManager</c> drops the active module the moment its primary actor is destroyed,
+/// whatever the encounter thinks. The state machine here already says the phase ends only once the
+/// Hollow King is dead too, so the intent was always to carry on; what was missing was something for the
+/// manager to pick up. Keyed on the Hollow King, it activates the moment Shinryu leaves, with the same
+/// components: the ones watching Shinryu casts simply never fire.</para>
+/// </summary>
+[SkipLocalsInit]
+sealed class A35HollowKingStates(A35HollowKing module) : A35ShinryuParadoxStates(module);
+
+[ModuleInfo(CFCID = 1117u, NameID = 14730u, PrimaryActorOID = (uint)OID.HollowKing, Maturity = ModuleMaturity.WIP, Contributors = "Xan, ported by wen (ported from BMR)")]
+public sealed class A35HollowKing(WorldState ws, Actor primary) : A35ShinryuParadox(ws, primary)
+{
+    /// <summary>One boss and no tail, so the level the character stands on decides nothing here.</summary>
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment,
+        AIHints hints)
+    {
+        hints.SetPriority(PrimaryActor, 0);
+        NeverTheParts(this, hints);
     }
 }
 

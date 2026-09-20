@@ -22,6 +22,7 @@ sealed class A34PromathiaStates : StateMachineBuilder
             .ActivateOnEnter<Comet>()
             .ActivateOnEnter<FalseGenesis>()
             .ActivateOnEnter<ArenaChanges>()
+            .ActivateOnEnter<FalseGenesisHit>()
             .ActivateOnEnter<MemoryReceptacle>()
             .ActivateOnEnter<EmptyBeleaguer>()
             .ActivateOnEnter<AuroralDrape>()

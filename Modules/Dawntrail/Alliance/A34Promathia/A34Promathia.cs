@@ -134,24 +134,120 @@ sealed class ArenaChanges(ModuleBase module) : ModuleComponent(module)
     private static readonly WPos _arenacentre = new(-820f, -820f);
     private static readonly ArenaBoundsCircle _startingboundscircle = new(25f);
 
+    /// <summary>Half-side of one platform.</summary>
+    private const float PlatformHalf = 6.5f;
+
+    /// <summary>
+    /// The three platforms False Genesis leaves behind. One table, used for the bounds that replace the
+    /// floor, for the ground the dodge is told to be standing on before they do, and for the outline drawn
+    /// while the cast runs -- so the warning and the floor can never describe different platforms.
+    /// </summary>
+    private static readonly (WPos Centre, Angle Rotation)[] Platforms =
+    [
+        (new(-820f, -807f), default),
+        (new(-808.724f, -826.5f), 120f.Degrees()),
+        (new(-831.258f, -826.5f), -120f.Degrees()),
+    ];
+
+    private static readonly ArenaBoundsCustom _splitbounds = BuildSplitBounds();
+    private static readonly ShapeDistance _offThePlatforms = BuildOffThePlatforms();
+
+    private static ArenaBoundsCustom BuildSplitBounds()
+    {
+        var shapes = new Shape[Platforms.Length];
+        for (var i = 0; i < Platforms.Length; ++i)
+            shapes[i] = new Square(Platforms[i].Centre, PlatformHalf, Platforms[i].Rotation);
+        return new ArenaBoundsCustom(shapes);
+    }
+
+    /// <summary>
+    /// Everything that is not a platform, as one zone. A real signed distance rather than a containment
+    /// test, so a cell just inside a ledge reads as marginal and the dodge keeps the safety margin it is
+    /// configured with away from the drop, without the platform being hand-shrunk to fake it.
+    /// </summary>
+    private static ShapeDistance BuildOffThePlatforms()
+    {
+        var zones = new ShapeDistance[Platforms.Length];
+        for (var i = 0; i < Platforms.Length; ++i)
+            zones[i] = new SDRect(Platforms[i].Centre, Platforms[i].Rotation, PlatformHalf, PlatformHalf, PlatformHalf);
+        return new SDOutsideOfUnion(zones);
+    }
+
+    /// <summary>When the floor goes, or default when it is not going anywhere.</summary>
+    private DateTime falls;
+
+    private bool Pending => this.falls != default;
+
+    /// <summary>
+    /// The floor does not shrink at a moment the dodge can work out for itself -- the character is standing
+    /// on ground that stops existing when False Genesis finishes. Swapping the bounds on the cast end is
+    /// right and too late: by then anyone off a platform is already falling.
+    ///
+    /// <para>The cast runs 9.7 seconds (2026-09-20: 119.3s to 128.8s), so while it runs everything that is
+    /// not a platform is forbidden ground with the cast end as its activation. The dodge then walks across
+    /// during the cast and the swap lands under the character rather than out from under it -- the same
+    /// answer as Ultima's shelter, which walks in with two seconds to spare.</para>
+    /// </summary>
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.FalseGenesis)
+            this.falls = Module.CastFinishAt(spell);
+    }
+
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.FalseGenesis)
         {
-            var bounds = new ArenaBoundsCustom([new Square(new(-820f, -807f), 6.5f), new Square(new(-808.724f, -826.5f), 6.5f, 120f.Degrees()), new Square(new(-831.258f, -826.5f), 6.5f, -120f.Degrees())]);
-            Module.Bounds = bounds;
-            Module.Center = bounds.Center;
+            this.falls = default;   // the bounds say it now; the warning has done its job
+            Module.Bounds = _splitbounds;
+            Module.Center = _splitbounds.Center;
         }
     }
+
     public override void OnMapEffect(byte index, uint state)
     {
         if (index == 0x0C && state == 0x00080004)
         {
+            this.falls = default;
             Module.Bounds = _startingboundscircle;
             Module.Center = _arenacentre;
         }
     }
+
+    private static bool OnAPlatform(WPos p)
+    {
+        for (var i = 0; i < Platforms.Length; ++i)
+            if (p.InSquare(Platforms[i].Centre, PlatformHalf, Platforms[i].Rotation))
+                return true;
+        return false;
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (this.Pending)
+            hints.AddForbiddenZone(_offThePlatforms, this.falls);
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints)
+    {
+        if (this.Pending)
+            hints.Add("Get on a platform!", !OnAPlatform(actor.Position));
+    }
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc)
+    {
+        if (!this.Pending)
+            return;
+        for (var i = 0; i < Platforms.Length; ++i)
+            Arena.OutlineShape(new AOEShapeRect(PlatformHalf, PlatformHalf, PlatformHalf), Platforms[i].Centre, Platforms[i].Rotation, Colors.Safe, 2f);
+    }
 }
+
+/// <summary>The floor going out from under the alliance: a 25-yalm circle on the arena centre, which is
+/// every inch of the old floor. Nobody dodges it -- the platforms are about not falling afterwards, not
+/// about this hit -- so it is recorded as the raidwide it is rather than left for the dodge to be blamed
+/// for.</summary>
+sealed class FalseGenesisHit(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.FalseGenesis1);
 
 sealed class MemoryReceptacle(ModuleBase module) : Components.Adds(module, (uint)OID.MemoryReceptacle);
 
