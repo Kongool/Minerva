@@ -82,6 +82,22 @@ public enum TetherID : uint
     CometMeteorTether = 60, // 4C74->4EBB
 }
 
+/// <summary>
+/// The flare where it actually lands, from its own cast.
+///
+/// <para>FlareHolyMerge predicts these nine seconds out from the tethers that pair the spheres, which is
+/// far better warning -- but only once the tethers exist. The first flare of the fight lands before any
+/// tether is drawn (42.5s against tethers at 69.2s in the 2026-09-19 pull), and until then nothing was
+/// published at all: an eighteen yalm circle on the radar that the dodge did not know about. The cast
+/// carries its own position, so this covers every one of them with two seconds of warning, merge or no
+/// merge.</para>
+/// </summary>
+sealed class TinyFlare(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.TinyFlare1, 18f);
+
+/// <summary>Fifty yalms on a twenty yalm arena: there is nowhere to stand, so it is called what it is
+/// rather than drawn as ground to leave.</summary>
+sealed class TinyHoly(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.TinyHoly1);
+
 sealed class TinyThunderIII(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.TinyThunderIIIRaidwide);
 
 sealed class TinyQuake(ModuleBase module) : Components.GenericAOEs(module)
@@ -730,6 +746,8 @@ sealed class CE214TinyTerrorStates : StateMachineBuilder
     {
         TrivialPhase()
             .ActivateOnEnter<TinyThunderIII>()
+            .ActivateOnEnter<TinyFlare>()
+            .ActivateOnEnter<TinyHoly>()
             .ActivateOnEnter<TinyQuake>()
             .ActivateOnEnter<DiminutiveDualcast>()
             .ActivateOnEnter<TinyMeteor>()
