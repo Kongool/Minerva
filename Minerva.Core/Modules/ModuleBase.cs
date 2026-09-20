@@ -433,11 +433,51 @@ public abstract class ModuleBase : IDisposable
     /// </summary>
     public virtual string[] PrePullHints => [];
 
-    /// <summary>An actor's floor. Always null. <inheritdoc cref="ModuleComponent.ArenaProjectionLayer"/></summary>
-    public int? ResolveArenaProjectionLayer(Actor actor) => null;
+    /// <summary>
+    /// The heights of this arena's floors, lowest first, for a fight played on more than one level.
+    ///
+    /// <para>Empty for almost every module, and everything below then behaves as it always did: every
+    /// mechanic applies to everyone and an actor's floor resolves to null. A module that declares heights
+    /// gets the separation instead -- Shinryu Paradox casts the same pattern on both levels at once, and
+    /// drawing both to everybody puts one floor's lines on top of the other's.</para>
+    /// </summary>
+    public virtual ReadOnlySpan<float> ArenaProjectionLayerHeights => [];
 
-    /// <summary>Does a mechanic on this floor apply to this actor? Always, without floors.</summary>
-    public bool MechanicAppliesToArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer) => true;
+    /// <summary>The floor at this height: the nearest declared one, or null when none are.</summary>
+    public int? ResolveArenaProjectionLayer(float y)
+    {
+        var heights = this.ArenaProjectionLayerHeights;
+        if (heights.Length == 0)
+            return null;
+
+        var best = 0;
+        var bestGap = MathF.Abs(y - heights[0]);
+        for (var i = 1; i < heights.Length; ++i)
+        {
+            var gap = MathF.Abs(y - heights[i]);
+            if (gap < bestGap)
+            {
+                bestGap = gap;
+                best = i;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>An actor's floor. <inheritdoc cref="ModuleComponent.ArenaProjectionLayer"/></summary>
+    public int? ResolveArenaProjectionLayer(Actor actor) => this.ResolveArenaProjectionLayer(actor.PosRot.Y);
+
+    /// <summary>
+    /// Does a mechanic on this floor apply to this actor? Always, unless the arena has floors, the
+    /// mechanic named one, and it asked to be kept to it.
+    /// </summary>
+    public bool MechanicAppliesToArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer)
+    {
+        if (restrictToLayer != true || mechanicLayer is not { } layer || this.ArenaProjectionLayerHeights.Length == 0)
+            return true;
+        return this.ResolveArenaProjectionLayer(actor) is not { } mine || mine == layer;
+    }
 
     /// <summary>Is this actor on the mechanic's floor? Always, without floors.</summary>
     public bool ActorMatchesArenaProjectionLayer(Actor actor, int? mechanicLayer, bool? restrictToLayer) => true;

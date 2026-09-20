@@ -575,6 +575,14 @@ public class A35ShinryuParadox(WorldState ws, Actor primary)
     Actor? Groin;
     Actor? _bossP2;
 
+    /// <summary>
+    /// The two levels this fight is played on, lower first -- the same heights BossmodReborn hands its
+    /// Starflare component. Both levels get the crossing lines at the same moment, so without this each
+    /// floor draws the other's pattern over its own and the dodge answers to danger it cannot be in.
+    /// <see cref="Helpers.Level"/> splits them at -890 and agrees with the nearest of these.
+    /// </summary>
+    public override ReadOnlySpan<float> ArenaProjectionLayerHeights => [-900f, -879f];
+
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {
         base.DrawEnemies(pcSlot, pc);

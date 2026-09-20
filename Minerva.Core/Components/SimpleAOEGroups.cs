@@ -34,7 +34,9 @@ public class SimpleAOEGroups(ModuleBase module, uint[] aids, AOEShape shape, int
         if (!this.Watches(cast.Action.ID))
             return;
         var origin = cast.LocXZ != default ? cast.LocXZ : caster.Position;
-        this.Casters.Add(new AOEInstance(this.Shape, origin, cast.Rotation, this.Module.CastFinishAt(cast), actorID: caster.InstanceID));
+        var layer = this.Module.ResolveArenaProjectionLayer(caster.PosRot.Y);   // null, and so unrestricted, on a single-floor arena
+        this.Casters.Add(new AOEInstance(this.Shape, origin, cast.Rotation, this.Module.CastFinishAt(cast), actorID: caster.InstanceID,
+            arenaProjectionLayer: layer, restrictToArenaProjectionLayer: layer != null));
         if (this.Casters.Count >= this.ExpectedNumCasters)
             SortByActivation(this.Casters);
     }
@@ -103,7 +105,9 @@ public class ChargeAOEs(ModuleBase module, uint aid, float halfWidth, int maxCas
             return;
         var dir = cast.LocXZ - caster.Position;
         var shape = new AOEShapeRect(dir.Length() + this.ExtraLengthFront, this.HalfWidth);
-        this.Casters.Add(new AOEInstance(shape, caster.Position, Angle.FromDirection(dir), this.Module.CastFinishAt(cast), actorID: caster.InstanceID));
+        var layer = this.Module.ResolveArenaProjectionLayer(caster.PosRot.Y);
+        this.Casters.Add(new AOEInstance(shape, caster.Position, Angle.FromDirection(dir), this.Module.CastFinishAt(cast), actorID: caster.InstanceID,
+            arenaProjectionLayer: layer, restrictToArenaProjectionLayer: layer != null));
     }
 }
 

@@ -22,8 +22,20 @@ public abstract class GenericAOEs(ModuleBase module, uint aid = default, string 
         var now = this.World.CurrentTime;
         var aoes = this.ActiveAOEs(pcSlot, pc);
         foreach (ref readonly var aoe in aoes)
-            this.Arena.ZoneShape(aoe.Shape, aoe.Origin, aoe.Rotation, ColorFor(aoe, now));
+            if (this.OnViewersFloor(pc, aoe))
+                this.Arena.ZoneShape(aoe.Shape, aoe.Origin, aoe.Rotation, ColorFor(aoe, now));
     }
+
+    /// <summary>
+    /// Is this AOE on the floor the viewer is standing on?
+    ///
+    /// <para>True for every fight on one level, which is nearly all of them. On a fight played on two --
+    /// Shinryu Paradox casts the same crossing lines upstairs and downstairs at the same moment -- drawing
+    /// both to everyone lays one floor's pattern over the other's and neither can be read, and forbidding
+    /// both leaves the dodge a floor's worth of danger that cannot reach it.</para>
+    /// </summary>
+    protected bool OnViewersFloor(Actor viewer, in AOEInstance aoe)
+        => this.Module.MechanicAppliesToArenaProjectionLayer(viewer, aoe.ArenaProjectionLayer, aoe.RestrictToArenaProjectionLayer);
 
     /// <summary>Fill colour for an AOE: its own override, else brighter when it's about to resolve.</summary>
     public static uint ColorFor(in AOEInstance aoe, DateTime now)
@@ -51,7 +63,7 @@ public abstract class GenericAOEs(ModuleBase module, uint aid = default, string 
     {
         var aoes = this.ActiveAOEs(slot, actor);
         foreach (ref readonly var aoe in aoes)
-            if (aoe.Risky)
+            if (aoe.Risky && this.OnViewersFloor(actor, aoe))
                 hints.AddForbiddenZone(aoe);
     }
 }
@@ -155,7 +167,11 @@ public class SimpleAOEs(ModuleBase module, uint aid, AOEShape shape, int maxCast
         if (cast.Action.ID != this.WatchedAction)
             return;
         var origin = cast.LocXZ != default ? cast.LocXZ : caster.Position; // location-targeted vs self-targeted
-        this.Casters.Add(new AOEInstance(this.Shape, origin, cast.Rotation, this.Module.CastFinishAt(cast), actorID: caster.InstanceID));
+        // On a multi-floor arena the caster's own height says which floor this belongs to; on every other
+        // arena there are no floors and this resolves to null, which restricts nothing.
+        var layer = this.Module.ResolveArenaProjectionLayer(caster.PosRot.Y);
+        this.Casters.Add(new AOEInstance(this.Shape, origin, cast.Rotation, this.Module.CastFinishAt(cast), actorID: caster.InstanceID,
+            arenaProjectionLayer: layer, restrictToArenaProjectionLayer: layer != null));
     }
 
     public override void OnCastFinished(Actor caster, ActorCastInfo cast)
