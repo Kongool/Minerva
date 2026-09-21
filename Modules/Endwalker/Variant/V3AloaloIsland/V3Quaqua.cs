@@ -67,8 +67,20 @@ sealed class ArcaneArmamentsLine(ModuleBase module) : Components.SimpleAOEs(modu
 sealed class VioletStorm(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VioletStorm, new AOEShapeCone(32f, 60f.Degrees()));
 sealed class MadeMagic(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.MadeMagic);
 
-/// <summary>Forty yalms on a twenty-one yalm floor: it hit the whole party three times in the 19:05 pull,
-/// so it is named rather than drawn as ground to leave.</summary>
+/// <summary>
+/// Kept as a raidwide, and not confidently.
+///
+/// <para>The sheet calls it a forty-yalm circle, which on this floor is everywhere, and it did hit the
+/// whole party three times in the 19:05 pull. Splatoon's community layout for this duty calls it a
+/// fourteen-yalm chariot instead -- dodgeable, if true. The recording cannot settle it: the three hammers
+/// land two seconds apart while everyone is moving, so the hit distances from one landing point come out
+/// as 9.6, 9.7 and 9.9 caught with 10.9 and 11.7 spared, which is no circle at all and simply means the
+/// positions are a frame or two stale.</para>
+///
+/// <para>Naming it a raidwide is the conservative reading: it warns, and it never tells anyone that ground
+/// forty yalms out is safe when it is not. A pull where the party holds still through one -- or one that
+/// spares somebody standing well clear -- decides it.</para>
+/// </summary>
 sealed class HammerLanding(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.HammerLanding, (uint)AID.HammerLanding2]);
 
 /// <summary>

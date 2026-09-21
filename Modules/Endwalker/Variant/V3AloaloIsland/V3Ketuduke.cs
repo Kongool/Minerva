@@ -53,16 +53,24 @@ sealed class BubbleNet(ModuleBase module) : Components.RaidwideCast(module, (uin
 sealed class TidalRoar(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.TidalRoarVisual);
 
 /// <summary>
-/// The in-and-out pair, drawn as two components because the answer is opposite: the circles want you out
-/// and the donuts want you in, and a fight that alternates them punishes reading one as the other.
+/// All four tides, and they are all the same shape: stand in the middle.
 ///
-/// <para>The donut's inner edge is the one number the sheet does not carry, so it was measured instead:
-/// in the recorded pull nobody inside 7.6 yalms was touched and the nearest player it caught stood at
-/// 10.2, which puts the real edge between the two. The sheet's 8 sits inside that window, on the side that
-/// draws more danger rather than less, so it is kept.</para>
+/// <para>The names promise an in-and-out pair and the game sheet backs it, calling Receding Twintides and
+/// Near Tide fourteen-yalm circles. The fight disagrees. Five casts across three pulls, covering all four
+/// ids, spared everyone inside roughly eight yalms and caught everyone past ten: Near Tide spared players
+/// at 3.0 and 7.1 while catching 10.1, 12.2 and 14.3, and Receding spared 1.7 and 8.7 in one pull while
+/// catching 8.1 and 14.0 in another. A fourteen-yalm circle centred there would have killed the player
+/// standing at 1.7, every time.</para>
+///
+/// <para>Drawing them as circles is the dangerous way to be wrong -- it walks people out of the one safe
+/// ring and into the water -- so they are donuts until a pull actually shows a chariot. Splatoon's
+/// community layout for this duty calls Encroaching a chariot and Receding a donut, which agrees with
+/// neither the sheet nor this; if a recording ever catches someone inside eight yalms taking one of these,
+/// that id is the one to split out.</para>
 /// </summary>
-sealed class Twintides(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.RecedingTwintides, (uint)AID.NearTide], 14f);
-sealed class Tides(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.EncroachingTwintides, (uint)AID.FarTide], new AOEShapeDonut(8f, 60f));
+sealed class Tides(ModuleBase module) : Components.SimpleAOEGroups(module,
+    [(uint)AID.RecedingTwintides, (uint)AID.NearTide, (uint)AID.EncroachingTwintides, (uint)AID.FarTide],
+    new AOEShapeDonut(8f, 60f));
 
 /// <summary>The bubbles left standing on the floor. Radius is the actor's own hitbox.</summary>
 sealed class AiryBubble(ModuleBase module) : Components.Voidzone(module, 1.3f, (uint)OID.AiryBubble);
@@ -76,7 +84,6 @@ sealed class V3KetudukeStates : StateMachineBuilder
             .ActivateOnEnter<SaturateRects>()
             .ActivateOnEnter<FlukeTyphoon>()
             .ActivateOnEnter<Hydrobomb>()
-            .ActivateOnEnter<Twintides>()
             .ActivateOnEnter<Tides>()
             .ActivateOnEnter<AiryBubble>()
             .ActivateOnEnter<BubbleNet>()
