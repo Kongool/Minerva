@@ -4,6 +4,8 @@
 // Aloalo Island at all, so there is nothing upstream to port; C031Ketuduke next door is the reference for
 // what each mechanic does, not for its ids.
 using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Minerva;
 
 namespace Minerva.Endwalker.Variant.V3AloaloIsland.V3Ketuduke;
@@ -17,6 +19,7 @@ public enum OID : uint
     AiryBubble = 0x4095,        // R1.3, the bubbles left on the floor
     ZealBlindZozone = 0x4096,
     SummonedApa = 0x4113,       // R2.88, summoned add, hardcasts Water III
+    ShatterMarker = 0x1EB936,   // the event object that parks where a shatter line will run
     Matsya = 0x3FE7,            // the NPC standing in, not part of the fight
 }
 
@@ -76,16 +79,54 @@ sealed class BubbleNet(ModuleBase module) : Components.RaidwideCasts(module, [(u
 sealed class WindRaidwides(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.Updraft, (uint)AID.AerialShock]);
 
 /// <summary>
-/// The line a shattered crystal throws, and a warning that it may never draw.
+/// The alternating lines, read from the markers that park where each one will run.
 ///
-/// <para>It caught the recorded character at 125.6s of the 19:46 pull with nothing drawn for it. This
-/// component is keyed on the cast, and in that pull the action resolved four times with **no cast bar at
-/// all** -- so it will cover the telegraphed version if one exists and cover nothing otherwise. What it
-/// really needs is the same treatment as Quaqua's scalding waves: find the actor that throws it, confirm
-/// it stands still beforehand, and draw the line off its pose. The shattered crystals are the obvious
-/// candidate and the next recording with a shatter in it should settle it.</para>
+/// <para>Left, right, left, right down a column and then again: four lines ten yalms apart, each facing
+/// the opposite way to its neighbour, and **no cast bar on any of them**. Keying the component on the cast
+/// covered nothing, which is why this caught the recorded character at 125.6s of the 19:46 pull with an
+/// empty arena drawn.</para>
+///
+/// <para>What announces them is an event object, one per line. In that pull four parked at
+/// (-790, -380), (-790, -390), (-790, -400) and (-790, -410) at 119.41s facing -90, +90, -90 and +90, and
+/// the lines that fired six seconds later matched those facings exactly. So the markers are the telegraph,
+/// and they give six seconds of warning where the cast gives none.</para>
+///
+/// <para>Rinse and repeat: after a volley resolves the clock is wound forward again rather than the
+/// drawing being dropped, because the markers stay put and fire again. When the mechanic really is over
+/// they despawn and this empties with them.</para>
 /// </summary>
-sealed class SphereShatter(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SphereShatter, new AOEShapeRect(20f, 5f));
+sealed class SphereShatter(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeRect Shape = new(20f, 5f);
+
+    /// <summary>Marker spawn to the line landing, measured at 119.41s and 125.6s of the 19:46 pull.</summary>
+    private const double Lead = 6.2d;
+
+    private readonly List<AOEInstance> aoes = [];
+    private DateTime fires;
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.aoes);
+
+    public override void OnActorCreated(Actor actor)
+    {
+        if (actor.OID == (uint)OID.ShatterMarker)
+            this.fires = World.FutureTime(Lead);
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.SphereShatter)
+            this.fires = World.FutureTime(Lead);   // the set repeats while the markers stand
+    }
+
+    public override void Update()
+    {
+        this.aoes.Clear();
+        foreach (var marker in World.Actors)
+            if (marker.OID == (uint)OID.ShatterMarker && !marker.IsDestroyed)
+                this.aoes.Add(new(Shape, marker.Position, marker.Rotation, this.fires));
+    }
+}
 sealed class TidalRoar(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.TidalRoarVisual);
 
 /// <summary>
