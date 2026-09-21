@@ -56,7 +56,13 @@ public enum SID : uint
     AboutFace = 3716,
     LeftFace = 3717,
     RightFace = 3718,
-    ForcedMarch = 3719,         // the walk itself; its extra is the direction, not the four above
+    ForcedMarch = 3719,         // the walk itself; its extra confirms the direction at the last moment
+}
+
+public enum IconID : uint
+{
+    RotateCW = 493,             // subtracts a quarter turn from the arrow you were given
+    RotateCCW = 494,            // adds one
 }
 
 /// <summary>
@@ -344,39 +350,58 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
 }
 
 /// <summary>
-/// Forced March: the walk you do not steer.
+/// Forced March: the walk you do not steer, aimed by the way you were facing when it started.
 ///
-/// <para>Four statuses land twelve seconds ahead, one per player -- 3715 to 3718, the usual Forward
-/// March, About Face, Left Face, Right Face block -- and then everyone gets 3719 and walks. The direction
-/// is in 3719's own extra and **not** in the four that preceded it, which is the opposite of how this
-/// mechanic usually reads and cost an afternoon to see: across the two recordings, 3715 preceded a
-/// ninety-degree turn once and a hundred-and-forty-seven-degree one the next time, while the extras
-/// lined up perfectly every time. 0x1 walks you the way you face, 0x2 turns you round first -- the
-/// reversed one -- and 0x4 and 0x8 are the quarter turns either way.</para>
+/// <para>Four arrow debuffs land twelve seconds ahead, one per player -- Forward March, About Face, Left
+/// Face, Right Face at 3715 to 3718 -- and two seconds after them each player gets a rotate icon, 493 or
+/// 494, which turns that arrow a quarter. The sum is where you walk, measured from the way you face when
+/// the walk begins. Then 3719 arrives, the game snaps you onto that heading and walks you.</para>
 ///
-/// <para>Measured rather than assumed: 3.1 seconds of walking at just under four yalms a second, so about
-/// twelve yalms. The recorded character went 11.6, and the other three 10.0, 10.3 and 10.4 with their
-/// turns still settling. That is a walk, not the six-yalm run the component assumes by default.</para>
+/// <para>The rotate icon is the whole puzzle and it is easy to miss, because without it the arrows look
+/// random: the same debuff produced opposite turns in two pulls, on hands-off characters. With it, all
+/// eight player-walks across the two recordings fit and nothing is left over. 3715 is no turn, 3716 is
+/// half, 3717 a quarter one way and 3718 a quarter the other; 493 subtracts a quarter and 494 adds one.
+/// It is the same trick this boss plays on Targeted Light, where a rotation is layered over a direction
+/// handed out earlier.</para>
 ///
-/// <para>What this does and does not do. It draws where each player is being taken and says so if that
-/// lands them off the floor. It does not steer, because nothing can: the game owns movement for those
-/// three seconds and the direction is not knowable until the walk begins -- the twelve-second warning
-/// names a player, not a heading. The only real defence is to be standing somewhere that survives any of
-/// the four, which is a positioning rule the dodge does not publish yet.</para>
+/// <para>So it is solvable, and the way to solve it is to choose the facing rather than to predict the
+/// walk: the heading is your facing plus a total this knows ten seconds in advance, so pointing you the
+/// right way decides where you end up. That is what this does -- it looks for a heading whose twelve
+/// yalms neither leave the floor nor cross a burned row, subtracts the turn to get the facing that
+/// produces it, and forbids every other facing so the same machinery that turns you out of a gaze turns
+/// you into this. It needs Face on, and it does nothing once the walk has started, because by then the
+/// game owns both your feet and your facing.</para>
 /// </summary>
 sealed class ForcedMarch : Components.GenericForcedMarch
 {
-    /// <summary>Seconds of walking, from the recorded character's own trace.</summary>
+    /// <summary>Seconds of walking, from the recorded characters own traces.</summary>
     private const float Walk = 3.1f;
+
+    /// <summary>Yalms covered, rounded up from the longest measured (11.6).</summary>
+    private const float Reach = 12f;
+
+    /// <summary>Arrow to walk: measured 11.91s and 11.96s across the two pulls.</summary>
+    private const double Lead = 11.9d;
+
+    private readonly Dictionary<ulong, Angle> arrows = [];
+    private readonly Dictionary<ulong, Angle> turns = [];
+    private DateTime walks;
 
     public ForcedMarch(ModuleBase module)
         : base(module, stopAtWall: true) => this.MovementSpeed = 3.9f;
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status)
     {
-        if (status.ID == (uint)SID.ForcedMarch && Heading(status.Extra) is { } heading)
+        if (Arrow(status.ID) is { } arrow)
         {
-            this.AddForcedMovement(actor, heading, Walk, status.ExpireAt);
+            this.arrows[actor.InstanceID] = arrow;
+            this.turns.Remove(actor.InstanceID);   // the rotate icon has not landed yet
+            this.walks = World.FutureTime(Lead);
+        }
+        else if (status.ID == (uint)SID.ForcedMarch)
+        {
+            this.turns.Remove(actor.InstanceID);
+            this.arrows.Remove(actor.InstanceID);
             this.ActivateForcedMovement(actor, status.ExpireAt);
         }
     }
@@ -387,13 +412,86 @@ sealed class ForcedMarch : Components.GenericForcedMarch
             this.DeactivateForcedMovement(actor);
     }
 
-    /// <summary>Which way the walk goes, read off the status that starts it.</summary>
-    private static Angle? Heading(ushort extra) => extra switch
+    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
     {
-        0x1 => default(Angle),
-        0x2 => 180f.Degrees(),
-        0x4 => 90f.Degrees(),
-        0x8 => -90f.Degrees(),
+        var rotate = iconID switch
+        {
+            (uint)IconID.RotateCW => -90f.Degrees(),
+            (uint)IconID.RotateCCW => 90f.Degrees(),
+            _ => default(Angle?),
+        };
+
+        if (rotate is { } turn && this.arrows.TryGetValue(actor.InstanceID, out var arrow))
+            this.turns[actor.InstanceID] = arrow + turn;
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (!this.turns.TryGetValue(actor.InstanceID, out var turn) || World.CurrentTime > this.walks)
+            return;
+
+        if (this.Facing(actor, turn) is not { } facing)
+            return;
+
+        // leave only the quarter around the facing that aims the walk somewhere survivable, the same way
+        // an inverted gaze leaves only the quarter that faces it
+        hints.ForbiddenDirections.Add((facing + 180f.Degrees(), 135f.Degrees(), this.walks));
+    }
+
+    /// <summary>The facing that sends the walk somewhere worth ending up, or null if nothing does.</summary>
+    private Angle? Facing(Actor actor, Angle turn)
+    {
+        var array = Module.FindComponent<ArcaneArray>();
+        Angle? best = null;
+        var bestSwing = float.MaxValue;
+
+        for (var step = 0; step < 36; ++step)
+        {
+            var heading = (step * 10f).Degrees();
+            if (!this.Survivable(actor, heading, array))
+                continue;
+
+            // among the headings that work, the one asking for the smallest turn, so the dodge is not
+            // spun across the arena for a tie
+            var swing = MathF.Abs((heading - turn - actor.Rotation).Normalized().Rad);
+            if (swing < bestSwing)
+            {
+                bestSwing = swing;
+                best = heading - turn;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Does the whole walk stay on the floor and out of the burned rows?</summary>
+    private bool Survivable(Actor actor, Angle heading, ArcaneArray? array)
+    {
+        var dir = heading.ToDirection();
+        for (var d = 1f; d <= Reach; d += 1f)
+        {
+            var at = actor.Position + (d * dir);
+            if (!Module.InBounds(at))
+                return false;
+
+            if (array == null)
+                continue;
+
+            foreach (ref readonly var aoe in array.ActiveAOEs(0, actor))
+                if (aoe.Check(at))
+                    return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>The arrow you are given, before the rotate icon turns it.</summary>
+    private static Angle? Arrow(uint status) => status switch
+    {
+        (uint)SID.ForwardMarch => default(Angle),
+        (uint)SID.AboutFace => 180f.Degrees(),
+        (uint)SID.LeftFace => 90f.Degrees(),
+        (uint)SID.RightFace => -90f.Degrees(),
         _ => null,
     };
 }
