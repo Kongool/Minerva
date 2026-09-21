@@ -375,7 +375,19 @@ public sealed class ReplayService : IDisposable
     /// Delete what <see cref="ReplayRetention"/> says to, and report it. Runs on load and after each recording ends;
     /// the window calls it too. Does nothing at all until a limit is set.
     /// </summary>
-    public string Purge()
+    /// <summary>
+    /// Apply the retention limits. <paramref name="byHand"/> is the difference between the sweep that runs
+    /// on its own and the button on the Record page.
+    ///
+    /// <para>Age and size retire recordings on their own, because both creep up slowly and predictably.
+    /// Obsolescence does not: the revision is a constant in the source, and the moment it is edited every
+    /// recording on disk becomes obsolete at once. On 2026-09-20 that is exactly what happened -- a build
+    /// carrying one new field deleted the whole library on both boxes the instant it loaded, including a
+    /// night's recordings that had not been looked at yet. A rule that can empty the shelf in one step has
+    /// to be something a person presses, with the count in front of them, not something a constant edit
+    /// triggers while they are in a fight.</para>
+    /// </summary>
+    public string Purge(bool byHand = false)
     {
         var doomed = ReplayRetention.Plan(
             this.OnDisk(),
@@ -383,7 +395,7 @@ public sealed class ReplayService : IDisposable
             this.config.ReplayMaxTotalMB,
             DateTime.UtcNow,
             this.currentPath,
-            this.config.ReplayPurgeObsolete ? ReplayRecorder.Revision : 0);
+            byHand && this.config.ReplayPurgeObsolete ? ReplayRecorder.Revision : 0);
         if (doomed.Count == 0)
             return "Nothing to delete.";
 

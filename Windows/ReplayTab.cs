@@ -135,7 +135,7 @@ public sealed class ReplayTab
         UiKit.Tip("Over the cap, the oldest go first.");
 
         if (ImGui.Button("Purge now"))
-            this.purgeResult = this.replay.Purge();
+            this.purgeResult = this.replay.Purge(byHand: true);   // the only path that may retire obsolete recordings
         UiKit.Tip(cfg.ReplayKeepDays == 0 && cfg.ReplayMaxTotalMB == 0
             ? "Nothing to do until one of the limits above is set. The newest recording, and the one being written, are never deleted."
             : "Applies the limits above right now. The newest recording, and the one being written, are never deleted.");

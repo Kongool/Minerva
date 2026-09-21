@@ -2,6 +2,8 @@
 // Subterrane and V2 Mount Rokkon but no V3 Aloalo Island at all, so there is nothing upstream to port:
 // every shape below is either what the sheet says or what the recording measured.
 using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Minerva;
 
 namespace Minerva.Endwalker.Variant.V3AloaloIsland.V3Quaqua;
@@ -26,7 +28,11 @@ public enum AID : uint
     Rout1 = 35729,                  // Quaqua->location, 4.7s cast, range 45 width 16 rect
     Rout2 = 35730,                  // Quaqua->self, the same rect with NO cast bar: see the Rout component
     ArcaneArmamentsLine = 35731,    // Helper->location, 2.7s cast, range 40 width 10 rect
+    HammerLanding = 35725,          // Quaqua->location, range 40 circle: raidwide-sized on this floor
+    HammerLanding2 = 35726,         // the repeats, same circle
     MadeMagic = 35732,              // Quaqua->location, 4.7s cast, range 50 circle: the raidwide
+    ScaldingWavesWide = 35735,      // AnalaFamiliar->location, range 50 width 8 rect
+    ScaldingWaves = 35736,          // AnalaFamiliar->location, range 50 width 4 rect, in waves
     VioletStorm = 35733,            // Quaqua->location, 5.2s cast, range 32 120-degree cone
     Howl = 35734,                   // Quaqua->location, 3.7s cast, single-target
     CloudToGroundVisual = 35739,    // DrakeFamiliarLarge->location, 3.7s cast, single-target
@@ -61,6 +67,68 @@ sealed class ArcaneArmamentsLine(ModuleBase module) : Components.SimpleAOEs(modu
 sealed class VioletStorm(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VioletStorm, new AOEShapeCone(32f, 60f.Degrees()));
 sealed class MadeMagic(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.MadeMagic);
 
+/// <summary>Forty yalms on a twenty-one yalm floor: it hit the whole party three times in the 19:05 pull,
+/// so it is named rather than drawn as ground to leave.</summary>
+sealed class HammerLanding(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.HammerLanding, (uint)AID.HammerLanding2]);
+
+/// <summary>
+/// The familiars' lines, which are dodgeable and were not drawn at all until now -- twenty of the narrow
+/// ones in the 19:05 pull, one of which caught the recorded character while they were mid-cast. Two
+/// components because the wide and narrow versions are genuinely different widths, and drawing the narrow
+/// one at the wide one's size would forbid ground that is safe.
+/// </summary>
+sealed class ScaldingWavesWide(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScaldingWavesWide, new AOEShapeRect(50f, 4f));
+
+/// <summary>
+/// The narrow waves, read from the familiars rather than from a cast bar they do not have.
+///
+/// <para>Nothing telegraphs an individual shot: no cast, no icon, no tether. What does telegraph it is the
+/// familiars themselves. They teleport into a row along z=94 at four-yalm spacing, stand **perfectly
+/// still** -- 0.0 yalms of movement in the second before every shot measured in the 19:05 pull -- and fire
+/// along their own facing, which matched the line they cast to a tenth of a degree every time. So each
+/// parked familiar is a fifty-yalm line waiting to happen, and drawing it from the actor gives the roughly
+/// two seconds between waves as warning where there was none at all.</para>
+///
+/// <para>Twenty of these landed in that pull and one caught the recorded character mid-cast. The cadence
+/// and the grace period below are what the same pull measured; the wave is assumed over when no shot has
+/// landed for a few seconds, since the familiars simply stop rather than announce anything.</para>
+/// </summary>
+sealed class ScaldingWaves(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeRect Shape = new(50f, 2f);
+
+    /// <summary>Measured gap between waves: 142.2, 144.3, 146.5, 148.5, 150.4, 152.5.</summary>
+    private const double Cadence = 2.1d;
+
+    /// <summary>How long after a shot the row is still assumed to be firing.</summary>
+    private const double Grace = 3.5d;
+
+    private readonly List<AOEInstance> aoes = [];
+    private DateTime nextShot, until;
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.aoes);
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is (uint)AID.ScaldingWaves or (uint)AID.ScaldingWavesWide)
+        {
+            this.nextShot = World.FutureTime(Cadence);
+            this.until = World.FutureTime(Grace);
+        }
+    }
+
+    public override void Update()
+    {
+        this.aoes.Clear();
+        if (World.CurrentTime > this.until)
+            return;
+
+        foreach (var familiar in Module.Enemies((uint)OID.AnalaFamiliar))
+            if (!familiar.IsDeadOrDestroyed)
+                this.aoes.Add(new(Shape, familiar.Position, familiar.Rotation, this.nextShot));
+    }
+}
+
 /// <summary>
 /// The drakes drop six-yalm circles where they aim, in a fast and a slow flavour. Grouped because they
 /// land in waves -- 24 fast casts in one minute of the recording -- and a wave read one circle at a time
@@ -79,7 +147,10 @@ sealed class V3QuaquaStates : StateMachineBuilder
             .ActivateOnEnter<ArcaneArmamentsLine>()
             .ActivateOnEnter<VioletStorm>()
             .ActivateOnEnter<CloudToGround>()
-            .ActivateOnEnter<MadeMagic>();
+            .ActivateOnEnter<MadeMagic>()
+            .ActivateOnEnter<HammerLanding>()
+            .ActivateOnEnter<ScaldingWavesWide>()
+            .ActivateOnEnter<ScaldingWaves>();
     }
 }
 
