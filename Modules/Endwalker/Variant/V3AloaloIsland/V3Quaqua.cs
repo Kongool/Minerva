@@ -28,13 +28,14 @@ public enum AID : uint
     Rout1 = 35729,                  // Quaqua->location, 4.7s cast, range 45 width 16 rect
     Rout2 = 35730,                  // Quaqua->self, the same rect with NO cast bar: see the Rout component
     ArcaneArmamentsLine = 35731,    // Helper->location, 2.7s cast, range 40 width 10 rect
-    HammerLanding = 35725,          // Quaqua->location, range 40 circle: raidwide-sized on this floor
-    HammerLanding2 = 35726,         // the repeats, same circle
+    HammerLanding = 35725,          // Quaqua->location, 7.7s cast: the first hammer, then it leaps
+    HammerLanding2 = 35726,         // the two follow-ups, no cast bar; each also shoves 20y on landing
     MadeMagic = 35732,              // Quaqua->location, 4.7s cast, range 50 circle: the raidwide
     ArcaneArmaments3 = 35743,       // Quaqua->self, single-target
     ElementalImpact = 35744,        // range 14 circle
-    FlowingLance = 35745,           // range 24 width 12 cross
-    FlowingLance2 = 36049,          // the same cross
+    FlowingLance = 35745,           // range 24 width 12 cross, 7.7s cast: the first of seven, steps -15 deg
+    FlowingLance2 = 36049,          // the same cross from the other helper, stepping +15 deg
+    FlowingLance3 = 35746,          // the six repeats from either helper, 0.7s cast each
     ScaldingWavesWide = 35735,      // AnalaFamiliar->location, range 50 width 8 rect
     ScaldingWaves = 35736,          // AnalaFamiliar->location, range 50 width 4 rect, in waves
     VioletStorm = 35733,            // Quaqua->location, 5.2s cast, range 32 120-degree cone
@@ -71,21 +72,103 @@ sealed class ArcaneArmamentsLine(ModuleBase module) : Components.SimpleAOEs(modu
 sealed class VioletStorm(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VioletStorm, new AOEShapeCone(32f, 60f.Degrees()));
 sealed class MadeMagic(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.MadeMagic);
 
+/// <summary>The damage the hammer does on the way down, which is not the dangerous half: see
+/// <see cref="HammerLanding"/> for the shove that follows it.</summary>
+sealed class HammerBlow(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.HammerLanding, (uint)AID.HammerLanding2]);
+
 /// <summary>
-/// Kept as a raidwide, and not confidently.
+/// Three hammer landings, each a twenty-yalm shove away from the spot the hammer comes down on.
 ///
-/// <para>The sheet calls it a forty-yalm circle, which on this floor is everywhere, and it did hit the
-/// whole party three times in the 19:05 pull. Splatoon's community layout for this duty calls it a
-/// fourteen-yalm chariot instead -- dodgeable, if true. The recording cannot settle it: the three hammers
-/// land two seconds apart while everyone is moving, so the hit distances from one landing point come out
-/// as 9.6, 9.7 and 9.9 caught with 10.9 and 11.7 spared, which is no circle at all and simply means the
-/// positions are a frame or two stale.</para>
+/// <para>This was named a raidwide, and a raidwide is not what hurt anyone. Quaqua casts for seven and a
+/// half seconds, the hammer resolves where it stands, and then it leaps -- and the push comes from where
+/// it lands, not from where it cast. At 100.8s of the 19:59 pull two characters standing in different
+/// places were pushed along bearings -105 and -112; those two rays meet at (63.0, -152.5), which is
+/// exactly where Quaqua arrived at 101.46s. The same fit at 279.0s lands on (37.0, -152.5), again the
+/// arrival. Away-from-origin to within a degree, twice, and every target carried a knockback effect.</para>
 ///
-/// <para>Naming it a raidwide is the conservative reading: it warns, and it never tells anyone that ground
-/// forty yalms out is safe when it is not. A pull where the party holds still through one -- or one that
-/// spares somebody standing well clear -- decides it.</para>
+/// <para>Where it lands is knowable ahead of time. The leap runs along the boss's own facing, which it
+/// turns to four tenths of a second into the cast and then holds for the remaining seven and a third, and
+/// the three landing spots sit on a ring fifteen yalms out from the middle of the room -- so the
+/// destination is simply where that facing crosses the ring: fifteen yalms from the middle, twenty-six
+/// from one spot to another. Both measured leaps matched that to a tenth of a yalm. The two follow-ups
+/// carry no cast bar at all and the boss actor's own rotation still reads the previous leap for another
+/// third of a second, so those are read from the cast event, which does carry the new facing, and give
+/// nine tenths of a second of warning each.</para>
+///
+/// <para>Twenty yalms, from the two shoves that were not cut short: 18.7 and 18.9 measured with the
+/// position sampling ending mid-slide. The wall is solid -- two shoves two minutes apart, travelling in
+/// opposite directions, both stopped dead at 24.0 yalms from the middle -- so this cannot push anyone off
+/// the floor, and it is drawn rather than forbidden.</para>
 /// </summary>
-sealed class HammerLanding(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.HammerLanding, (uint)AID.HammerLanding2]);
+sealed class HammerLanding(ModuleBase module) : Components.GenericKnockback(module, stopAtWall: true)
+{
+    private const float Distance = 20f;
+
+    /// <summary>The ring the three landing spots sit on, measured out from the middle of the room.</summary>
+    private const float Ring = 15f;
+
+    /// <summary>Cast event to the shove: the leap itself takes 0.63s and the push follows a quarter of a
+    /// second after the boss arrives.</summary>
+    private const double Shove = 0.9d;
+
+    private readonly List<Knockback> shoves = [];
+    private WPos origin;
+    private DateTime lands;
+
+    /// <summary>While the cast runs the boss can still turn, so its facing is re-read every frame rather
+    /// than stamped once. The time is stamped at the trigger, which is what makes it grow urgent.</summary>
+    private bool leaping;
+
+    public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.shoves);
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID == (uint)AID.HammerLanding)
+        {
+            this.lands = Module.CastFinishAt(cast, Shove);
+            this.leaping = true;
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is not ((uint)AID.HammerLanding or (uint)AID.HammerLanding2))
+            return;
+
+        var from = spell.SourcePos == default ? caster.Position : new WPos(spell.SourcePos.X, spell.SourcePos.Z);
+        this.origin = Landing(from, spell.Rotation);
+        this.lands = World.FutureTime(Shove);
+        this.leaping = false;
+        ++this.NumCasts;
+    }
+
+    public override void Update()
+    {
+        this.shoves.Clear();
+        if (this.lands == default)
+            return;
+
+        if (World.CurrentTime > this.lands.AddSeconds(1d))
+        {
+            this.lands = default;
+            return;
+        }
+
+        var boss = Module.PrimaryActor;
+        this.shoves.Add(new(this.leaping ? Landing(boss.Position, boss.Rotation) : this.origin, Distance, this.lands));
+    }
+
+    /// <summary>Where the leap ends: along the given facing, out to the ring the landing spots sit on. From
+    /// the middle that is fifteen yalms; from one landing spot to another it is the chord, 25.98.</summary>
+    private WPos Landing(WPos from, Angle rot)
+    {
+        var dir = rot.ToDirection();
+        var rel = from - Module.Center;
+        var along = rel.Dot(dir);
+        var disc = (along * along) - rel.LengthSq() + (Ring * Ring);
+        return disc <= 0f ? from + (Ring * dir) : from + ((MathF.Sqrt(disc) - along) * dir);
+    }
+}
 
 /// <summary>
 /// The familiars' lines, which are dodgeable and were not drawn at all until now -- twenty of the narrow
@@ -98,7 +181,56 @@ sealed class HammerLanding(ModuleBase module) : Components.RaidwideCasts(module,
 /// nothing until the 19:59 pull: a fourteen-yalm circle, and a cross whose arms the sheet gives as
 /// twenty-four by twelve.</summary>
 sealed class ElementalImpact(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ElementalImpact, 14f);
-sealed class FlowingLance(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.FlowingLance, (uint)AID.FlowingLance2], new AOEShapeCross(24f, 6f));
+/// <summary>
+/// Two counter-rotating crosses, seven positions each, fifteen degrees apart.
+///
+/// <para>The module drew the first cross of each set and nothing else, because the six that follow carry a
+/// different action id -- 35746 -- which was not in the enum. That is the one that killed the recorded
+/// character: at 163.1s of the 19:59 pull it caught them, at 165.3s both crosses caught them, and 165.97s
+/// is where their HP reached zero with an empty arena drawn. Ten hits across the pull, every one of them
+/// invisible.</para>
+///
+/// <para>The shape is the same cross the first cast uses, confirmed against the hits rather than assumed:
+/// with the character standing still through a whole rotation the caught positions sit 2.2, 2.8 and 5.8
+/// yalms off an arm and the spared ones 6.6, 8.6, 9.9 and further, which is a half-width of six; one spared
+/// at 25.1 yalms along an arm against hits out to 19.2 puts the length at the sheet's twenty-four. The
+/// samples that look like a survivor standing inside an arm are all after 165.97s and are a corpse.</para>
+///
+/// <para>Drawn as a rotation rather than one cast at a time, because each repeat telegraphs for only seven
+/// tenths of a second -- enough to be told, not enough to be walked out of, and stepping clear of one
+/// blindly is how you stand in the next. The sequence is rigid: seven casts 2.1s apart, the 35745 helper
+/// stepping -15 degrees and the 36049 helper +15, mirrored so they sweep into each other. All three sets in
+/// the recording ran exactly that, including the mirrored set that starts at -135 rather than +135.</para>
+/// </summary>
+sealed class FlowingLance(ModuleBase module) : Components.GenericRotatingAOE(module)
+{
+    private static readonly AOEShapeCross Shape = new(24f, 6f);
+
+    /// <summary>The opening cast plus its six repeats.</summary>
+    private const int Casts = 7;
+
+    /// <summary>Measured between resolves across all three sets: 2.0 to 2.2.</summary>
+    private const double Step = 2.1d;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        var increment = spell.Action.ID switch
+        {
+            (uint)AID.FlowingLance => -15f.Degrees(),
+            (uint)AID.FlowingLance2 => 15f.Degrees(),
+            _ => default
+        };
+
+        if (increment != default)
+            this.Sequences.Add(new(Shape, caster.Position, spell.Rotation, increment, Module.CastFinishAt(spell), Step, Casts));
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is (uint)AID.FlowingLance or (uint)AID.FlowingLance2 or (uint)AID.FlowingLance3)
+            this.AdvanceSequence(caster.Position, spell.Rotation, World.CurrentTime);
+    }
+}
 
 sealed class ScaldingWavesWide(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScaldingWavesWide, new AOEShapeRect(25f, 4f, 25f));
 
@@ -178,6 +310,7 @@ sealed class V3QuaquaStates : StateMachineBuilder
             .ActivateOnEnter<VioletStorm>()
             .ActivateOnEnter<CloudToGround>()
             .ActivateOnEnter<MadeMagic>()
+            .ActivateOnEnter<HammerBlow>()
             .ActivateOnEnter<HammerLanding>()
             .ActivateOnEnter<ElementalImpact>()
             .ActivateOnEnter<FlowingLance>()
@@ -201,6 +334,13 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// second 24.1 and 15.2, so the rooms differ in proportion and not only in place. A rectangle of 25 by 21
 /// holds both.</para>
 ///
+/// <para>The width is measured rather than guessed: Hammer Landing shoves people into the east and west
+/// walls, and two shoves two minutes apart, travelling in opposite directions, both stopped dead at 24.0
+/// yalms from the middle. Twenty thousand in-combat position samples reach 24.3 and 24.4, so 24 is the
+/// wall to within half a yalm. The north-south extent is still the old guess and is the weaker half: the
+/// samples run 17.5 south and 22.6 north of the middle, which is either an off-centre room or somebody
+/// standing in the doorway, and nothing so far distinguishes the two.</para>
+///
 /// <para>Erring large here rather than small, which is the opposite of the usual rule, because two things
 /// make it survivable and one makes it necessary: the floor probe refuses a dodge target with no floor
 /// under it, leaving this arena a bound on the search rather than the last word on the ground; and
@@ -215,4 +355,4 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Quaqua(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsRect(25f, 21f));
+    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsRect(24f, 21f));
