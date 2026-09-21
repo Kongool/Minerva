@@ -97,8 +97,8 @@ sealed class HammerBlow(ModuleBase module) : Components.RaidwideCasts(module, [(
 ///
 /// <para>Twenty yalms, from the two shoves that were not cut short: 18.7 and 18.9 measured with the
 /// position sampling ending mid-slide. The wall is solid -- two shoves two minutes apart, travelling in
-/// opposite directions, both stopped dead at 24.0 yalms from the middle -- so this cannot push anyone off
-/// the floor, and it is drawn rather than forbidden.</para>
+/// opposite directions, both stopped dead on the arena edge at 24.17 and 24.27 from the middle -- so this
+/// cannot push anyone off the floor, and it is drawn rather than forbidden.</para>
 /// </summary>
 sealed class HammerLanding(ModuleBase module) : Components.GenericKnockback(module, stopAtWall: true)
 {
@@ -334,12 +334,13 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// second 24.1 and 15.2, so the rooms differ in proportion and not only in place. A rectangle of 25 by 21
 /// holds both.</para>
 ///
-/// <para>The width is measured rather than guessed: Hammer Landing shoves people into the east and west
-/// walls, and two shoves two minutes apart, travelling in opposite directions, both stopped dead at 24.0
-/// yalms from the middle. Twenty thousand in-combat position samples reach 24.3 and 24.4, so 24 is the
-/// wall to within half a yalm. The north-south extent is still the old guess and is the weaker half: the
-/// samples run 17.5 south and 22.6 north of the middle, which is either an off-centre room or somebody
-/// standing in the doorway, and nothing so far distinguishes the two.</para>
+/// <para>The floor is round and the radius is measured, not guessed. Of 20,483 in-combat position samples
+/// 99% sit within 24.2 yalms of the spawn and 99.9% within 24.3, with four samples in the whole recording
+/// beyond 24.5 -- that is an edge, not a tail. Hammer Landing agrees from the other side: it shoves people
+/// into the wall, and two shoves two minutes apart travelling in opposite directions stopped dead at 24.17
+/// and 24.27 from the spawn. It was briefly drawn as a rectangle, which was wrong twice over -- the
+/// screenshot of a square outline on a round floor is what said so -- and the rectangle's corners were
+/// ground nobody can stand on.</para>
 ///
 /// <para>Erring large here rather than small, which is the opposite of the usual rule, because two things
 /// make it survivable and one makes it necessary: the floor probe refuses a dodge target with no floor
@@ -355,4 +356,4 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Quaqua(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsRect(24f, 21f));
+    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsCircle(24f));
