@@ -51,6 +51,12 @@ public enum SID : uint
     BackUnseen = 3727,          // extra 0x298
     RightUnseen = 3728,         // extra 0x299
     LeftUnseen = 3729,          // extra 0x29A
+
+    ForwardMarch = 3715,        // the four that land twelve seconds ahead of the walk, one per player
+    AboutFace = 3716,
+    LeftFace = 3717,
+    RightFace = 3718,
+    ForcedMarch = 3719,         // the walk itself; its extra is the direction, not the four above
 }
 
 /// <summary>
@@ -288,6 +294,61 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
     }
 }
 
+/// <summary>
+/// Forced March: the walk you do not steer.
+///
+/// <para>Four statuses land twelve seconds ahead, one per player -- 3715 to 3718, the usual Forward
+/// March, About Face, Left Face, Right Face block -- and then everyone gets 3719 and walks. The direction
+/// is in 3719's own extra and **not** in the four that preceded it, which is the opposite of how this
+/// mechanic usually reads and cost an afternoon to see: across the two recordings, 3715 preceded a
+/// ninety-degree turn once and a hundred-and-forty-seven-degree one the next time, while the extras
+/// lined up perfectly every time. 0x1 walks you the way you face, 0x2 turns you round first -- the
+/// reversed one -- and 0x4 and 0x8 are the quarter turns either way.</para>
+///
+/// <para>Measured rather than assumed: 3.1 seconds of walking at just under four yalms a second, so about
+/// twelve yalms. The recorded character went 11.6, and the other three 10.0, 10.3 and 10.4 with their
+/// turns still settling. That is a walk, not the six-yalm run the component assumes by default.</para>
+///
+/// <para>What this does and does not do. It draws where each player is being taken and says so if that
+/// lands them off the floor. It does not steer, because nothing can: the game owns movement for those
+/// three seconds and the direction is not knowable until the walk begins -- the twelve-second warning
+/// names a player, not a heading. The only real defence is to be standing somewhere that survives any of
+/// the four, which is a positioning rule the dodge does not publish yet.</para>
+/// </summary>
+sealed class ForcedMarch : Components.GenericForcedMarch
+{
+    /// <summary>Seconds of walking, from the recorded character's own trace.</summary>
+    private const float Walk = 3.1f;
+
+    public ForcedMarch(ModuleBase module)
+        : base(module, stopAtWall: true) => this.MovementSpeed = 3.9f;
+
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == (uint)SID.ForcedMarch && Heading(status.Extra) is { } heading)
+        {
+            this.AddForcedMovement(actor, heading, Walk, status.ExpireAt);
+            this.ActivateForcedMovement(actor, status.ExpireAt);
+        }
+    }
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == (uint)SID.ForcedMarch)
+            this.DeactivateForcedMovement(actor);
+    }
+
+    /// <summary>Which way the walk goes, read off the status that starts it.</summary>
+    private static Angle? Heading(ushort extra) => extra switch
+    {
+        0x1 => default(Angle),
+        0x2 => 180f.Degrees(),
+        0x4 => 90f.Degrees(),
+        0x8 => -90f.Degrees(),
+        _ => null,
+    };
+}
+
 sealed class V3LalaStates : StateMachineBuilder
 {
     public V3LalaStates(ModuleBase module) : base(module)
@@ -298,6 +359,7 @@ sealed class V3LalaStates : StateMachineBuilder
             .ActivateOnEnter<TargetedLight>()
             .ActivateOnEnter<StrategicStrike>()
             .ActivateOnEnter<RollingSpout>()
+            .ActivateOnEnter<ForcedMarch>()
             .ActivateOnEnter<InfernoTheorem>()
             .ActivateOnEnter<FlailSmash>();
     }
