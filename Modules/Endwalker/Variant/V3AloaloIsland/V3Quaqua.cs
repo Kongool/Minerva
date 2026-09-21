@@ -196,9 +196,17 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// facing into it, so the centre is a fixed step along its own facing and survives a room that is turned
 /// around.</para>
 ///
-/// <para>Quaqua stands on the centre itself, so the step is zero. The radius is still the small guess it
-/// always was: a circle that is too small only costs the dodge ground it could have used, one that is too
-/// large walks somebody off the edge.</para>
+/// <para>Quaqua stands on the centre itself, so the step is zero. The shape is sized to cover every room
+/// seen so far rather than the smallest: the first ran 19.7 yalms either side in x and 20.0 in z, the
+/// second 24.1 and 15.2, so the rooms differ in proportion and not only in place. A rectangle of 25 by 21
+/// holds both.</para>
+///
+/// <para>Erring large here rather than small, which is the opposite of the usual rule, because two things
+/// make it survivable and one makes it necessary: the floor probe refuses a dodge target with no floor
+/// under it, leaving this arena a bound on the search rather than the last word on the ground; and
+/// stepping off in this duty costs a bleed rather than a life. What makes it necessary is the 19:59 pull,
+/// where a circle sized to the smaller room left the solver with no reachable safe cell three separate
+/// times while real ground stood empty to the east and west.</para>
 ///
 /// <para>Unclassified, and each one single-target by the sheet, so drawn as nothing rather than as a
 /// guess: Arcane Armaments (the 7.7s wind-up and its 4.7s follow-up), Howl, and the drakes' Cloud to
@@ -207,4 +215,4 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Quaqua(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsCircle(21f));
+    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsRect(25f, 21f));
