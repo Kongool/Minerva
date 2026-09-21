@@ -40,16 +40,52 @@ public enum AID : uint
     FarTide = 35488,                // Ketuduke->self, 1.2s cast, range 8-60 donut: get in
     HydrobombVisual = 35489,        // Ketuduke->self, 2.7s cast, single-target
     Hydrobomb = 35490,              // Ketuduke->location, 2.7s cast, range 5 circle puddle
+    SphereShatter = 35463,          // Ketuduke->self, range 20 width 10 rect: the shattered sphere's line
+    RoarVisual = 35474,             // Ketuduke->self, single-target
+    BubbleNetVisual2 = 35475,       // Ketuduke->self, single-target
+    BubbleNet2 = 35476,             // Ketuduke->self, range 65 circle: the second raidwide
+    UpdraftVisual = 35477,          // Ketuduke->self, single-target
+    Updraft = 35478,                // Helper->self, range 35 circle
+    AerialShockVisual = 35483,      // Ketuduke->self, single-target
+    AerialShock = 35484,            // Helper->self, range 35 circle
     TidalRoarVisual = 35493,        // Ketuduke->self, 4.7s cast, single-target
     TidalRoar = 35494,              // Helper->self, range 100 circle: the raidwide
     WaterIII = 36116,               // SummonedApa->player, 9.7s hardcast, single-target
 }
 
 sealed class SaturateSpheres(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.SaturateSphere, (uint)AID.SaturateSphereFast], 8f);
-sealed class SaturateRects(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.SaturateRect, (uint)AID.SaturateRectFast], new AOEShapeRect(76f, 5f));
+/// <summary>
+/// The crystals' lines, at the length they actually are.
+///
+/// <para>Drawn as seventy-six yalms thrown forward, one line swallowed most of the arena and several of
+/// them left nothing legible -- the report was that the fill was not needed when only two rows are bad.
+/// The sheet's seventy-six is the whole line, not the reach: the community layout for this duty draws it
+/// as thirty-five either side of the crystal, and every hit measured in the 19:46 pull landed within
+/// eighteen yalms of the crystal, so nothing is lost by centring it.</para>
+/// </summary>
+sealed class SaturateRects(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.SaturateRect, (uint)AID.SaturateRectFast], new AOEShapeRect(38f, 5f, 38f));
 sealed class FlukeTyphoon(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.FlukeTyphoon, new AOEShapeRect(40f, 20f));
 sealed class Hydrobomb(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Hydrobomb, 5f);
-sealed class BubbleNet(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.BubbleNet);
+sealed class BubbleNet(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.BubbleNet, (uint)AID.BubbleNet2]);
+
+/// <summary>
+/// Thirty-five yalms on a forty-two yalm floor, which leaves nowhere worth walking to, so both are named
+/// rather than drawn. Updraft is the wind itself and Aerial Shock follows it; neither was covered at all
+/// until the 19:46 pull turned them up.
+/// </summary>
+sealed class WindRaidwides(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.Updraft, (uint)AID.AerialShock]);
+
+/// <summary>
+/// The line a shattered crystal throws, and a warning that it may never draw.
+///
+/// <para>It caught the recorded character at 125.6s of the 19:46 pull with nothing drawn for it. This
+/// component is keyed on the cast, and in that pull the action resolved four times with **no cast bar at
+/// all** -- so it will cover the telegraphed version if one exists and cover nothing otherwise. What it
+/// really needs is the same treatment as Quaqua's scalding waves: find the actor that throws it, confirm
+/// it stands still beforehand, and draw the line off its pose. The shattered crystals are the obvious
+/// candidate and the next recording with a shatter in it should settle it.</para>
+/// </summary>
+sealed class SphereShatter(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SphereShatter, new AOEShapeRect(20f, 5f));
 sealed class TidalRoar(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.TidalRoarVisual);
 
 /// <summary>
@@ -87,6 +123,8 @@ sealed class V3KetudukeStates : StateMachineBuilder
             .ActivateOnEnter<Tides>()
             .ActivateOnEnter<AiryBubble>()
             .ActivateOnEnter<BubbleNet>()
+            .ActivateOnEnter<WindRaidwides>()
+            .ActivateOnEnter<SphereShatter>()
             .ActivateOnEnter<TidalRoar>();
     }
 }
