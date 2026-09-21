@@ -139,6 +139,17 @@ public sealed class RouteGrid
 
     public bool Blocked(int x, int z) => this.blocked[(z * this.w) + x];
 
+    /// <summary>
+    /// Is this cell off the arena floor?
+    ///
+    /// <para>Distinct from <see cref="Blocked"/> on purpose. The cell the character is standing on is
+    /// force-unblocked below so the flood has somewhere to start -- otherwise a character knocked outside
+    /// could not be routed anywhere at all. That makes it walkable, not standable: without this the search
+    /// happily answers "the nearest safe cell is the one you are on" and the dodge leaves someone stranded
+    /// off the floor, which is what it did.</para>
+    /// </summary>
+    public bool Outside(int x, int z) => this.outside[(z * this.w) + x];
+
     public bool Risky(int x, int z) => this.risky[(z * this.w) + x];
 
     /// <summary>

@@ -261,7 +261,15 @@ public static class ArenaPathfinder
         // while requiring the margin of the destination makes the solve stop the instant the player's
         // centre crosses the edge, stranding them on the AOE rim where hitbox radius and server latency
         // still clip them. (Reported in-game as "starts to avoid but doesn't fully leave the AOE".)
-        if (!hints.InImminentDanger(player, deadline, safetyMargin) && !hints.Misplaced(player))
+        // Standing off the floor is a reason to move even when nothing is aimed at you. A knockback puts
+        // people outside the arena several times a fight, and until now the solve looked at that character,
+        // found no AOE on them and said stay: Quaqua, 2026-09-20, three and a third yalms outside the floor
+        // for at least eight seconds with the dodge reporting a spot found and no need to reach it. The
+        // grid already knows how to route in from outside -- it prices outside cells and floods back
+        // through them -- so all that was missing was a reason to ask it.
+        var offTheFloor = !hints.Bounds.Contains(hints.Center, player);
+
+        if (!offTheFloor && !hints.InImminentDanger(player, deadline, safetyMargin) && !hints.Misplaced(player))
         {
             // Nothing is about to land -- but if the ground underfoot is going to fire at all, leaving now
             // is the cheap version of leaving later. Pallmagia, 2026-09-06: the character stood in a
@@ -714,7 +722,10 @@ public static class ArenaPathfinder
         {
             for (var gx = 0; gx < grid.Width; ++gx)
             {
-                if (grid.Blocked(gx, gz) || grid.Risky(gx, gz))
+                // Outside as well as blocked: the cell underfoot is force-unblocked so a character who is
+                // already off the floor can be routed at all, and without this it then qualifies as the
+                // nearest safe place to stand -- the answer that stranded people outside the arena.
+                if (grid.Blocked(gx, gz) || grid.Outside(gx, gz) || grid.Risky(gx, gz))
                     continue;
 
                 var p = grid.Center(gx, gz);

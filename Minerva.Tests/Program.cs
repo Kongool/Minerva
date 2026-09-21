@@ -228,6 +228,21 @@ t.Section("Module framework");
     t.True("point inside AOE detected", aoes[0].Check(new WPos(102, 100)));
     t.True("point outside AOE clear", !aoes[0].Check(new WPos(110, 100)));
 
+    // Knocked off the floor with nothing aimed at you: the solve used to look at the character, find no
+    // AOE on them and answer "stay", so anyone a knockback put outside the arena stood there. Quaqua,
+    // 2026-09-20: three and a third yalms out for eight seconds, the dodge reporting a spot found and no
+    // need to walk to it.
+    {
+        var lost = new AIHints { Center = new WPos(0, 0), Bounds = new ArenaBoundsCircle(20f), PlayerPosition = new WPos(0, 25) };
+        var back = ArenaPathfinder.Solve(lost, DateTime.UtcNow);
+        t.True("being off the floor is a reason to move", back.NeedToMove);
+        t.True("and the way back in is found", back.Found);
+        t.True("which leads onto the floor", back.Target.InCircle(new WPos(0, 0), 20f));
+
+        var home = new AIHints { Center = new WPos(0, 0), Bounds = new ArenaBoundsCircle(20f), PlayerPosition = new WPos(0, 5) };
+        t.True("standing on it with nothing aimed at you still means stay", !ArenaPathfinder.Solve(home, DateTime.UtcNow).NeedToMove);
+    }
+
     // a player standing in it should get a risk hint
     var hints = new ModuleComponent.TextHints();
     var inside = new Actor(0x1, 1, 0, "P", 0, ActorType.Player, new Vector4(101, 0, 100, 0));

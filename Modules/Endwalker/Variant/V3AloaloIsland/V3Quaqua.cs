@@ -89,7 +89,8 @@ sealed class HammerLanding(ModuleBase module) : Components.RaidwideCasts(module,
 /// components because the wide and narrow versions are genuinely different widths, and drawing the narrow
 /// one at the wide one's size would forbid ground that is safe.
 /// </summary>
-sealed class ScaldingWavesWide(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScaldingWavesWide, new AOEShapeRect(50f, 4f));
+/// <summary>The wide wave. Centred on the familiar, not thrown forward from it -- see ScaldingWaves.</summary>
+sealed class ScaldingWavesWide(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScaldingWavesWide, new AOEShapeRect(25f, 4f, 25f));
 
 /// <summary>
 /// The narrow waves, read from the familiars rather than from a cast bar they do not have.
@@ -107,7 +108,14 @@ sealed class ScaldingWavesWide(ModuleBase module) : Components.SimpleAOEs(module
 /// </summary>
 sealed class ScaldingWaves(ModuleBase module) : Components.GenericAOEs(module)
 {
-    private static readonly AOEShapeRect Shape = new(50f, 2f);
+    /// <summary>
+    /// The line runs both ways from the familiar, which is what "the fire waves were not full length"
+    /// meant: it was drawn as fifty yalms thrown forward, so the ground behind the familiar -- real danger
+    /// -- was never marked. In the 19:37 pull players were caught 9.3 and 8.1 yalms behind the line's own
+    /// origin, and as far as 13.0 ahead. Twenty-five each way covers both the sheet's fifty-yalm range and
+    /// the community layout's twenty either side.
+    /// </summary>
+    private static readonly AOEShapeRect Shape = new(25f, 2f, 25f);
 
     /// <summary>Measured gap between waves: 142.2, 144.3, 146.5, 148.5, 150.4, 152.5.</summary>
     private const double Cadence = 2.1d;
