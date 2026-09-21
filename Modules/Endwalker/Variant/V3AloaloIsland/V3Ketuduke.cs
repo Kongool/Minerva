@@ -173,13 +173,18 @@ sealed class V3KetudukeStates : StateMachineBuilder
 /// <summary>
 /// Ketuduke, a route boss of the Aloalo Island variant dungeon.
 ///
-/// <para>The arena is measured, and measured again after the first fit proved half a yalm short. Taking
-/// only the 22,154 samples from after the pull -- the approach to the room was dragging the fit north --
-/// the floor runs 21 yalms either side of (-789.6, -393.0), and the corners are populated, so it is a
-/// square and not the circle the extractor proposed. The first attempt, half-20 about (-789.8, -392.5),
-/// put 4.9% of the ground people actually stood on outside the arena, three quarters of it along the north
-/// edge; this leaves 0.7%. Half-22 would cover every last sample, which is the wrong side to err on for a
-/// boundary nobody has proven is solid.</para>
+/// <para>The arena is derived from the boss rather than written down, because this duty puts the same
+/// boss in a different room each run: Quaqua was fought at (-538, 94) and again at (50, -160), and a
+/// hardcoded centre meant the dodge judged an arena that was several hundred yalms away -- every cell off
+/// the floor, no safe spot anywhere, the module loaded and useless. The boss spawns on the room's axis
+/// facing into it, so the centre is a fixed step along its own facing and survives a room that is turned
+/// around.</para>
+///
+/// <para>Ketuduke spawns twelve yalms short of its room centre, which is why the step is twelve: from its
+/// spawn at (-790, -405) that lands on (-790, -393), the centre measured from 22,154 in-combat samples.
+/// The floor runs 21 yalms either side of it and the corners are populated, so it is a square and not the
+/// circle the extractor proposed. Half-22 would cover every last sample, which is the wrong side to err on
+/// for a boundary nobody has proven is solid.</para>
 ///
 /// <para>Left uncovered, each single-target by the sheet and each a wind-up for something else: Spring
 /// Crystals (the crystals then cast the lines that are covered), the Bubble Net and Tidal Roar visuals
@@ -190,4 +195,4 @@ sealed class V3KetudukeStates : StateMachineBuilder
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Ketuduke(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, new WPos(-789.6f, -393.0f).Quantized(), new ArenaBoundsSquare(21f));
+    : ModuleBase(ws, primary, (primary.Position + (12f * primary.Rotation.ToDirection())).Quantized(), new ArenaBoundsSquare(21f));

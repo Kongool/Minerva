@@ -31,6 +31,10 @@ public enum AID : uint
     HammerLanding = 35725,          // Quaqua->location, range 40 circle: raidwide-sized on this floor
     HammerLanding2 = 35726,         // the repeats, same circle
     MadeMagic = 35732,              // Quaqua->location, 4.7s cast, range 50 circle: the raidwide
+    ArcaneArmaments3 = 35743,       // Quaqua->self, single-target
+    ElementalImpact = 35744,        // range 14 circle
+    FlowingLance = 35745,           // range 24 width 12 cross
+    FlowingLance2 = 36049,          // the same cross
     ScaldingWavesWide = 35735,      // AnalaFamiliar->location, range 50 width 8 rect
     ScaldingWaves = 35736,          // AnalaFamiliar->location, range 50 width 4 rect, in waves
     VioletStorm = 35733,            // Quaqua->location, 5.2s cast, range 32 120-degree cone
@@ -90,6 +94,12 @@ sealed class HammerLanding(ModuleBase module) : Components.RaidwideCasts(module,
 /// one at the wide one's size would forbid ground that is safe.
 /// </summary>
 /// <summary>The wide wave. Centred on the familiar, not thrown forward from it -- see ScaldingWaves.</summary>
+/// <summary>Two mechanics from a route the earlier pulls never took, both dodgeable and both drawn by
+/// nothing until the 19:59 pull: a fourteen-yalm circle, and a cross whose arms the sheet gives as
+/// twenty-four by twelve.</summary>
+sealed class ElementalImpact(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ElementalImpact, 14f);
+sealed class FlowingLance(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.FlowingLance, (uint)AID.FlowingLance2], new AOEShapeCross(24f, 6f));
+
 sealed class ScaldingWavesWide(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScaldingWavesWide, new AOEShapeRect(25f, 4f, 25f));
 
 /// <summary>
@@ -169,6 +179,8 @@ sealed class V3QuaquaStates : StateMachineBuilder
             .ActivateOnEnter<CloudToGround>()
             .ActivateOnEnter<MadeMagic>()
             .ActivateOnEnter<HammerLanding>()
+            .ActivateOnEnter<ElementalImpact>()
+            .ActivateOnEnter<FlowingLance>()
             .ActivateOnEnter<ScaldingWavesWide>()
             .ActivateOnEnter<ScaldingWaves>();
     }
@@ -177,10 +189,16 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// <summary>
 /// Quaqua, a route boss of the Aloalo Island variant dungeon.
 ///
-/// <para>The arena is a guess and deliberately a small one. The recording that produced this module is
-/// half a pull -- a plugin reload split it -- and half a pull does not show where the floor ends. A circle
-/// that is too small only costs the dodge some ground it could have used; one that is too large walks
-/// somebody off the edge. Widen it once a whole pull has been watched.</para>
+/// <para>The arena is derived from the boss rather than written down, because this duty puts the same
+/// boss in a different room each run: Quaqua was fought at (-538, 94) and again at (50, -160), and a
+/// hardcoded centre meant the dodge judged an arena that was several hundred yalms away -- every cell off
+/// the floor, no safe spot anywhere, the module loaded and useless. The boss spawns on the room's axis
+/// facing into it, so the centre is a fixed step along its own facing and survives a room that is turned
+/// around.</para>
+///
+/// <para>Quaqua stands on the centre itself, so the step is zero. The radius is still the small guess it
+/// always was: a circle that is too small only costs the dodge ground it could have used, one that is too
+/// large walks somebody off the edge.</para>
 ///
 /// <para>Unclassified, and each one single-target by the sheet, so drawn as nothing rather than as a
 /// guess: Arcane Armaments (the 7.7s wind-up and its 4.7s follow-up), Howl, and the drakes' Cloud to
@@ -189,4 +207,4 @@ sealed class V3QuaquaStates : StateMachineBuilder
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Quaqua(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, new WPos(-538f, 94.8f).Quantized(), new ArenaBoundsCircle(21f));
+    : ModuleBase(ws, primary, primary.Position.Quantized(), new ArenaBoundsCircle(21f));
