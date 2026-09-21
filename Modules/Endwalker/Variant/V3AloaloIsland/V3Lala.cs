@@ -188,7 +188,28 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
     /// <summary>How long a square may outlive its predicted time before it is dropped unfired.</summary>
     private const double Lingers = 3d;
 
-    private readonly List<AOEInstance> aoes = [];
+    /// <summary>
+    /// How long the burned ground keeps bleeding after the last square of a set goes off.
+    ///
+    /// <para>Measured from who was bleeding and when: the 21:08 set finished at 464.6s and players were
+    /// still being given the status at 474.0, which is 9.4 seconds later and covers the forced march that
+    /// walked through it. The earlier set, which no march followed, stopped at 5.1. Ten seconds covers
+    /// the long case; the lines are reported to go out when the march ends, and the march is what the set
+    /// before it exists to set up.</para>
+    /// </summary>
+    private const double Burns = 10d;
+
+    /// <summary>What the radar and the dodge see: the squares still to come, plus the ground already
+    /// burned and still bleeding.</summary>
+    private readonly List<AOEInstance> active = [];
+
+    /// <summary>Squares that have not gone off yet, each with the moment it will.</summary>
+    private readonly List<AOEInstance> schedule = [];
+
+    /// <summary>Squares that have gone off and are still a bleed line underfoot.</summary>
+    private readonly List<WPos> burned = [];
+
+    private DateTime burnedUntil;
     private readonly List<(bool Bright, WPos Origin, Angle Dir)> arrows = [];
 
     /// <summary>When the opening square lands. Stamped at the cast, never recomputed per frame.</summary>
@@ -196,7 +217,7 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
 
     private DateTime spawned;
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.aoes);
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.active);
 
     public override void OnCastStarted(Actor caster, ActorCastInfo cast)
     {
@@ -236,25 +257,53 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
             return;
 
         var at = spell.SourcePos == default ? caster.Position : new WPos(spell.SourcePos.X, spell.SourcePos.Z);
-        var i = this.aoes.FindIndex(a => (a.Origin - at).LengthSq() <= 1f);
+        var i = this.schedule.FindIndex(a => (a.Origin - at).LengthSq() <= 1f);
         if (i >= 0)
-            this.aoes.RemoveAt(i);
+            this.schedule.RemoveAt(i);
+
+        if (!this.burned.Exists(b => (b - at).LengthSq() <= 1f))
+            this.burned.Add(at);
+
+        // every square pushes the whole set's expiry out, so the lines go together rather than one lane
+        // at a time -- which is what the last set before the march does, covering everything but one row
+        this.burnedUntil = World.FutureTime(Burns);
+    }
+
+    /// <summary>
+    /// The march holds the lines open.
+    ///
+    /// <para>They are reported to go out when the walk ends, and the set before the march is the one that
+    /// covers the floor bar a single row -- so the ten seconds is a floor, not the rule, and a walk that
+    /// runs past it keeps the ground burning until it finishes. Both sets are treated the same way; only
+    /// the second is usually followed by a march.</para>
+    /// </summary>
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == (uint)SID.ForcedMarch && this.burned.Count != 0 && status.ExpireAt > this.burnedUntil)
+            this.burnedUntil = status.ExpireAt;
     }
 
     public override void Update()
     {
+        var now = World.CurrentTime;
+
+        if (this.burned.Count != 0 && now > this.burnedUntil)
+            this.burned.Clear();
+
         // the backstop, for a square whose pulse never arrives: generous, because the event is the real
         // clearer and this only exists so a missed one cannot sit on the floor forever
-        if (this.aoes.Count != 0)
-        {
-            var stale = World.CurrentTime.AddSeconds(-Lingers);
-            this.aoes.RemoveAll(a => a.Activation < stale);
-        }
+        if (this.schedule.Count != 0)
+            this.schedule.RemoveAll(a => a.Activation < now.AddSeconds(-Lingers));
+
+        this.active.Clear();
+        this.active.AddRange(this.schedule);
+        for (var i = 0; i < this.burned.Count; ++i)
+            this.active.Add(new(Cell, this.burned[i], default, now));   // burning now, not later
     }
 
     private void Rebuild()
     {
-        this.aoes.Clear();
+        this.schedule.Clear();
 
         var lead = 0;
         foreach (var arrow in this.arrows)
@@ -266,10 +315,10 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
             var start = arrow.Bright ? 0 : lead;
             var cells = Line(arrow);
             for (var i = 0; i < cells.Count; ++i)
-                this.aoes.Add(new(Cell, cells[i], default, this.first.AddSeconds((start + i) * Cadence)));
+                this.schedule.Add(new(Cell, cells[i], default, this.first.AddSeconds((start + i) * Cadence)));
         }
 
-        this.aoes.Sort(static (a, b) => a.Activation.CompareTo(b.Activation));
+        this.schedule.Sort(static (a, b) => a.Activation.CompareTo(b.Activation));
     }
 
     /// <summary>
