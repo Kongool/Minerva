@@ -13,6 +13,7 @@ public enum OID : uint
 {
     Boss = 0x4039,              // Lala
     Helper = 0x233C,            // also named Lala: casts the cleave, the pulses and the light
+    Kapokapo = 0x403B,          // the flower the boss plants: one Rolling Spout each
     Rodiaki = 0x403C,           // the route add
     ArrowBright = 0x1EB941,     // marks a line of squares that fires first
     ArrowDim = 0x1EB942,        // marks a line that waits for the bright ones to finish
@@ -23,6 +24,7 @@ public enum AID : uint
 {
     AutoAttack = 872,
     ArcaneBlightFront = 34927,      // Lala->self: the wind-up, always facing 180 whichever way it cleaves
+    ArcaneBlightLeft = 34928,       // a third wind-up, from the 21:08 pull
     ArcaneBlightBack = 34930,       // the other wind-up seen in the recording
     ArcaneBlightAOE = 34931,        // Helper->self: the cleave itself, and the only one that carries the angle
     Teleport = 34932,               // Lala->location, no cast
@@ -34,6 +36,8 @@ public enum AID : uint
     CalculatedTrajectory = 34941,   // Lala->self, no damage in the recording
     StrategicStrike = 34942,        // Lala->player: tankbuster, hit only its target
     InfernoTheorem = 34943,         // Lala->self: raidwide
+    FloralFigure = 34944,           // Lala->self: plants the flowers
+    RollingSpout = 34945,           // Kapokapo->self, 4.9s cast: the flower's donut
     FaunalFigure = 34946,           // Lala->self: summons the golems
     FlailSmash = 34947,             // Rodiaki->self: caught everyone out to 47 yalms
     FlailSmash2 = 35436,            // the second form
@@ -69,6 +73,28 @@ sealed class FlailSmash(ModuleBase module) : Components.RaidwideCasts(module, [(
 
 /// <summary>Hit its target and nobody else, at five yalms, with three other people inside eleven.</summary>
 sealed class StrategicStrike(ModuleBase module) : Components.SingleTargetCast(module, (uint)AID.StrategicStrike);
+
+/// <summary>
+/// The flowers' donut: stand on the flower, not near it.
+///
+/// <para>Floral Figure plants a Kapokapo at a fixed spot and each one casts this for 4.9 seconds. The
+/// two that fired in the 21:08 pull spared everyone at 0.5, 1.6 and 3.5 yalms, caught the one character
+/// at 10.4 and 12.2, and spared everyone again from 20.2 out -- a ring, with the flower itself safe. That
+/// is the whole of the direct evidence, so the hole is bracketed between 3.5 and 10.4 and the outer edge
+/// between 12.2 and 20.2.</para>
+///
+/// <para>The hole is four, which is what the community layout for this duty draws as the safe circle and
+/// which sits at the near end of the bracket -- the end to be wrong at, because a hole drawn larger than
+/// it is puts somebody in the ring believing they are clear.</para>
+///
+/// <para>The outer is fifteen, and it is the second wave that argues for it rather than the first. The
+/// boss planted four flowers at 483.5s, at (143, -854), (127, -862), (143, -878) and (127, -886), and the
+/// pull ended before they cast. The nearest two holes are 17.9 yalms apart, so any ring reaching that far
+/// would swallow its neighbours' holes and the wave would have no answer at all -- which means the real
+/// outer edge is comfortably under it, and fifteen is the round number between there and the 12.2 that
+/// was measured. A pull that lives through a four-flower wave settles it properly.</para>
+/// </summary>
+sealed class RollingSpout(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.RollingSpout, new AOEShapeDonut(4f, 15f));
 
 /// <summary>
 /// Targeted Light: turn your unseen side toward the light. The same mechanic Mustadio runs in Rabanastre,
@@ -153,6 +179,9 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
     /// <summary>Only used if an arrow ever appears without the cast that times it.</summary>
     private const double Fallback = 11.8d;
 
+    /// <summary>How long a square may outlive its predicted time before it is dropped unfired.</summary>
+    private const double Lingers = 3d;
+
     private readonly List<AOEInstance> aoes = [];
     private readonly List<(bool Bright, WPos Origin, Angle Dir)> arrows = [];
 
@@ -187,11 +216,32 @@ sealed class ArcaneArray(ModuleBase module) : Components.GenericAOEs(module)
         this.Rebuild();
     }
 
+    /// <summary>
+    /// A square comes off the radar when its own pulse fires, not when the schedule says it should have.
+    ///
+    /// <para>Clearing on the predicted time was clearing too early in game. The schedule is accurate --
+    /// the cadence drifts at most 0.15s over ten steps -- but it is still a prediction, and a square that
+    /// vanishes while the explosion is on screen reads as the danger being over. The game announces every
+    /// square as it goes off, so that is what removes it.</para>
+    /// </summary>
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is not ((uint)AID.BrightPulseFirst or (uint)AID.BrightPulseRest))
+            return;
+
+        var at = spell.SourcePos == default ? caster.Position : new WPos(spell.SourcePos.X, spell.SourcePos.Z);
+        var i = this.aoes.FindIndex(a => (a.Origin - at).LengthSq() <= 1f);
+        if (i >= 0)
+            this.aoes.RemoveAt(i);
+    }
+
     public override void Update()
     {
+        // the backstop, for a square whose pulse never arrives: generous, because the event is the real
+        // clearer and this only exists so a missed one cannot sit on the floor forever
         if (this.aoes.Count != 0)
         {
-            var stale = World.CurrentTime.AddSeconds(-0.6d);
+            var stale = World.CurrentTime.AddSeconds(-Lingers);
             this.aoes.RemoveAll(a => a.Activation < stale);
         }
     }
@@ -247,6 +297,7 @@ sealed class V3LalaStates : StateMachineBuilder
             .ActivateOnEnter<ArcaneArray>()
             .ActivateOnEnter<TargetedLight>()
             .ActivateOnEnter<StrategicStrike>()
+            .ActivateOnEnter<RollingSpout>()
             .ActivateOnEnter<InfernoTheorem>()
             .ActivateOnEnter<FlailSmash>();
     }
@@ -273,12 +324,16 @@ sealed class V3LalaStates : StateMachineBuilder
 /// covers 40 by 40 and the floor is the square of half-20 that BossmodReborn also uses for the criterion
 /// version of this room.</para>
 ///
-/// <para>Left uncovered, and each of them a wind-up rather than damage: Teleport, the two Arcane Blight
+/// <para>Left uncovered, and each of them a wind-up rather than damage: Teleport, the three Arcane Blight
 /// visuals (the helper's cast carries the real angle and is drawn), both Arcane Plot visuals (the arrows
-/// they create are drawn), Analysis and Calculated Trajectory. Faunal Figure is the real gap: it summons
-/// the golems whose Aero is a 50-by-8 line in the criterion version, and in this recording the golems
-/// never lived long enough to cast, so the variant's action id for it is still unknown. A pull where they
-/// get a cast off would close it.</para>
+/// they create are drawn), Analysis, Calculated Trajectory, and the two summons -- Floral Figure, whose
+/// flowers cast the Rolling Spout that is drawn, and Faunal Figure, whose golems are the real gap. Their
+/// Aero is a 50-by-8 line in the criterion version and in neither recording did a golem live long enough
+/// to cast, so the variant's id for it is still unknown.</para>
+///
+/// <para>Which adds turn up depends on the route: the 20:29 pull had Rodiaki and its raidwide, the 21:08
+/// pull had the flowers instead. Both are covered; a route that sends the golems is the one still
+/// missing.</para>
 /// </summary>
 [ModuleInfo(CFCID = 961u, PrimaryActorOID = (uint)OID.Boss, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva, from a recording")]
 public sealed class V3Lala(WorldState ws, Actor primary)
