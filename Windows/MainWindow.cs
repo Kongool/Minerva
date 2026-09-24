@@ -216,7 +216,8 @@ public sealed class MainWindow : Window, IDisposable
                 ("Unscripted content", cfg.AutoHintsForTrash, v => cfg.AutoHintsForTrash = v, "Also dodge trash and open-world casts, guessed from enemy cast bars when no boss module is active."),
                 ("Auto-move", cfg.AutoDodgeEnabled, v => cfg.AutoDodgeEnabled = v, "Steer your character to the safe spot. Experimental."),
                 ("Face gazes", cfg.AutoFaceGazes, v => cfg.AutoFaceGazes = v, "Turn your character away from gazes. Experimental."),
-                ("Navmesh", cfg.UseNavmesh, v => cfg.UseNavmesh = v, "Path around walls with Ariadne or vnavmesh when available; falls back to direct steering."));
+                ("Navmesh", cfg.UseNavmesh, v => cfg.UseNavmesh = v, "Path around walls with Ariadne or vnavmesh when available; falls back to direct steering."),
+                ("Follow my target", cfg.UptimeFollowsOwnTarget, v => cfg.UptimeFollowsOwnTarget = v, "Keep uptime on your own target before the boss, so a rotation that switches to adds gets walked to them."));
             if (ImGui.BeginTable("##dodge", 2, ImGuiTableFlags.SizingStretchProp))
             {
                 ImGui.TableSetupColumn("k", ImGuiTableColumnFlags.WidthFixed, 110f);

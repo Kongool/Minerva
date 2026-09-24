@@ -162,6 +162,9 @@ public sealed class AIManager
             return;
         }
 
+        // Modules flag invulnerable phases one fight at a time; this covers the ones that do not.
+        this.hints.MarkInvincibleByStatus();
+
         var now = this.world.CurrentTime;
         this.MustNotAct = this.hints.MustNotAct(now);
         this.MustNotMove = this.hints.MustNotMove(now);
@@ -637,7 +640,13 @@ public sealed class AIManager
     {
         var target = this.hints.ForcedTarget is { IsDeadOrDestroyed: false } forced ? forced
             : this.PrioritisedTarget(pc)
-            ?? (module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.Forbidden(boss) ? boss
+            // The rotation's target, ahead of the boss: when Daedalus retargets onto an add, the add is where
+            // uptime is. Forbidden targets are skipped, so an invincible boss the player still has targeted
+            // falls through to the lines below exactly as before.
+            ?? (this.config.UptimeFollowsOwnTarget
+                && this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } own
+                && !this.Forbidden(own) ? own
+            : module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.Forbidden(boss) ? boss
             : this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } t ? t
             // Trash, with nothing targeted: follow whatever is already fighting us, as BossmodReborn's AI does. Only
             // reached without a module and without a target of one's own -- a boss fight keys on its primary actor,

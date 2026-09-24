@@ -153,6 +153,12 @@ public sealed class Configuration : IPluginConfiguration
     /// out when something puts them under it.</summary>
     public float CasterStandoff { get; set; }
 
+    /// <summary>The walk back to uptime goes to your own target before the module's boss. On for rotation plugins
+    /// (Daedalus) that retarget onto adds during invulnerable phases: without it, a module that does not flag the boss
+    /// invincible walks the character back to it while the rotation is trying to hit the add. Priority and forced
+    /// targets still come first, and a target the module forbids is never followed.</summary>
+    public bool UptimeFollowsOwnTarget { get; set; } = true;
+
     /// <summary>The main window was last left in its compact state, so the next open returns to it.</summary>
     public bool MiniWindowActive { get; set; }
 

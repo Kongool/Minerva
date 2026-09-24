@@ -857,6 +857,41 @@ public sealed class AIHints
     }
 
     /// <summary>
+    /// Enemy statuses that mean "cannot be damaged", gathered from the modules that already check for them
+    /// (325, 775, 671, 4410, 4875 -- all Invincibility on bosses or adds). 1570 is deliberately absent: it is the
+    /// player-side cutscene invincibility. Directional wards (1125) are not total, so they are left to modules.
+    /// </summary>
+    private static readonly uint[] InvincibleStatusIds = [325, 775, 671, 4410, 4875];
+
+    /// <summary>
+    /// Marks every potential target that is invincible by status, or no longer targetable, as
+    /// <see cref="Enemy.PriorityInvincible"/>. Runs after the module has built its hints, so a fight whose module
+    /// never flagged its invulnerable phase still stops the walk back to the boss -- and the forbidden list
+    /// published over IPC picks it up too, so the rotation drops the target on the same frame.
+    /// </summary>
+    public void MarkInvincibleByStatus()
+    {
+        foreach (var e in this.PotentialTargets)
+        {
+            if (e.Priority <= Enemy.PriorityInvincible)
+                continue;
+            if (!e.Actor.IsTargetable)
+            {
+                e.Priority = Enemy.PriorityInvincible;
+                continue;
+            }
+            foreach (var sid in InvincibleStatusIds)
+            {
+                if (e.Actor.FindStatus(sid) != null)
+                {
+                    e.Priority = Enemy.PriorityInvincible;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Distances closer than this count as the same distance when choosing between targets. Veyn's BossMod clamps at
     /// three yalms for exactly one reason, stated in its own comment: without it the choice flips between two mobs
     /// standing near each other, sometimes every frame, and the character shuffles between them instead of fighting.
