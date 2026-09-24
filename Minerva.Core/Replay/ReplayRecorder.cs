@@ -34,7 +34,9 @@ public sealed class ReplayRecorder : IDisposable
     /// <para>2: cast events carry the position their caster fired from (2026-09-20), so an ability that
     /// moves its caster can be placed at all. Recordings without it cannot answer where a dashing boss
     /// swept from.</para>
-    public const int Revision = 2;
+    /// <para>3: the dodge decision carries the enemy the uptime walk was aimed at (2026-09-24), so a replay can
+    /// show the character being walked to the add or back to the boss without inferring it from coordinates.</para>
+    public const int Revision = 3;
 
     private readonly WorldState ws;
     private readonly TextWriter writer;

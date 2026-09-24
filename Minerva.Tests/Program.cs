@@ -326,7 +326,7 @@ t.Section("Replay round-trip");
         live.Execute(new ActorState.OpCastInfo(boss, cast));
         live.Execute(new ActorState.OpStatus(player, 0, new ActorStatus(1871, 0, live.FutureTime(15), boss)));
         live.Execute(new ActorState.OpMove(boss, new Vector4(40, 0, -95, 1.5f)));
-        live.Execute(new OpDodgeDecision(new DodgeDecision(true, true, new WPos(37f, -92f), DodgeReason.Danger, DodgeBlocker.None, true) { GazeUp = true, Turning = true, Mover = Mover.NavPath, MoverBusy = true }));
+        live.Execute(new OpDodgeDecision(new DodgeDecision(true, true, new WPos(37f, -92f), DodgeReason.Danger, DodgeBlocker.None, true) { GazeUp = true, Turning = true, Mover = Mover.NavPath, MoverBusy = true, UptimeTargetID = boss }));
         live.Execute(new ActorState.OpCastInfo(boss, null));
     }
 
@@ -389,11 +389,13 @@ t.Section("Replay round-trip");
         && rebuilt.LastDodge.Target.AlmostEqual(new WPos(37f, -92f), 0.01f));
     t.True("the facing half of the decision round-trips", rebuilt.LastDodge is { GazeUp: true, Turning: true });
     t.True("the mover half of the decision round-trips", rebuilt.LastDodge is { Mover: Mover.NavPath, MoverBusy: true, MoverKnown: true });
+    t.True("the uptime target round-trips", rebuilt.LastDodge.UptimeTargetKnown && rebuilt.LastDodge.UptimeTargetID == 0x40000AAAAul);
     {
         // a decision line written before the mover fields existed still parses, with the mover unknown
         var old = new WorldState(10_000_000, "old");
         ReplayParser.Replay(new System.IO.StringReader("MINERVA-REPLAY 2 10000000 old 0\n0 DODG 7 -149.000 -864.000 1 0\n"), ws => old = ws);
         t.True("an older decision line parses without mover fields", old.LastDodge is { Known: true, NeedToMove: true, Steering: true, Mover: Mover.None, MoverBusy: false });
+        t.True("an older decision line reads its uptime target as unknown", !old.LastDodge.UptimeTargetKnown && old.LastDodge.UptimeTargetID == 0ul);
     }
     t.True("a steer with an idle mover names the mover", new DodgeDecision(true, true, default, DodgeReason.Danger, DodgeBlocker.None, true) { Known = true, Mover = Mover.NavPath, MoverKnown = true }.Explain(true, 3f).Contains("nothing driving"));
     t.True("a hit while walking for uptime is a zone the module never drew",

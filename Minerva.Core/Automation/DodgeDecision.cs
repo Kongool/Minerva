@@ -82,6 +82,13 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
     /// <summary>The mover fields were recorded (logs before 2026-09-05 evening have none).</summary>
     public bool MoverKnown { get; init; }
 
+    /// <summary>The enemy the walk back to uptime was aimed at this frame (0 = none). This is what tells a replay
+    /// whether the character was being walked to the add or back to the boss.</summary>
+    public ulong UptimeTargetID { get; init; }
+
+    /// <summary>The uptime target was recorded (logs before recorder revision 3 have none).</summary>
+    public bool UptimeTargetKnown { get; init; }
+
     /// <summary>One line for a live readout: what the dodge is doing right now.</summary>
     public string Describe(float distanceToTarget)
     {
@@ -171,7 +178,7 @@ public sealed class OpDodgeDecision(DodgeDecision value) : WorldState.Operation
         var flags = (this.Value.NeedToMove ? 1u : 0u) | (this.Value.Found ? 2u : 0u) | (this.Value.Steering ? 4u : 0u)
             | (this.Value.GazeUp ? 8u : 0u) | (this.Value.Turning ? 16u : 0u);
         o.Tag("DODG").Emit(flags).Emit(this.Value.Target.X).Emit(this.Value.Target.Z).Emit((uint)this.Value.Reason).Emit((uint)this.Value.Blocker)
-            .Emit((uint)this.Value.Mover).Emit(this.Value.MoverBusy);
+            .Emit((uint)this.Value.Mover).Emit(this.Value.MoverBusy).Emit(this.Value.UptimeTargetID, "X");
     }
 
     /// <summary>The parser's half of <see cref="Write"/>. The mover fields are trailing and optional, so
@@ -192,12 +199,21 @@ public sealed class OpDodgeDecision(DodgeDecision value) : WorldState.Operation
             busy = r.NextBool();
             moverKnown = true;
         }
+        var uptimeTarget = 0ul;
+        var uptimeKnown = false;
+        if (r.HasMore)
+        {
+            uptimeTarget = r.NextHex64();
+            uptimeKnown = true;
+        }
         return new(new DodgeDecision((flags & 1u) != 0, (flags & 2u) != 0, new WPos(x, z), reason, blocker, (flags & 4u) != 0)
         {
             GazeUp = (flags & 8u) != 0,
             Turning = (flags & 16u) != 0,
             Mover = mover,
             MoverBusy = busy,
+            UptimeTargetID = uptimeTarget,
+            UptimeTargetKnown = uptimeKnown,
             MoverKnown = moverKnown,
         });
     }

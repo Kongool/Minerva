@@ -19,6 +19,9 @@ public sealed class AIManager
     private readonly WorldState world;
     private readonly ModuleManager modules;
     private readonly Configuration config;
+
+    /// <summary>This frame's uptime target, carried into the recorded decision.</summary>
+    private ulong uptimeTargetId;
     private readonly IMovementController movement;
     private readonly AIHints hints = new();
     private readonly AutoHints? autoHints;
@@ -158,6 +161,7 @@ public sealed class AIManager
         {
             // nothing authored and nothing guessable: stay out of the way rather than invent guidance
             this.movement.Stop();
+            this.uptimeTargetId = 0ul;
             this.Publish(this.Decide(false, false, default, DodgeReason.None, DodgeBlocker.NoModule, false));
             return;
         }
@@ -183,6 +187,7 @@ public sealed class AIManager
         // let the role say what uptime means. A tank and a Black Mage do not want the same distance, and
         // scoring both against melee reach is what walks a caster into the boss to save a yard of travel.
         var target = this.UptimeTarget(module, pc);
+        this.uptimeTargetId = target?.InstanceID ?? 0ul;
         UptimeGoal? goal = target != null
             ? UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.config.CasterStandoff)
             : null;
@@ -330,6 +335,8 @@ public sealed class AIManager
             Turning = this.SafeFacing != null && this.config.AutoFaceGazes,
             Mover = this.movement.Mode,
             MoverBusy = this.movement.Busy,
+            UptimeTargetID = this.uptimeTargetId,
+            UptimeTargetKnown = true,
         };
 
     /// <summary>
