@@ -645,7 +645,7 @@ public sealed class AIManager
             // falls through to the lines below exactly as before.
             ?? (this.config.UptimeFollowsOwnTarget
                 && this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } own
-                && !this.Forbidden(own) ? own
+                && !this.Forbidden(own) && this.ReachableOnThisFloor(pc, own) ? own
             : module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.Forbidden(boss) ? boss
             : this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } t ? t
             // Trash, with nothing targeted: follow whatever is already fighting us, as BossmodReborn's AI does. Only
@@ -669,6 +669,29 @@ public sealed class AIManager
         var best = this.hints.BestPrioritisedTarget(pc.Position, pc.TargetID, this.lastPrioritised);
         this.lastPrioritised = best?.InstanceID ?? 0ul;
         return best;
+    }
+
+    /// <summary>
+    /// Whether the edge of <paramref name="target"/>'s hitbox can be walked to on the floor the player is on.
+    /// Checked at the hitbox edge rather than the centre, because a huge boss (Shinryu is R22, its wings R15) often
+    /// has its centre hanging over the void while its edge is well inside the arena. Height alone is the wrong test
+    /// for the same reason: a flying boss can be far above the floor and still be the thing to stand under. What
+    /// this rejects is a target on another floor or platform, which would otherwise be chased in X/Z straight off an
+    /// edge. Rejected means "fall through to the boss", i.e. the behaviour before the own-target rule existed.
+    /// </summary>
+    private bool ReachableOnThisFloor(Actor pc, Actor target)
+    {
+        // same trust the dodge's own floor probe gets: where collision misreads the zone, don't let it veto
+        if (this.floorProbeDistrusted || GameData.IsDeepDungeon(this.world.CurrentCFCID))
+            return true;
+        var to = target.Position - pc.Position;
+        var dist = to.Length();
+        var reach = MathF.Max(dist - target.HitboxRadius, 0f);
+        if (reach < 1f)
+            return true;
+        var edge = pc.Position + (to.Normalized() * reach);
+        var from = new Vector3(pc.PosRot.X, pc.PosRot.Y, pc.PosRot.Z);
+        return GameData.PathHasFloor(from, new Vector3(edge.X, pc.PosRot.Y, edge.Z));
     }
 
     /// <summary>The enemy this picked last frame, so a tie between two mobs standing together stays where it was.</summary>
