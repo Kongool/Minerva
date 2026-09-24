@@ -710,6 +710,12 @@ public sealed class AIManager
     /// <summary>The module says not to attack this one (invincible, or forbidden outright): no uptime to regain on it.</summary>
     private bool Forbidden(Actor a)
     {
+        // An untargetable actor is never seeded into PotentialTargets, so the loop below cannot see it and used to
+        // call it fair game. Shinryu Paradox is the case: the body goes untargetable when the Hollow King spawns but
+        // stays in the world ~53s longer (2026-09-20: 265.7s -> 318.8s), and as the primary actor it kept winning
+        // the walk back to uptime while the rotation was on the Hollow King.
+        if (!a.IsTargetable)
+            return true;
         foreach (var e in this.hints.PotentialTargets)
             if (e.Actor == a)
                 return e.Priority <= AIHints.Enemy.PriorityInvincible;
