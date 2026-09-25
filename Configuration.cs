@@ -148,10 +148,24 @@ public sealed class Configuration : IPluginConfiguration
     /// open-field content. Your own character and party are kept. On by default.</summary>
     public bool RecordExcludeOtherPlayers { get; set; } = true;
 
-    /// <summary>How far a backline job (caster, ranged, healer) keeps off the target's hitbox, in yalms. Zero -- the
-    /// default -- lets them stand wherever uptime allows, including on top of the boss; up to three walks them back
-    /// out when something puts them under it.</summary>
-    public float CasterStandoff { get; set; }
+    /// <summary>
+    /// The backline's range band, in yalms from the target's hitbox edge: casters, ranged and healers only move for
+    /// range when outside [<see cref="RangedBandMin"/>, <see cref="RangedBandMax"/>], and then walk to
+    /// <see cref="RangedBandPreferred"/>. Replaces the old caster standoff, which was the same floor capped at three.
+    /// </summary>
+    public float RangedBandMin { get; set; } = 8f;
+
+    /// <inheritdoc cref="RangedBandMin"/>
+    public float RangedBandPreferred { get; set; } = 12f;
+
+    /// <inheritdoc cref="RangedBandMin"/>
+    public float RangedBandMax { get; set; } = 15f;
+
+    /// <summary>The melee band, for tanks and melee, in yalms from the hitbox edge. No floor: melee stand on the boss.</summary>
+    public float MeleeBandPreferred { get; set; } = 1.5f;
+
+    /// <inheritdoc cref="MeleeBandPreferred"/>
+    public float MeleeBandMax { get; set; } = 3f;
 
     /// <summary>The walk back to uptime goes to your own target before the module's boss. On for rotation plugins
     /// (Daedalus) that retarget onto adds during invulnerable phases: without it, a module that does not flag the boss

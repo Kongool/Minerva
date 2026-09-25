@@ -241,16 +241,14 @@ public sealed class MainWindow : Window, IDisposable
                 }
                 UiKit.Tip("Be clear this early. Costs uptime, buys margin.");
 
-                // Whole yalms: under one the character is still on the hitbox and every action needs the same
-                // hand-holding it did at zero, so there is nothing in between worth offering.
-                Key("Caster standoff");
-                var standoff = (int)MathF.Round(cfg.CasterStandoff);
-                if (ImGui.SliderInt("##standoff", ref standoff, 0, (int)UptimeGoal.MaxBacklineStandoff, standoff == 0 ? "off" : "%d y"))
+                Key("Ranged min");
+                var bandMin = cfg.RangedBandMin;
+                if (ImGui.SliderFloat("##bandmin", ref bandMin, 0f, 15f, bandMin <= 0f ? "off" : "%.0f y"))
                 {
-                    cfg.CasterStandoff = Math.Clamp(standoff, 0, (int)UptimeGoal.MaxBacklineStandoff);
+                    cfg.RangedBandMin = Math.Clamp(MathF.Round(bandMin), 0f, 15f);
                     changed = true;
                 }
-                UiKit.Tip("How far casters, ranged and healers keep off the target's hitbox. Off: they may stand on it.");
+                UiKit.Tip($"Casters, ranged and healers keep at least this far off the target's hitbox. They move only when outside {cfg.RangedBandMin:0}-{cfg.RangedBandMax:0}y, then walk to {cfg.RangedBandPreferred:0}y.");
 
                 ImGui.EndTable();
             }

@@ -18,6 +18,53 @@ public enum Positional
 }
 
 /// <summary>
+/// How far from the target a role wants to stand: never closer than <see cref="Min"/>, never further than
+/// <see cref="Max"/>, and when it has to move, to <see cref="Preferred"/>. All three measured from the target's
+/// hitbox edge, the way the game measures ability range, so a large boss does not eat the band.
+/// <para>A band rather than a distance because standing still is worth more than standing exactly right: a caster
+/// inside [Min, Max] is useful and should be left to cast, and one that has drifted out should come back to
+/// Preferred rather than to the edge it crossed, or the next step the boss takes puts it out again.</para>
+/// </summary>
+public readonly record struct RangeBand(float Min, float Preferred, float Max)
+{
+    /// <summary>How close to <see cref="Preferred"/> counts as arrived.</summary>
+    public const float StopTolerance = 1f;
+
+    /// <summary>The narrowest a band may be, so there is always somewhere inside it to stand.</summary>
+    public const float MinWidth = 1f;
+
+    /// <summary>Tanks and melee: on the hitbox, never more than three yalms off it.</summary>
+    public static readonly RangeBand Melee = new(0f, 1.5f, 3f);
+
+    /// <summary>Casters, ranged and healers: out of the cleaves, inside the stacks and heals.</summary>
+    public static readonly RangeBand Ranged = new(8f, 12f, 15f);
+
+    /// <summary>Tanks share the melee band. Healers and anyone whose role is unknown share the ranged one: standing
+    /// too far back costs damage, standing too close costs the pull.</summary>
+    public static RangeBand DefaultFor(Role role) => role is Role.Tank or Role.Melee ? Melee : Ranged;
+
+    /// <summary>
+    /// This band made consistent: no negatives, at least a yalm wide, and <see cref="Preferred"/> kept a whole
+    /// tolerance inside each edge where the band is wide enough for that.
+    /// <para>The last part is what stops a walk turning into a twitch. Arriving means being within the tolerance of
+    /// Preferred, so a Preferred a hair inside Min would count arriving a hair outside the band as done -- and the
+    /// next frame would start the walk again.</para>
+    /// </summary>
+    public RangeBand Normalized()
+    {
+        var max = MathF.Max(this.Max, MinWidth);
+        var min = Math.Clamp(this.Min, 0f, max - MinWidth);
+        var low = min + StopTolerance;
+        var high = max - StopTolerance;
+        return new(min, low <= high ? Math.Clamp(this.Preferred, low, high) : (min + max) / 2f, max);
+    }
+
+    /// <summary>Where a walk to the band stops: within the tolerance of Preferred, and never outside the band.</summary>
+    public (float Low, float High) StopWindow
+        => (MathF.Max(this.Preferred - StopTolerance, this.Min), MathF.Min(this.Preferred + StopTolerance, this.Max));
+}
+
+/// <summary>
 /// What the dodge aims for when it is not busy avoiding something: stay within <see cref="Range"/> of the
 /// target, and prefer the requested side of it.
 /// <para>Bundled rather than passed loose because these four always travel together, and a solver taking
@@ -29,52 +76,36 @@ public readonly record struct UptimeGoal(WPos Target, Angle Rotation, float Rang
     private const float FrontFlankEdge = 45f;
     private const float FlankRearEdge = 135f;
 
-    /// <summary>Melee reach, matching BossmodReborn's own figure. Measured from the target's hitbox.</summary>
-    public const float MeleeReach = 2.6f;
+    /// <summary>The ring the walk back aims for, as distances from the target's centre: the band's stop window. Left at
+    /// zero, the ring is the band itself.</summary>
+    public float AimLow { get; init; }
 
-    /// <summary>
-    /// How close everyone else wants to be. Not an ability range — a caster reaches 25 yalms — but the
-    /// distance at which they are still inside stack markers, heals and most mechanics without being in
-    /// the cleave. Also measured from the hitbox, as the game measures everything.
-    /// </summary>
-    public const float RangedReach = 15f;
+    /// <inheritdoc cref="AimLow"/>
+    public float AimHigh { get; init; }
 
-    /// <summary>What this role wants between itself and the target's hitbox.</summary>
-    public static float ReachFor(Role role) => role is Role.Tank or Role.Melee ? MeleeReach : RangedReach;
-
-    /// <summary>
-    /// How far a backline job wants to stay OFF the hitbox. Uptime used to be a band with no floor, so standing on
-    /// top of the boss satisfied it as well as standing at range did: nothing walked a caster back out once a dodge,
-    /// a knockback or another plugin had put it there, and under the boss every centred AOE nudges you again -- the
-    /// user's report, 2026-09-19, was a Pictomancer at zero taking micro-adjustments and casting nothing.
-    /// <para>Off by default: a caster under the boss is still in range, and how much that costs depends on the fight
-    /// and on who else is standing there.</para>
-    /// </summary>
-    public const float MaxBacklineStandoff = 3f;
-
-    /// <summary>
-    /// The smallest standoff worth asking for. Under a yalm the character is still effectively on the hitbox and
-    /// every action needs the same hand-holding it did at zero (the user, 2026-09-19), so anything between the two is
-    /// rounded up rather than offered: the setting is off, or it is at least this.
-    /// </summary>
-    public const float MinBacklineStandoff = 1f;
-
-    /// <summary>What this role keeps between itself and the target's hitbox at the near side. Melee hug regardless:
-    /// their range IS the hitbox.</summary>
-    public static float FloorFor(Role role, float standoff)
-        => role is Role.Tank or Role.Melee || standoff <= 0f
-            ? 0f
-            : Math.Clamp(standoff, MinBacklineStandoff, MaxBacklineStandoff);
+    /// <summary>The ring a walk to the band should end in.</summary>
+    public (float Low, float High) Aim => this.AimHigh > 0f ? (this.AimLow, this.AimHigh) : (this.MinRange, this.Range);
 
     /// <summary>
     /// The goal for keeping a given player useful against a given target.
     /// <para>Roles do not share a definition of uptime, and treating them as if they did is what drags a
-    /// Black Mage into a boss's melee band to shave a yard off a dodge. An unknown role is treated as
-    /// ranged: standing too far back costs damage, standing too close costs the pull.</para>
+    /// Black Mage into a boss's melee band to shave a yard off a dodge. The band comes from the caller's settings;
+    /// without one, the role's default.</para>
+    /// <para>Melee get no floor even though their band starts at zero: MinRange zero means "anywhere up to the
+    /// centre", which is where a melee standing inside a big hitbox already is. A floor at the hitbox edge would
+    /// walk them out of it.</para>
     /// </summary>
-    public static UptimeGoal For(Actor target, Role role, Positional positional = Positional.Any, float boundaryMarginDeg = 15f, float backlineStandoff = 0f)
-        => new(target.Position, target.Rotation, target.HitboxRadius + ReachFor(role), positional, boundaryMarginDeg,
-            FloorFor(role, backlineStandoff) is var floor && floor > 0f ? target.HitboxRadius + floor : 0f);
+    public static UptimeGoal For(Actor target, Role role, Positional positional = Positional.Any, float boundaryMarginDeg = 15f, RangeBand? band = null)
+    {
+        var b = (band ?? RangeBand.DefaultFor(role)).Normalized();
+        var r = target.HitboxRadius;
+        var (low, high) = b.StopWindow;
+        return new(target.Position, target.Rotation, r + b.Max, positional, boundaryMarginDeg, b.Min > 0f ? r + b.Min : 0f)
+        {
+            AimLow = r + low,
+            AimHigh = r + high,
+        };
+    }
 
     /// <summary>
     /// How far outside the useful band this point is, in yalms. Zero anywhere inside it.
@@ -504,11 +535,12 @@ public static class ArenaPathfinder
         // extra arc at melee radius. Measured on a samurai switching rear to flank, the nearest-on-side
         // pass parked it one cell past the border, and the boss's next turn put it back on the rear. The
         // nearest cell past the floor is still what wins, so the switch stays as short as the floor allows.
-        // Walking out of the boss's lap aims past the floor rather than at it. The nearest cell that satisfies a
-        // floor sits exactly on it, and the boss taking one step then puts the character back inside -- which is the
-        // micro-adjustment loop a caster cannot cast through (reported 2026-09-19). Only when walking out: coming
-        // back from too far away still stops at the first cell that restores the band.
-        var aim = standing < g.MinRange ? g with { MinRange = g.MinRange + FloorHysteresis } : g;
+        // Aim for the preferred ring, not the nearest edge of the band. The nearest cell that restores a band sits
+        // exactly on its edge, and the boss taking one step then puts the character back out -- the micro-adjustment
+        // loop a caster cannot cast through (reported 2026-09-19). From inside a floor the nearest cell of the ring
+        // lies straight out from the target's centre, so "too close" walks directly away without a case of its own.
+        var (aimLow, aimHigh) = g.Aim;
+        var aim = g with { MinRange = aimLow, Range = aimHigh };
         var pick = Nearest(hints, deadline, player, cellSize, margin, aim, SideRule.Inside)
             ?? Nearest(hints, deadline, player, cellSize, margin, aim, SideRule.OnSide)
             ?? Nearest(hints, deadline, player, cellSize, margin, aim, SideRule.Any);
@@ -527,11 +559,6 @@ public static class ArenaPathfinder
     }
 
     /// <summary>How strictly a regain pass reads the positional.</summary>
-    /// <summary>How far past the floor to stand when stepping out of it, so the next step the boss takes does not
-    /// put the character back inside and start the walk again. Kept to a yalm: the floor is already close in, and
-    /// the point is to stop the twitching, not to walk anybody across the arena.</summary>
-    private const float FloorHysteresis = 1f;
-
     private enum SideRule
     {
         Any,
@@ -577,7 +604,13 @@ public static class ArenaPathfinder
 
         if (!found)
             return null;
-        return (best - player).LengthSq() > cellSize * cellSize
+
+        // Within a cell of the best cell is close enough -- but only for a character already in the ring. One short
+        // of it is still out of position, and with a preferred distance that matters: the walk would end a yalm
+        // outside the window it was aiming for, and never finish.
+        var standing = (player - g.Target).Length();
+        var inRing = standing >= g.MinRange && standing <= g.Range;
+        return (best - player).LengthSq() > cellSize * cellSize || !inRing
             ? new SafeSpot(true, true, best, (best - player).Normalized())
             : SafeSpot.Stay;
     }

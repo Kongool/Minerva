@@ -22,6 +22,9 @@ public sealed class AIManager
 
     /// <summary>This frame's uptime target, carried into the recorded decision.</summary>
     private ulong uptimeTargetId;
+
+    /// <summary>Whether a walk back to the range band is under way, which decides where it stops.</summary>
+    private readonly BandWalk bandWalk = new();
     private readonly IMovementController movement;
     private readonly AIHints hints = new();
     private readonly AutoHints? autoHints;
@@ -162,6 +165,7 @@ public sealed class AIManager
             // nothing authored and nothing guessable: stay out of the way rather than invent guidance
             this.movement.Stop();
             this.uptimeTargetId = 0ul;
+            this.bandWalk.Reset();
             this.Publish(this.Decide(false, false, default, DodgeReason.None, DodgeBlocker.NoModule, false));
             return;
         }
@@ -188,9 +192,16 @@ public sealed class AIManager
         // scoring both against melee reach is what walks a caster into the boss to save a yard of travel.
         var target = this.UptimeTarget(module, pc);
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
-        UptimeGoal? goal = target != null
-            ? UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.config.CasterStandoff)
-            : null;
+        // The band says when to move (outside it) and where to stop (at its preferred distance); BandWalk is what
+        // remembers a walk is under way, so crossing back into the band does not end it short of preferred.
+        UptimeGoal? goal = null;
+        if (target != null)
+            goal = this.bandWalk.Apply(
+                UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc.Role)),
+                pc.Position,
+                pc.CastInfo != null);
+        else
+            this.bandWalk.Reset();
         // A zone hazard adds to an encounter rather than replacing it, so this runs after the boss
         // module has filled its zones -- and runs even when there is no boss, which is the whole point:
         // a field effect with no encounter attached has nowhere else to be expressed. Contained, because
@@ -280,12 +291,15 @@ public sealed class AIManager
         // not move (a Sage stood through an eight second raise in a seven second puddle). If the ground is
         // lethal the cast is cancelled, as BossmodReborn's mechanic AI does; if it is not, the cast is left
         // alone and the dodge waits -- an uptime walk is never worth a raise.
+        // The one exception is a character well out of its band (BandWalk.CastSlack). It still cannot move until the
+        // cast ends, but steering zeroes the cast budget below, so the rotation does not start the next cast and the
+        // walk begins the moment this one finishes instead of never.
         var casting = false;
         if (steering && pc.CastInfo != null && this.movement is not NullMovementController)
         {
             if (this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin))
                 GameData.CancelCast();
-            else
+            else if (!this.bandWalk.MayStartDuringCast)
             {
                 steering = false;
                 casting = true;
@@ -645,21 +659,16 @@ public sealed class AIManager
     /// </summary>
     private Actor? UptimeTarget(ModuleBase? module, Actor pc)
     {
-        var target = this.hints.ForcedTarget is { IsDeadOrDestroyed: false } forced ? forced
-            : this.PrioritisedTarget(pc)
-            // The rotation's target, ahead of the boss: when Daedalus retargets onto an add, the add is where
-            // uptime is. Forbidden targets are skipped, so an invincible boss the player still has targeted
-            // falls through to the lines below exactly as before.
-            ?? (this.config.UptimeFollowsOwnTarget
-                && this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } own
-                && !this.Forbidden(own) && this.ReachableOnThisFloor(pc, own) ? own
-            : module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.Forbidden(boss) ? boss
-            : this.world.Actors.Find(pc.TargetID) is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false } t ? t
-            // Trash, with nothing targeted: follow whatever is already fighting us, as BossmodReborn's AI does. Only
-            // reached without a module and without a target of one's own -- a boss fight keys on its primary actor,
-            // and anybody with a target keeps it.
-            : module == null ? this.EngagedTarget(pc)
-            : null);
+        // the choice itself lives in Core (UptimeTargeting) so it can be tested; only the floor raycast stays here
+        var target = UptimeTargeting.Choose(
+            this.hints,
+            this.world.Actors.Find(pc.TargetID),
+            module?.PrimaryActor,
+            module != null,
+            this.config.UptimeFollowsOwnTarget,
+            () => this.PrioritisedTarget(pc),
+            own => this.ReachableOnThisFloor(pc, own),
+            () => this.EngagedTarget(pc));
         return target != null && InTheFight(module, pc, target) ? target : null;
     }
 
@@ -691,15 +700,17 @@ public sealed class AIManager
         // same trust the dodge's own floor probe gets: where collision misreads the zone, don't let it veto
         if (this.floorProbeDistrusted || GameData.IsDeepDungeon(this.world.CurrentCFCID))
             return true;
-        var to = target.Position - pc.Position;
-        var dist = to.Length();
-        var reach = MathF.Max(dist - target.HitboxRadius, 0f);
-        if (reach < 1f)
+        if (UptimeTargeting.HitboxEdge(pc.Position, target) is not { } edge)
             return true;
-        var edge = pc.Position + (to.Normalized() * reach);
         var from = new Vector3(pc.PosRot.X, pc.PosRot.Y, pc.PosRot.Z);
         return GameData.PathHasFloor(from, new Vector3(edge.X, pc.PosRot.Y, edge.Z));
     }
+
+    /// <summary>The configured band for a role: tanks and melee share one, everyone else the backline's.</summary>
+    private RangeBand BandFor(Role role)
+        => role is Role.Tank or Role.Melee
+            ? new RangeBand(0f, this.config.MeleeBandPreferred, this.config.MeleeBandMax)
+            : new RangeBand(this.config.RangedBandMin, this.config.RangedBandPreferred, this.config.RangedBandMax);
 
     /// <summary>The enemy this picked last frame, so a tie between two mobs standing together stays where it was.</summary>
     private ulong lastPrioritised;
@@ -713,21 +724,6 @@ public sealed class AIManager
     }
 
     private ulong lastEngaged;
-
-    /// <summary>The module says not to attack this one (invincible, or forbidden outright): no uptime to regain on it.</summary>
-    private bool Forbidden(Actor a)
-    {
-        // An untargetable actor is never seeded into PotentialTargets, so the loop below cannot see it and used to
-        // call it fair game. Shinryu Paradox is the case: the body goes untargetable when the Hollow King spawns but
-        // stays in the world ~53s longer (2026-09-20: 265.7s -> 318.8s), and as the primary actor it kept winning
-        // the walk back to uptime while the rotation was on the Hollow King.
-        if (!a.IsTargetable)
-            return true;
-        foreach (var e in this.hints.PotentialTargets)
-            if (e.Actor == a)
-                return e.Priority <= AIHints.Enemy.PriorityInvincible;
-        return false;
-    }
 
     /// <summary>
     /// How far the dodge will walk to regain uptime when nothing authored says where the fight is. A FATE

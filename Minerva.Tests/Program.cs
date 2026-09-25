@@ -711,16 +711,13 @@ t.Section("Auto-dodge pathfinding");
         // standing under the mob", "once at 0 micro adjustments cause no dps").
         {
             var hitbox = target.HitboxRadius;
-            var caster = UptimeGoal.For(target, Role.Ranged, backlineStandoff: 1f);
-            t.Eq("the standoff is off unless asked for", UptimeGoal.For(target, Role.Ranged).MinRange, 0f);
-            t.Eq("under a yalm is rounded up to one, not honoured as it is",
-                UptimeGoal.FloorFor(Role.Ranged, 0.4f), UptimeGoal.MinBacklineStandoff);
-            t.Eq("and it never exceeds the maximum", UptimeGoal.FloorFor(Role.Ranged, 99f), UptimeGoal.MaxBacklineStandoff);
-            t.Eq("melee never keep a standoff, whatever it is set to", UptimeGoal.FloorFor(Role.Melee, 3f), 0f);
+            var caster = UptimeGoal.For(target, Role.Ranged);
             t.True($"a caster's band has a floor ({caster.MinRange:0.0}y) and a ceiling ({caster.Range:0.0}y)",
                 caster.MinRange > hitbox && caster.Range > caster.MinRange + 5f);
-            t.Near("the floor sits that far off the hitbox", caster.MinRange - hitbox, 1f);
+            t.Near("the floor sits the band's minimum off the hitbox", caster.MinRange - hitbox, RangeBand.Ranged.Min);
             t.Eq("melee has no floor", UptimeGoal.For(target, Role.Melee).MinRange, 0f);
+            t.Eq("nor does a backline band whose minimum is set to zero",
+                UptimeGoal.For(target, Role.Ranged, band: new RangeBand(0f, 12f, 15f)).MinRange, 0f);
             t.True("standing on the boss is out of position for a caster", caster.ExcessRange(boss) > 0f);
             t.True("and in position for melee", melee.ExcessRange(boss) == 0f);
 
@@ -734,8 +731,8 @@ t.Section("Auto-dodge pathfinding");
             var outTo = (under.Target - boss).Length();
             t.True($"a caster under the boss walks back out (to {outTo:0.0}y, floor {caster.MinRange:0.0})",
                 under.NeedToMove && under.Found && outTo >= caster.MinRange);
-            t.True($"and stands past the floor, not on it, so the boss's next step does not start it again ({outTo:0.0} vs {caster.MinRange:0.0})",
-                outTo >= caster.MinRange + 0.9f);
+            t.True($"and aims for its preferred ring, not the floor, so the boss's next step does not start it again ({outTo:0.0} vs ring {caster.AimLow:0.0}-{caster.AimHigh:0.0})",
+                outTo >= caster.AimLow && outTo <= caster.AimHigh);
             t.True("a caster already at range stays", !Walk(boss + new WDir(0f, 11f), caster).NeedToMove);
             t.True("a melee on the boss stays", !Walk(boss + new WDir(0.5f, 0f), melee).NeedToMove);
         }
@@ -783,6 +780,156 @@ t.Section("Auto-dodge pathfinding");
         var passiveOnly = new AIHints();
         passiveOnly.SeedPotentialTargets([Mob(10, 2f, 2f, combat: false)]);
         t.True("a mob minding its own business is never walked to", passiveOnly.BestEngagedTarget(me, 0ul, 0ul) == null);
+    }
+
+    // Invincibility read off the statuses, for the fights whose module never flagged the phase. The walk back to
+    // uptime is what this protects: without it a character is marched to a boss that cannot be damaged while the
+    // rotation is busy on the add that can.
+    {
+        static Actor Mob(ulong id, bool targetable = true)
+            => new(id, 0x100u, (int)id, "mob", 0u, ActorType.Enemy, new Vector4(2f, 0f, 0f, 0f), 1f) { InCombat = true, IsTargetable = targetable };
+        var soon = DateTime.UtcNow.AddSeconds(10d);
+
+        foreach (var sid in new uint[] { 325u, 775u, 671u, 4410u, 4875u })
+        {
+            var warded = Mob(1);
+            warded.Statuses[0] = new ActorStatus(sid, 0, soon, 2ul);
+            var marked = new AIHints();
+            marked.SeedPotentialTargets([warded]);
+            marked.MarkInvincibleByStatus();
+            t.Eq($"status {sid} means there is no uptime to walk to", marked.PotentialTargets[0].Priority, AIHints.Enemy.PriorityInvincible);
+        }
+
+        // Shinryu Paradox: the body goes untargetable when the Hollow King spawns but stays in the world for
+        // another fifty-three seconds, and as the primary actor it kept winning the walk back to uptime. The seeding
+        // never admits an untargetable actor, which is why the uptime walk has to ask Forbidden() about targetability
+        // itself rather than find the actor flagged in this list.
+        var gone = Mob(2, targetable: false);
+        var left = new AIHints();
+        left.SeedPotentialTargets([gone]);
+        t.Eq("an untargetable actor never becomes a potential target", left.PotentialTargets.Count, 0);
+
+        // one that was seeded and then went untargetable before the marking is still caught
+        var fading = Mob(7);
+        var mid = new AIHints();
+        mid.SeedPotentialTargets([fading]);
+        fading.IsTargetable = false;
+        mid.MarkInvincibleByStatus();
+        t.Eq("one that stops being targetable after seeding is marked invincible", mid.PotentialTargets[0].Priority, AIHints.Enemy.PriorityInvincible);
+
+        // the exclusions are deliberate and worth pinning, because both look like invincibility from a distance
+        var cutscene = Mob(3);
+        cutscene.Statuses[0] = new ActorStatus(1570u, 0, soon, 2ul);   // the player-side cutscene invulnerability
+        var ward = Mob(4);
+        ward.Statuses[0] = new ActorStatus(1125u, 0, soon, 2ul);       // a directional ward: not total
+        var fine = new AIHints();
+        fine.SeedPotentialTargets([cutscene, ward]);
+        fine.MarkInvincibleByStatus();
+        t.True("the cutscene invulnerability and a directional ward are left alone",
+            fine.PotentialTargets[0].Priority > AIHints.Enemy.PriorityInvincible && fine.PotentialTargets[1].Priority > AIHints.Enemy.PriorityInvincible);
+
+        // forbidden is the stronger statement of the two: a module that banned a target outright keeps that ban
+        var banned = Mob(5);
+        banned.Statuses[0] = new ActorStatus(325u, 0, soon, 2ul);
+        var strict = new AIHints();
+        strict.SeedPotentialTargets([banned]);
+        strict.PotentialTargets[0].Priority = AIHints.Enemy.PriorityForbidden;
+        strict.MarkInvincibleByStatus();
+        t.Eq("a forbidden target is not softened to merely invincible", strict.PotentialTargets[0].Priority, AIHints.Enemy.PriorityForbidden);
+
+        // and the ordinary case: nothing to say about a mob you can hit
+        var plain = Mob(6);
+        var normal = new AIHints();
+        normal.SeedPotentialTargets([plain]);
+        var before = normal.PotentialTargets[0].Priority;
+        normal.MarkInvincibleByStatus();
+        t.Eq("a mob with nothing on it keeps the priority it had", normal.PotentialTargets[0].Priority, before);
+    }
+
+    // What the walk back to uptime aims at. The rule that matters most is the new one: when the rotation retargets
+    // onto an add, the add is where uptime is, not the boss the module is keyed on. Everything around it is the
+    // order the rest of the chain falls through in, and which targets it refuses.
+    {
+        static Actor Foe(ulong id, float x = 0f, float z = 10f, float radius = 1f, bool targetable = true)
+            => new(id, 0x200u, (int)id, "foe", 0u, ActorType.Enemy, new Vector4(x, 0f, z, 0f), radius) { InCombat = true, IsTargetable = targetable };
+        var soon = DateTime.UtcNow.AddSeconds(10d);
+        var nobody = (Func<Actor?>)(() => null);
+        var everywhere = (Func<Actor, bool>)(_ => true);
+
+        Actor? Pick(AIHints h, Actor? own, Actor? primary, bool follow = true, Func<Actor?>? prioritised = null,
+                    Func<Actor, bool>? reachable = null, Func<Actor?>? engaged = null, bool hasModule = true)
+            => UptimeTargeting.Choose(h, own, primary, hasModule, follow, prioritised ?? nobody, reachable ?? everywhere, engaged ?? nobody);
+
+        var keyed = Foe(1);
+        var add = Foe(2, x: 15f);
+        var fight = new AIHints();
+        fight.SeedPotentialTargets([keyed, add]);
+
+        t.Eq("an ordinary fight with nothing targeted keys on the boss", Pick(fight, null, keyed)!.InstanceID, keyed.InstanceID);
+        t.Eq("the rotation's target is where uptime is, ahead of the boss", Pick(fight, add, keyed)!.InstanceID, add.InstanceID);
+        t.Eq("unless the setting is off, when the boss keeps it", Pick(fight, add, keyed, follow: false)!.InstanceID, keyed.InstanceID);
+
+        var forcedFight = new AIHints { ForcedTarget = keyed };
+        forcedFight.SeedPotentialTargets([keyed, add]);
+        t.Eq("a target the module forces beats your own", Pick(forcedFight, add, keyed)!.InstanceID, keyed.InstanceID);
+        t.Eq("the module's priority beats your own", Pick(fight, add, keyed, prioritised: () => keyed)!.InstanceID, keyed.InstanceID);
+
+        // refusals: each falls through to the boss rather than walking somewhere pointless
+        var warded = Foe(3, x: 15f);
+        warded.Statuses[0] = new ActorStatus(325u, 0, soon, 1ul);
+        var wardFight = new AIHints();
+        wardFight.SeedPotentialTargets([keyed, warded]);
+        wardFight.MarkInvincibleByStatus();
+        t.Eq("an invincible target of your own is not followed", Pick(wardFight, warded, keyed)!.InstanceID, keyed.InstanceID);
+        t.Eq("nor is one on another floor", Pick(fight, add, keyed, reachable: _ => false)!.InstanceID, keyed.InstanceID);
+        var friend = new Actor(4, 0x300u, 4, "friend", 0u, ActorType.Enemy, new Vector4(5f, 0f, 5f, 0f), 1f, ally: true);
+        t.Eq("nor an ally", Pick(fight, friend, keyed)!.InstanceID, keyed.InstanceID);
+        var corpse = Foe(5, x: 15f);
+        corpse.IsDead = true;
+        t.Eq("nor a corpse", Pick(fight, corpse, keyed)!.InstanceID, keyed.InstanceID);
+
+        // Shinryu Paradox: the body is untargetable but still the primary actor; the Hollow King is what you are on
+        var body = Foe(6, radius: 22f, targetable: false);
+        var king = Foe(7, x: 12f);
+        var paradox = new AIHints();
+        paradox.SeedPotentialTargets([body, king]);
+        t.Eq("an untargetable boss loses to the one you are fighting", Pick(paradox, king, body)!.InstanceID, king.InstanceID);
+        t.Eq("even with the setting off, because the boss is forbidden", Pick(paradox, king, body, follow: false)!.InstanceID, king.InstanceID);
+        t.True("and with nothing targeted there is nothing to walk to", Pick(paradox, null, body) == null);
+
+        // the last line takes your target without asking whether it is forbidden: an invincible boss you are still
+        // targeting is walked to, as it was before the own-target rule existed
+        var walled = Foe(8);
+        walled.Statuses[0] = new ActorStatus(325u, 0, soon, 1ul);
+        var wallFight = new AIHints();
+        wallFight.SeedPotentialTargets([walled]);
+        wallFight.MarkInvincibleByStatus();
+        t.Eq("an invincible boss you still have targeted is still the target", Pick(wallFight, walled, walled)!.InstanceID, walled.InstanceID);
+
+        // trash: no module, nothing targeted, so whatever is already fighting us
+        var brawler = Foe(9, x: 3f);
+        t.Eq("in trash with nothing targeted, the mob already fighting you", Pick(fight, null, null, engaged: () => brawler, hasModule: false)!.InstanceID, brawler.InstanceID);
+        t.True("but a boss fight never falls back to it", Pick(fight, null, null, engaged: () => brawler) == null);
+
+        // the two remembered picks must only be asked when it is their turn: each one records what it chose so that
+        // a tie next frame stays put, and asking out of turn would overwrite that memory with a pick that lost
+        var askedPriority = false;
+        Pick(forcedFight, add, keyed, prioritised: () => { askedPriority = true; return null; });
+        t.True("the priority pick is not consulted when a target is forced", !askedPriority);
+        var askedEngaged = false;
+        Pick(fight, add, keyed, engaged: () => { askedEngaged = true; return null; }, hasModule: false);
+        t.True("the engaged pick is not consulted when you have a target", !askedEngaged);
+    }
+
+    // The floor test walks to the edge of the hitbox, not the centre: a boss as big as Shinryu hangs its centre over
+    // the void while its edge is well inside the arena, and testing the centre would call it unreachable.
+    {
+        var huge = new Actor(1, 0x400u, 1, "huge", 0u, ActorType.Enemy, new Vector4(0f, 0f, 30f, 0f), 22f);
+        var hitboxEdge = UptimeTargeting.HitboxEdge(new WPos(0f, 0f), huge);
+        t.True("a player thirty yalms from an R22 boss tests the ground eight yalms out, not thirty",
+            hitboxEdge is { } e && e.AlmostEqual(new WPos(0f, 8f), 0.01f));
+        t.True("a player already at the edge has nothing to test", UptimeTargeting.HitboxEdge(new WPos(0f, 7.5f), huge) == null);
+        t.True("nor does a player inside the hitbox", UptimeTargeting.HitboxEdge(new WPos(0f, 20f), huge) == null);
     }
 
     t.True("uptime walks back when the way is clear",
@@ -3003,17 +3150,102 @@ t.Section("Uptime is a band, not a point");
 
     // Roles do not share a definition of uptime. Scoring everyone against melee reach is what walks a
     // caster into a boss's melee band to save a yard of travel on a dodge.
-    t.Near("a tank wants melee reach", UptimeGoal.ReachFor(Role.Tank), 2.6f);
-    t.Near("a melee dps wants the same", UptimeGoal.ReachFor(Role.Melee), 2.6f);
-    t.Near("a healer wants 15", UptimeGoal.ReachFor(Role.Healer), 15f);
-    t.Near("so does a ranged", UptimeGoal.ReachFor(Role.Ranged), 15f);
+    t.True("a tank shares the melee band", RangeBand.DefaultFor(Role.Tank) == RangeBand.Melee);
+    t.True("as does a melee dps", RangeBand.DefaultFor(Role.Melee) == RangeBand.Melee);
+    t.True("a healer shares the backline's", RangeBand.DefaultFor(Role.Healer) == RangeBand.Ranged);
+    t.True("as does a ranged", RangeBand.DefaultFor(Role.Ranged) == RangeBand.Ranged);
     // standing too far back costs damage; standing too close costs the pull. The second is worse.
-    t.Near("an unknown role is treated as ranged", UptimeGoal.ReachFor(Role.None), 15f);
+    t.True("an unknown role is treated as ranged", RangeBand.DefaultFor(Role.None) == RangeBand.Ranged);
 
-    // reach is measured from the hitbox, as the game measures everything
+    // the band is measured from the hitbox edge, as the game measures ability range
     var fatBoss = new Actor(1ul, 0x1234u, -1, "boss", 0u, ActorType.Enemy, new Vector4(0f, 0f, 0f, 0f), hitboxRadius: 8f);
-    t.Near("a big hitbox pushes melee range out with it", UptimeGoal.For(fatBoss, Role.Melee).Range, 10.6f);
-    t.Near("and ranged too", UptimeGoal.For(fatBoss, Role.Ranged).Range, 23f);
+    t.Near("a big hitbox pushes the melee band out with it", UptimeGoal.For(fatBoss, Role.Melee).Range, 11f);
+    t.Near("and the backline's too", UptimeGoal.For(fatBoss, Role.Ranged).Range, 23f);
+    t.Near("its floor included", UptimeGoal.For(fatBoss, Role.Ranged).MinRange, 16f);
+    t.True("and the ring it walks to", UptimeGoal.For(fatBoss, Role.Ranged).Aim == (19f, 21f));
+
+    // The range band: move only when outside [min, max], walk to preferred, stop within a yalm of it, and when too
+    // close walk straight out. Everything below is measured from the hitbox edge.
+    {
+        t.True("the backline stops within a yalm of twelve", RangeBand.Ranged.Normalized().StopWindow == (11f, 13f));
+        t.True("melee within a yalm of one and a half", RangeBand.Melee.Normalized().StopWindow == (0.5f, 2.5f));
+        t.Eq("a preferred distance outside the band is brought inside it", new RangeBand(8f, 40f, 15f).Normalized().Preferred, 14f);
+        t.Eq("and kept a yalm off the floor, so arriving never lands outside it", new RangeBand(8f, 8.2f, 15f).Normalized().Preferred, 9f);
+        t.True("a minimum dragged up to the maximum still leaves a yalm to stand in",
+            new RangeBand(15f, 12f, 15f).Normalized() is { Min: 14f, Max: 15f });
+
+        var bossAt = new WPos(0f, 0f);
+        var lord = new Actor(0x31, 0x100u, 0, "boss", 0u, ActorType.Enemy, new Vector4(0f, 0f, 0f, 0f), 1f);
+        float Edge(WPos p) => (p - bossAt).Length() - lord.HitboxRadius;
+
+        // A walk of half a yalm a frame, re-solved every frame, the way the plugin drives it. Returns where it ends.
+        (WPos End, int Frames) Walk(WPos from, Role role, RangeBand band, bool casting = false, int frames = 400)
+        {
+            var walk = new BandWalk();
+            var at = from;
+            for (var i = 0; i < frames; ++i)
+            {
+                var goal = walk.Apply(UptimeGoal.For(lord, role, band: band), at, casting);
+                var h = new AIHints { Center = bossAt, Bounds = new ArenaBoundsSquare(40f), PlayerPosition = at };
+                var spot = ArenaPathfinder.Solve(h, now, goal: goal, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+                if (!spot.NeedToMove)
+                    return (at, i);
+                var step = spot.Target - at;
+                at = step.Length() <= 0.5f ? spot.Target : at + (step.Normalized() * 0.5f);
+            }
+            return (at, frames);
+        }
+
+        var outOfRange = Walk(new WPos(0f, 25f), Role.Ranged, RangeBand.Ranged);
+        t.True($"a caster out of range walks back to preferred, not to the edge it crosses (stopped at {Edge(outOfRange.End):0.0}y)",
+            Edge(outOfRange.End) >= 11f && Edge(outOfRange.End) <= 13f);
+
+        var close = Walk(new WPos(0f, 3f), Role.Ranged, RangeBand.Ranged);
+        t.True($"a caster too close walks out to preferred (stopped at {Edge(close.End):0.0}y)", Edge(close.End) >= 11f && Edge(close.End) <= 13f);
+        // straight out to within the solver's grid: the ring cell nearest the line can sit up to half a cell's diagonal
+        // off it, and the grid is not aligned to whole yalms (it starts at the arena's centre minus its radius)
+        t.True($"straight out from the boss's centre (x {close.End.X:0.00} off the line)", MathF.Abs(close.End.X) <= 0.71f && close.End.Z > 0f);
+
+        t.Eq("a caster inside the band but off preferred is left alone", Walk(new WPos(0f, 15f), Role.Ranged, RangeBand.Ranged).Frames, 0);
+        t.Eq("as is one on the very edge of it", Walk(new WPos(0f, 16f), Role.Ranged, RangeBand.Ranged).Frames, 0);
+
+        var meleeIn = Walk(new WPos(0f, 7f), Role.Melee, RangeBand.Melee);
+        t.True($"melee out of reach walk in to a yalm and a half (stopped at {Edge(meleeIn.End):0.0}y)", Edge(meleeIn.End) >= 0.5f && Edge(meleeIn.End) <= 2.5f);
+        t.Eq("melee within three yalms are left alone", Walk(new WPos(0f, 3.8f), Role.Melee, RangeBand.Melee).Frames, 0);
+        t.Eq("and so are melee standing on the boss", Walk(new WPos(0f, 0.3f), Role.Melee, RangeBand.Melee).Frames, 0);
+
+        // Casting: a walk may not start for a small drift, only for a large one.
+        var ranged = UptimeGoal.For(lord, Role.Ranged);
+        var casting = new BandWalk();
+        casting.Apply(ranged, new WPos(0f, 17f), casting: true);          // a yalm out
+        t.True("a yalm out of band does not start a walk mid-cast", !casting.Walking && !casting.MayStartDuringCast);
+        casting.Apply(ranged, new WPos(0f, 19f), casting: true);          // three out
+        t.True("three yalms out does, and may steer through the cast", casting.Walking && casting.MayStartDuringCast);
+        var started = new BandWalk();
+        started.Apply(ranged, new WPos(0f, 17f), casting: false);
+        started.Apply(ranged, new WPos(0f, 16.8f), casting: true);
+        t.True("a walk already under way is not forgotten because a cast began", started.Walking && !started.MayStartDuringCast);
+        started.Apply(ranged, new WPos(0f, 15f), casting: false);         // edge fourteen: inside the band, past the window
+        t.True("and once the cast ends it carries on to preferred rather than stopping at the edge", started.Walking);
+        started.Apply(ranged, new WPos(0f, 13f), casting: false);         // edge twelve
+        t.True("stopping when it gets there", !started.Walking);
+
+        // Mechanic dodges come first: the walk never ends inside a telegraph, and gives way to it.
+        var fire = new AIHints { Center = bossAt, Bounds = new ArenaBoundsSquare(40f), PlayerPosition = new WPos(0f, 3f) };
+        fire.AddForbiddenZone(new AOEShapeCircle(4f), new WPos(0f, 13f), default, now.AddSeconds(2d));
+        var burning = new BandWalk();
+        var outward = ArenaPathfinder.Solve(fire, now, goal: burning.Apply(ranged, new WPos(0f, 3f), casting: false), moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"a walk out whose straight line ends in a telegraph goes somewhere else on the ring ({outward.Target.X:0.0},{outward.Target.Z:0.0})",
+            (outward.Target - new WPos(0f, 13f)).Length() > 4f);
+        var inside = new AIHints { Center = bossAt, Bounds = new ArenaBoundsSquare(40f), PlayerPosition = new WPos(0f, 25f) };
+        inside.AddForbiddenZone(new AOEShapeCircle(5f), new WPos(0f, 25f), default, now.AddSeconds(1d));
+        var dodge = ArenaPathfinder.Solve(inside, now, goal: new BandWalk().Apply(ranged, new WPos(0f, 25f), casting: false), moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True("and standing in one, the dodge wins over the band", dodge.NeedToMove && !inside.InImminentDanger(dodge.Target, now.AddSeconds(3d), 0f));
+        var resumed = new BandWalk();
+        resumed.Apply(ranged, new WPos(0f, 25f), casting: false);
+        resumed.Apply(ranged, new WPos(6f, 24f), casting: false);          // wherever the dodge put it
+        t.True("with the walk still under way afterwards, to resume", resumed.Walking);
+    }
 
     // inside the band every cell is equally good for uptime, so the dodge spends its budget on safety. This goal is
     // built by hand and so has no floor; the one UptimeGoal.For gives a backline job does (see the caster tests).
@@ -3863,8 +4095,8 @@ t.Section("Counter-rotating rings");
     // ---- Pallmagia's Roulette, with the real numbers off a recording ----
     //
     // CE204 Appalling Behavior. The boss sits 0.03y from the arena centre at every Roulette, its hitbox is
-    // 3.504, and melee reach adds 2.6 -- so a melee uptime goal covers 0-6.1y from centre while the kill
-    // circle is 5y. Four fifths of melee range is instant death. BossmodReborn declares that circle
+    // 3.504, and the melee band reaches 3 past it -- so a melee uptime goal covers 0-6.5y from centre while the
+    // kill circle is 5y. Three quarters of melee range is instant death. BossmodReborn declares that circle
     // dangerous only 18.3s ahead, which is why its AI holds position in it.
     {
         const float hitbox = 3.504f, killCircle = 5f;
@@ -3872,7 +4104,7 @@ t.Section("Counter-rotating rings");
         var boss = new Actor(3, 0x4D8F, 0, "Pallmagia", 0, ActorType.Enemy, new Vector4(arena.X, 61f, arena.Z + 0.03f, 0f), hitbox);
         var goal = UptimeGoal.For(boss, Role.Melee);
 
-        t.Near("melee uptime range on Pallmagia", goal.Range, hitbox + 2.6f, 0.01f);
+        t.Near("melee uptime range on Pallmagia", goal.Range, hitbox + RangeBand.Melee.Max, 0.01f);
         t.True("most of melee range lies inside the kill circle", goal.Range > killCircle);
         t.True("but a survivable sliver of melee range does exist", goal.Range - killCircle > 0.5f);
 
