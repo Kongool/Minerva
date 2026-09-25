@@ -51,18 +51,80 @@ sealed class Pheromones(ModuleBase module) : Components.Voidzone(module, 4f, Get
     private static List<Actor> GetVoidzones(ModuleBase module) => module.Enemies((uint)OID.Pheromones);
 }
 
-// Tender and Jealous Anaphylaxis: four cones on a four-second cast, two of each colour. Two corrections, both
-// measured on the 2026-09-17 Peerifool recording.
-//
-// The width. Players were damaged up to 27 degrees off a cone's centre and spared from 31 degrees out: 60 degrees
-// wide, not the 90 the port drew. At 90 the four of them cover the arena and the dodge reports no safe spot at all.
-//
-// The colours. The port showed a player only its own colour's cones, keyed on the Tender/Jealous status. That status
-// is applied BY the hit and runs about nine seconds -- which expires on the very tick the next round lands. So at the
-// moment of damage nobody holds anything: 31 of 42 hits were on players holding no status, and the character here was
-// hit by a Tender cone while it had held Jealous through the whole cast. The colour decides nothing about who is
-// caught, so every cone is drawn for everybody.
-sealed class DeadLeaves(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.TenderAnaphylaxis, (uint)AID.JealousAnaphylaxis], new AOEShapeCone(30f, 30f.Degrees()));
+/// <summary>
+/// Dead Leaves: the floor turns into four quadrants, two Tender and two Jealous, and whichever one you are standing on
+/// when it resolves gives you its colour. Take the other colour next time and it barely scratches; take the same one
+/// again and it hits hard. So each player is shown only the quadrants of the colour they already carry -- those are the
+/// ones to leave -- and nothing at all before their first colour, when any quadrant will do.
+///
+/// <para>This is BossmodReborn's model, restored. It was replaced on 2026-09-17 by drawing every cone for everybody, on
+/// two readings of that day's recording that the 2026-09-25 pull disproves. Both are worth recording, because both
+/// look right from a distance:</para>
+///
+/// <para><b>"The colour expires before the next round, so it decides nothing."</b> It does not expire; it is replaced.
+/// A colour is held until the next round swaps it, and the swap and the loss happen on the same tick -- which is what
+/// read as a nine-second timer, since rounds one and two are nine seconds apart. Rosa and Xia then held Tender for 70.4
+/// seconds, round two to round three, and Saar held it for 80.4 across a round in which it got no new colour. Everyone
+/// still carries their colour through the whole four-second cast of the next round, which is the warning.</para>
+///
+/// <para><b>"The cones are sixty degrees wide."</b> They are ninety: quadrants at plus and minus 45 and 135, covering
+/// the floor with nothing between them. Colours were handed out at 32 to 37 degrees off a cone's centre in every round,
+/// past the thirty a sixty-degree cone allows. What was measured on 09-17 was damage, and a player who switches colour
+/// takes none, so the hits that were counted stopped short of the real edge.</para>
+///
+/// <para>The cost of the 09-17 version was two deaths on 2026-09-25. With every quadrant drawn the whole disc read as
+/// danger, and the dodge could not tell a harmless quadrant of the other colour from the border lines between them
+/// (Anaphylactic Shock, 33 to 38 thousand). Korha died at round two to a border plus Tender after Tender; Saar at round
+/// three, the same way. Same colour again hit for 11.5 to 17 thousand; the other colour for none, or about three.</para>
+/// </summary>
+sealed class DeadLeaves(ModuleBase module) : Components.GenericAOEs(module, default, "Go to different color!")
+{
+    private static readonly AOEShapeCone Quadrant = new(30f, 45f.Degrees());
+
+    private BitMask tender;
+    private BitMask jealous;
+    private readonly List<AOEInstance> tenderAOEs = [];
+    private readonly List<AOEInstance> jealousAOEs = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+        => CollectionsMarshal.AsSpan(this.tender[slot] ? this.tenderAOEs : this.jealous[slot] ? this.jealousAOEs : []);
+
+    public override void OnStatusGain(Actor actor, ref ActorStatus status) => this.Mark(actor, status.ID, true);
+
+    public override void OnStatusLose(Actor actor, ref ActorStatus status) => this.Mark(actor, status.ID, false);
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        var list = cast.Action.ID switch
+        {
+            (uint)AID.TenderAnaphylaxis => this.tenderAOEs,
+            (uint)AID.JealousAnaphylaxis => this.jealousAOEs,
+            _ => null,
+        };
+        var origin = cast.LocXZ != default ? cast.LocXZ : caster.Position;
+        list?.Add(new(Quadrant, origin, cast.Rotation, Module.CastFinishAt(cast)));
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID is (uint)AID.TenderAnaphylaxis or (uint)AID.JealousAnaphylaxis)
+        {
+            this.tenderAOEs.Clear();
+            this.jealousAOEs.Clear();
+        }
+    }
+
+    private void Mark(Actor actor, uint status, bool held)
+    {
+        var slot = Raid.FindSlot(actor.InstanceID);
+        if (slot < 0)
+            return;
+        if (status == (uint)SID.TenderAnaphylaxis)
+            this.tender[slot] = held;
+        else if (status == (uint)SID.JealousAnaphylaxis)
+            this.jealous[slot] = held;
+    }
+}
 
 sealed class AnaphylacticShock(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AnaphylacticShock, new AOEShapeRect(30f, 1f));
 sealed class SplashBomb(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SplashBombAOE, 6f);
