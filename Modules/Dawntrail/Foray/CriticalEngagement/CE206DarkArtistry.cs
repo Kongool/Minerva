@@ -127,7 +127,21 @@ sealed class CE206DarkArtistryStates : StateMachineBuilder
 
 [ModuleInfo(Group = ModuleGroup.CriticalEngagement, CFCID = 1093u, NameID = 57u, PrimaryActorOID = (uint)OID.PhantomNecromancer, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
-public sealed class CE206DarkArtistry(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(224f, -860f), new ArenaBoundsSquare(20f))
+public sealed class CE206DarkArtistry(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(224f, -860f), new ArenaBoundsSquare(SafeHalfWidth))
 {
+    /// <summary>
+    /// The floor the dodge may use, deliberately smaller than the square BossmodReborn draws.
+    ///
+    /// <para>The edge is a barrier: actor 0x4C75 pulses 47173 about once a second for the whole fight, and it
+    /// hits anyone past it. 2026-09-26, one pull, three toons hit, every one of them outside the 20-yalm square
+    /// and nobody inside it -- the nearest by the toon's own exact position was 1.2 yalms out. Saar's was a
+    /// dodge: the chosen spot was inside, five yalms along the south edge, but the route bent around an
+    /// explorer's circle along the edge itself, and the walk overshot it by two yalms. A floor ending at the
+    /// barrier leaves no room for that. Two yalms in, as Appalling Behavior's 18 inside its 20 (CE204).</para>
+    /// </summary>
+    private const float SafeHalfWidth = 18f;
+
+    /// <summary>Activation is judged against the real square, not the shrunken floor: someone standing at 19 yalms
+    /// when the engagement starts is in this fight and needs the module.</summary>
     protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InSquare(Module.Center, 20f);
 }
