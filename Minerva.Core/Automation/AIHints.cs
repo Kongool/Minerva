@@ -149,6 +149,7 @@ public sealed class AIHints
 
     public void Clear()
     {
+        this.touchZones = [];
         this.ForbiddenZones.Clear();
         this.PotentialTargets.Clear();
         this.TemporaryObstacles = [];
@@ -1014,6 +1015,107 @@ public sealed class AIHints
             {
                 risky = true;
                 mask |= 1ul << Math.Min(k, 63);
+            }
+        }
+
+        return new CellDanger(risky, mask, soonest);
+    }
+
+    // Which zones touch each cell of the last grid asked about; see ZoneTouches.
+    private ulong[]? touchCells;
+    private ForbiddenZone[] touchZones = [];
+    private WPos touchOrigin;
+    private float touchCell;
+    private float touchMargin;
+    private int touchWidth;
+    private int touchHeight;
+
+    /// <summary>
+    /// For every cell of a grid, one bit per forbidden zone that touches it (within <paramref name="margin"/>) --
+    /// the expensive half of <see cref="DangerAt"/>, and the half that does not depend on the deadline.
+    ///
+    /// <para>A solve builds up to seven route grids on the same cells, one per deadline it tries, and each measured
+    /// every zone against every cell again. Elm Gigas, 2026-09-26: 32 orbiting capsules, and 34ms of a 36ms solve
+    /// was those seven grids asking the same question -- re-solved several times a second, it was the frame drops
+    /// the user saw whenever the arena filled with AOEs. Measured once, each grid now only applies its deadline.</para>
+    ///
+    /// <para>Kept until the zones or the grid change, and dropped by <see cref="Clear"/> every frame, so a shape
+    /// whose geometry reads live state can never be answered from the frame before. Null with more than 64
+    /// zones, where one bit per zone no longer fits; the caller measures directly then.</para>
+    /// </summary>
+    internal ulong[]? ZoneTouches(WPos origin, float cell, int width, int height, float margin)
+    {
+        var zones = this.ForbiddenZones;
+        if (zones.Count > 64)
+            return null;
+        if (this.touchCells != null && this.touchOrigin == origin && this.touchCell == cell && this.touchWidth == width
+            && this.touchHeight == height && this.touchMargin == margin && this.SameZonesAsTouches())
+            return this.touchCells;
+
+        var cells = this.touchCells != null && this.touchCells.Length == width * height ? this.touchCells : new ulong[width * height];
+        for (var z = 0; z < height; ++z)
+        {
+            for (var x = 0; x < width; ++x)
+            {
+                // the same expression RouteGrid.Center uses, so the point measured is the point the grid means
+                var p = new WPos(origin.X + (x * cell), origin.Z + (z * cell));
+                var mask = 0ul;
+                for (var k = 0; k < zones.Count; ++k)
+                {
+                    if (Touches(zones[k], p, margin))
+                        mask |= 1ul << k;
+                }
+
+                cells[(z * width) + x] = mask;
+            }
+        }
+
+        this.touchCells = cells;
+        this.touchZones = [.. zones];
+        this.touchOrigin = origin;
+        this.touchCell = cell;
+        this.touchMargin = margin;
+        this.touchWidth = width;
+        this.touchHeight = height;
+        return cells;
+    }
+
+    private bool SameZonesAsTouches()
+    {
+        var zones = this.ForbiddenZones;
+        if (this.touchZones.Length != zones.Count)
+            return false;
+        for (var k = 0; k < zones.Count; ++k)
+        {
+            var was = this.touchZones[k];
+            var now = zones[k];
+            if (!ReferenceEquals(was.ShapeDistance, now.ShapeDistance) || was.Activation != now.Activation || was.Source != now.Source)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary><see cref="DangerAt"/> for a cell whose touching zones are already known (<see cref="ZoneTouches"/>):
+    /// the same three answers, by the same arithmetic, without measuring anything.</summary>
+    internal CellDanger DangerFromTouches(ulong touches, DateTime deadline, DateTime now)
+    {
+        var risky = false;
+        var mask = 0ul;
+        var soonest = float.MaxValue;
+        while (touches != 0)
+        {
+            var k = System.Numerics.BitOperations.TrailingZeroCount(touches);
+            touches &= touches - 1;
+            var z = this.ForbiddenZones[k];
+
+            var seconds = z.Activation == default ? 0f : (float)(z.Activation - now).TotalSeconds;
+            soonest = MathF.Min(soonest, MathF.Max(seconds, 0f));
+
+            if (z.Activation <= deadline)
+            {
+                risky = true;
+                mask |= 1ul << k;
             }
         }
 

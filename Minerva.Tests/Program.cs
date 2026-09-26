@@ -3427,6 +3427,31 @@ t.Section("Uptime is a band, not a point");
             EdgeOf(drifted.End) >= withGroup.Low - 0.01f && EdgeOf(drifted.End) <= withGroup.High + 0.01f && withGroup.High < 5f);
     }
 
+    // The route grids of one solve share one measurement of which zones touch which cell (AIHints.ZoneTouches):
+    // Elm Gigas, 2026-09-26, seven grids re-measuring 32 capsules were 34ms of a 36ms solve. The risk is a stale
+    // answer, so: a zone added after a solve, and a same-sized zone list after Clear, are both measured afresh.
+    {
+        var h = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(30f), PlayerPosition = new WPos(0f, 0f) };
+        h.AddForbiddenZone(new AOEShapeCircle(6f), new WPos(0f, 0f), default, now.AddSeconds(3d));
+        var first = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f);
+        t.True("standing in a zone, the solve moves", first.NeedToMove && first.Found);
+
+        // a second zone over the spot the first solve chose, added to the same hints
+        h.AddForbiddenZone(new AOEShapeCircle(5f), first.Target, default, now.AddSeconds(3d));
+        var added = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f);
+        t.True($"a zone added after a solve is seen by the next one ({(added.Target - first.Target).Length():0.0}y from the covered spot)",
+            added.Found && (added.Target - first.Target).Length() >= 5f);
+
+        // after Clear, the same number of zones with a bigger reach
+        h.Clear();
+        h.PlayerPosition = new WPos(0f, 0f);
+        h.AddForbiddenZone(new AOEShapeCircle(12f), new WPos(0f, 0f), default, now.AddSeconds(3d));
+        h.AddForbiddenZone(new AOEShapeCircle(5f), new WPos(25f, 0f), default, now.AddSeconds(3d));
+        var fresh = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f);
+        t.True($"and after Clear, a new list of the same size is measured afresh ({fresh.Target.ToVec2().Length():0.0}y out of a 12y circle)",
+            fresh.Found && fresh.Target.ToVec2().Length() >= 12f);
+    }
+
     // Stand near a point: every healer dead and a Phoenix Down that reaches fifteen yalms. The request becomes the
     // uptime goal -- a point, no hitbox, no band -- so the character walks into range of the corpse and stays there
     // instead of being pulled back to the boss. Appalling Behavior, 2026-09-25: the one toon able to Phoenix Down

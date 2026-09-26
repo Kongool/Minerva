@@ -107,13 +107,17 @@ public sealed class RouteGrid
                 this.came[i] = -1;
 
                 // out of bounds and inside something solid are both "cannot be here"; danger is not
+        // Which zones touch which cell is the same for every grid of a solve; only the deadline differs. Measured
+        // once and shared (see AIHints.ZoneTouches) -- it was most of the cost of a solve with many zones up.
+        var touches = hints.ZoneTouches(this.origin, this.cell, this.w, this.h, margin);
+
                 this.solid[i] = hints.InObstacle(p);
                 this.blocked[i] = this.outside[i] || this.solid[i];
                 this.dangerIn[i] = float.MaxValue;
                 if (!this.solid[i])   // outside cells too: the way back in from outside the arena is priced like any other ground
                 {
                     // One pass over the zones for all three answers; see AIHints.DangerAt.
-                    var danger = hints.DangerAt(p, deadline, now, margin);
+                    var danger = touches != null ? hints.DangerFromTouches(touches[i], deadline, now) : hints.DangerAt(p, deadline, now, margin);
                     this.risky[i] = danger.Risky;
                     if (danger.Risky)
                     {
