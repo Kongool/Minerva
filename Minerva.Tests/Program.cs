@@ -3452,6 +3452,48 @@ t.Section("Uptime is a band, not a point");
             fresh.Found && fresh.Target.ToVec2().Length() >= 12f);
     }
 
+    // Never walk into a hit to escape a later one. Alabaster Blade, 2026-09-26: four Occult Aero lines boxed Korha
+    // into a 10x10 pocket, firing in 0.7s; a tornado landed on the pocket, firing in 4.7s; and the dodge walked
+    // thirteen yalms across a line to get clear of the tornado and was mid-line when it fired.
+    {
+        var h = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(30f), PlayerPosition = new WPos(0f, 0f) };
+        var linesFire = now.AddSeconds(0.6d);
+        h.AddForbiddenZone(new AOEShapeRect(50f, 5f), new WPos(-25f, 10f), 90f.Degrees(), linesFire);    // z 5..15
+        h.AddForbiddenZone(new AOEShapeRect(50f, 5f), new WPos(-25f, -10f), 90f.Degrees(), linesFire);   // z -15..-5
+        h.AddForbiddenZone(new AOEShapeRect(50f, 5f), new WPos(-10f, -25f), 0f.Degrees(), linesFire);    // x -15..-5
+        h.AddForbiddenZone(new AOEShapeRect(50f, 5f), new WPos(10f, -25f), 0f.Degrees(), linesFire);     // x 5..15
+        h.AddForbiddenZone(new AOEShapeCircle(7f), new WPos(0f, 0f), default, now.AddSeconds(4.5d));    // the tornado, over the pocket
+        var boxed = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"boxed in by lines about to fire, the dodge does not walk across one to escape a later hit (answer {boxed.Target.X:0.0},{boxed.Target.Z:0.0}, move={boxed.NeedToMove})",
+            !boxed.NeedToMove || (MathF.Abs(boxed.Target.X) < 5f && MathF.Abs(boxed.Target.Z) < 5f));
+
+        // once the lines have gone off, the tornado is dodged with seconds to spare
+        h.Clear();
+        h.PlayerPosition = new WPos(0f, 0f);
+        h.AddForbiddenZone(new AOEShapeCircle(7f), new WPos(0f, 0f), default, now.AddSeconds(3.8d));
+        var after = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"and once they have fired, it leaves the tornado ({after.Target.ToVec2().Length():0.0}y out of a 7y circle)",
+            after.NeedToMove && after.Found && after.Target.ToVec2().Length() >= 7f);
+
+        // leaving what you are standing in is still an escape, even when every way out crosses it
+        h.Clear();
+        h.PlayerPosition = new WPos(0f, 0f);
+        h.AddForbiddenZone(new AOEShapeCircle(4f), new WPos(0f, 0f), default, now.AddSeconds(0.9d));
+        var escape = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"and a circle about to go off underfoot is still escaped ({escape.Target.ToVec2().Length():0.0}y out)",
+            escape.NeedToMove && escape.Found && escape.Target.ToVec2().Length() >= 4f);
+
+        // ground already live is crossed at a price, not refused: a puddle ringing the character is stepped over to escape
+        // a circle about to fire underfoot, rather than holding inside the circle
+        h.Clear();
+        h.PlayerPosition = new WPos(0f, 0f);
+        h.AddForbiddenZone(new AOEShapeCircle(6f), new WPos(0f, 0f), default, now.AddSeconds(3d));
+        h.AddForbiddenZone(new AOEShapeDonut(6f, 9f), new WPos(0f, 0f), default, now.AddSeconds(-1d));
+        var over = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        t.True($"and a live puddle is stepped over to escape a circle about to fire ({over.Target.ToVec2().Length():0.0}y out, move={over.NeedToMove})",
+            over.NeedToMove && over.Found && over.Target.ToVec2().Length() >= 9f);
+    }
+
     // Stand near a point: every healer dead and a Phoenix Down that reaches fifteen yalms. The request becomes the
     // uptime goal -- a point, no hitbox, no band -- so the character walks into range of the corpse and stays there
     // instead of being pulled back to the boss. Appalling Behavior, 2026-09-25: the one toon able to Phoenix Down

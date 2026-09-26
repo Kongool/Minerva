@@ -354,9 +354,9 @@ public static class ArenaPathfinder
         // horizon, so it scored the same as the far side -- and once it entered the horizon, every way off it
         // crossed the column that fired first. Only where to go changes; nothing past the horizon becomes a reason
         // to move, and where nothing reachable stays clear that long, the horizon alone decides as before.
-        if (TryNearestSafe(hints, deadline.AddSeconds(LookPastHorizon), solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
+        if (TryNearestSafe(hints, deadline.AddSeconds(LookPastHorizon), solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, budget, out var spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
-        if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
+        if (TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
 
         // The lead is clearance to spare, and it came off the budget above. Before settling for a stage, take ground
@@ -367,7 +367,7 @@ public static class ArenaPathfinder
         // started two seconds later and fell 3.9 yalms short. A hold is right when leaving means crossing the wave
         // about to fire (the cone waves below); the walk check keeps that case a hold.
         if (clearanceLead > 0f
-            && TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, TimeUntilDanger(hints, player, deadline, now), out spot)
+            && TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, TimeUntilDanger(hints, player, deadline, now), out spot)
             && RouteIsClear(hints, player, spot, solveNow, safetyMargin, moveSpeed))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
 
@@ -392,7 +392,7 @@ public static class ArenaPathfinder
         bool? leavingIsClear = null;
         foreach (var soon in ActivationsBefore(hints, deadline, now))
         {
-            if (!TryNearestSafe(hints, soon, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
+            if (!TryNearestSafe(hints, soon, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
                 continue;
             var staged = Settle(hints, soon, player, spot, cellSize, safetyMargin);
             if (staged.NeedToMove ? hints.InImminentDanger(player, soon, safetyMargin) : !(leavingIsClear ??= LeavingIsClear()))
@@ -400,12 +400,12 @@ public static class ArenaPathfinder
         }
 
         bool LeavingIsClear()
-            => TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out var clear)
+            => TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out var clear)
                 && RouteIsClear(hints, player, clear, solveNow, safetyMargin, moveSpeed);
 
-        if (TryNearestSafe(hints, deadline, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
+        if (TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
-        if (safetyMargin > 0f && TryNearestSafe(hints, deadline, solveNow, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
+        if (safetyMargin > 0f && TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
             return Settle(hints, deadline, player, spot, cellSize, 0f);
 
         // Nothing is safe from everything inside the horizon. Before giving up, ask the same question with
@@ -415,7 +415,7 @@ public static class ArenaPathfinder
         // seconds reporting "no safe spot" while a cell four yalms away was clear of it. Every frame
         // re-solves, so the second wave is dodged from wherever the first was dodged to, as a person does.
         foreach (var earlier in ActivationsBefore(hints, deadline, now))
-            if (TryNearestSafe(hints, earlier, solveNow, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
+            if (TryNearestSafe(hints, earlier, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
                 return Settle(hints, earlier, player, spot, cellSize, safetyMargin);
 
         // A positioning instruction is advice, danger is not. If nothing honours both, answer the danger
@@ -468,7 +468,7 @@ public static class ArenaPathfinder
 
         // Ground that stays clear for the whole look-ahead, scored the usual way, so the uptime band and
         // the positional still decide between the candidates that qualify.
-        if (!TryNearestSafe(hints, now.AddSeconds(DriftLookAhead), now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out var clear))
+        if (!TryNearestSafe(hints, now.AddSeconds(DriftLookAhead), now, now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out var clear))
             return fallback;
         if (!clear.NeedToMove || !clear.Found)
             return fallback;
@@ -773,7 +773,7 @@ public static class ArenaPathfinder
         return AnchorBias * (1f - (deg / AnchorToleranceDeg)); // strongest on the anchor, fading to nothing
     }
 
-    private static bool TryNearestSafe(AIHints hints, DateTime deadline, DateTime now, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, float timeBudget, out SafeSpot spot)
+    private static bool TryNearestSafe(AIHints hints, DateTime deadline, DateTime now, DateTime realNow, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, float timeBudget, out SafeSpot spot)
     {
         var hasGoals = hints.GoalZones.Count > 0;
         var found = false;
@@ -783,7 +783,7 @@ public static class ArenaPathfinder
         // Cost by route, not by displacement. Everything below scores a cell on what it takes to GET there,
         // so a safe wedge behind a rock is priced with the walk around the rock included, and an unreachable
         // one is not considered at all.
-        var grid = new RouteGrid(hints, deadline, player, cellSize, margin, now, moveSpeed);
+        var grid = new RouteGrid(hints, deadline, player, cellSize, margin, now, moveSpeed, realNow);
 
         for (var gz = 0; gz < grid.Height; ++gz)
         {
@@ -798,6 +798,15 @@ public static class ArenaPathfinder
                 var p = grid.Center(gx, gz);
                 if (float.IsInfinity(grid.CostAt(gx, gz)))
                     continue;                                   // nothing walks there from here
+
+                // Safe ground behind something that fires before the walk is across it is not safe ground: getting
+                // there is the hit. The route prices such a step, but only to choose among routes -- the cell was still
+                // taken, scored on distance alone. Alabaster Blade, 2026-09-26: boxed into a pocket by four lines firing
+                // in 0.7s, with a tornado dropped on the pocket firing in 4.7s, the dodge walked thirteen yalms across a
+                // line and was mid-line when it went off. Refusing it here leaves the stage below to answer "the lines
+                // first": stay in the pocket, then leave the tornado with seconds to spare.
+                if (grid.WalksIntoAHit(gx, gz))
+                    continue;
                 if (hints.Misplaced(p))
                     continue;                                   // not where the module asked us to stand
 

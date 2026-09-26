@@ -57,6 +57,8 @@ public sealed class RouteGrid
     private readonly float[] cost;    // penalised: what decides which way to go
     private readonly float[] length;  // plain yalms along that route: what the destination is scored on
     private readonly int[] came;
+    private readonly bool[] intoHit;  // the route here steps into something new that fires before it is crossed
+    private readonly ulong pending;   // zones that have not fired yet: telegraphs, as against ground already live
 
     public int Width => this.w;
     public int Height => this.h;
@@ -69,7 +71,10 @@ public sealed class RouteGrid
     /// <param name="now">When the solve is happening, so a cell's danger can be compared with the time it
     /// takes to walk there.</param>
     /// <param name="moveSpeed">Yalms per second; zero disables the arrival check entirely.</param>
-    public RouteGrid(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, DateTime now, float moveSpeed)
+    /// <param name="liveBy">The real time now. <paramref name="now"/> is the solve's, which a clearance lead moves ahead
+    /// of the clock; a zone that goes off by this is live ground rather than a telegraph still to fire (see
+    /// <see cref="WalksIntoAHit"/>). Defaults to <paramref name="now"/>.</param>
+    public RouteGrid(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, DateTime now, float moveSpeed, DateTime liveBy = default)
     {
         this.cell = cellSize;
         this.speed = moveSpeed;
@@ -90,11 +95,21 @@ public sealed class RouteGrid
         this.cost = new float[n];
         this.length = new float[n];
         this.came = new int[n];
+        this.intoHit = new bool[n];
+        for (var k = 0; k < hints.ForbiddenZones.Count; ++k)
+        {
+            if (hints.ForbiddenZones[k].Activation > (liveBy == default ? now : liveBy))
+                this.pending |= 1ul << Math.Min(k, 63);
+        }
 
         // The arena does not change between rungs or between frames, so the floor is rasterised once per
         // shape and kept on the bounds itself, the way BossmodReborn keeps its pathfinding map. It was
         // costing a full pass of point-in-polygon over the grid on each of the four grids a solve builds.
         hints.Bounds.CopyOutsideMask(center, this.origin, this.cell, this.w, this.h, this.outside);
+
+        // Which zones touch which cell is the same for every grid of a solve; only the deadline differs. Measured
+        // once and shared (see AIHints.ZoneTouches) -- it was most of the cost of a solve with many zones up.
+        var touches = hints.ZoneTouches(this.origin, this.cell, this.w, this.h, margin);
 
         for (var z = 0; z < this.h; ++z)
         {
@@ -107,10 +122,6 @@ public sealed class RouteGrid
                 this.came[i] = -1;
 
                 // out of bounds and inside something solid are both "cannot be here"; danger is not
-        // Which zones touch which cell is the same for every grid of a solve; only the deadline differs. Measured
-        // once and shared (see AIHints.ZoneTouches) -- it was most of the cost of a solve with many zones up.
-        var touches = hints.ZoneTouches(this.origin, this.cell, this.w, this.h, margin);
-
                 this.solid[i] = hints.InObstacle(p);
                 this.blocked[i] = this.outside[i] || this.solid[i];
                 this.dangerIn[i] = float.MaxValue;
@@ -142,6 +153,14 @@ public sealed class RouteGrid
     }
 
     public bool Blocked(int x, int z) => this.blocked[(z * this.w) + x];
+
+    /// <summary>
+    /// Does the route to this cell walk into a telegraph that fires before the character is across it -- one it
+    /// is not already standing in? Leaving a zone about to go off means crossing it, and that is the escape;
+    /// stepping into a different one on the way is the hit. Ground already live (a puddle, a hazard that is
+    /// already out) does not count: that is priced by the route, not refused. See <see cref="Flood"/>.
+    /// </summary>
+    public bool WalksIntoAHit(int x, int z) => this.intoHit[(z * this.w) + x];
 
     /// <summary>
     /// Is this cell off the arena floor?
@@ -312,6 +331,7 @@ public sealed class RouteGrid
         this.blocked[start] = false;
         this.cost[start] = 0f;
         this.length[start] = 0f;
+        var startZones = this.zones[start];   // what the character is standing in: leaving it is not a new hit
 
         var open = new PriorityQueue<int, float>();
         open.Enqueue(start, 0f);
@@ -357,13 +377,20 @@ public sealed class RouteGrid
 
                     var step = (dx != 0 && dz != 0 ? Diagonal : 1f) * this.cell;
                     var penalty = 1f;
+                    var hit = false;
                     if (this.risky[j])
                     {
                         // Would it still be safe to be in that cell when we got there? The route so far is
                         // this.length[i] yalms, so arrival is that plus this step, divided by walk speed.
                         penalty = DangerStepPenalty;
                         if (this.speed > 0f && this.dangerIn[j] <= ((this.length[i] + step) / this.speed) + ArrivalSlack)
+                        {
                             penalty = this.LethalPenalty(j);
+                            // only a telegraph that has not gone off yet: a puddle or an orbiting hazard that is already
+                            // live is ground to cross at a price, and stepping over one to escape something worse is
+                            // often the right call (Elm Gigas' capsules, 2026-09-26, held a character inside a cyclone)
+                            hit = (this.zones[j] & ~startZones & this.pending) != 0;
+                        }
                     }
                     var next = baseCost + (step * penalty);
                     if (next >= this.cost[j])
@@ -371,6 +398,7 @@ public sealed class RouteGrid
                     this.cost[j] = next;
                     this.length[j] = this.length[i] + step;
                     this.came[j] = i;
+                    this.intoHit[j] = this.intoHit[i] || hit;
                     open.Enqueue(j, next);
                 }
             }
