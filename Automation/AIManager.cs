@@ -57,6 +57,9 @@ public sealed class AIManager
     private Positional requestedPositional;
     private DateTime requestedUntil;
     private DateTime holdUntil;
+    private WPos standNearPoint;
+    private float standNearRange;
+    private DateTime standNearUntil;
 
     public SafeSpot Current { get; private set; } = SafeSpot.Stay;
 
@@ -195,7 +198,15 @@ public sealed class AIManager
         // The band says when to move (outside it) and where to stop (at its preferred distance); BandWalk is what
         // remembers a walk is under way, so crossing back into the band does not end it short of preferred.
         UptimeGoal? goal = null;
-        if (target != null)
+        if (this.standNearUntil > now)
+        {
+            // A rotation has somewhere to be that is not the boss -- a corpse to Phoenix Down, fifteen yalms at
+            // most. It replaces uptime outright rather than competing with it: a band pulling back toward the
+            // boss is how the character ends up out of range again halfway through an eight-second cast.
+            goal = new UptimeGoal(this.standNearPoint, default, this.standNearRange);
+            this.bandWalk.Reset();
+        }
+        else if (target != null)
             goal = this.bandWalk.Apply(
                 UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc, target)),
                 pc.Position,
@@ -1164,6 +1175,24 @@ public sealed class AIManager
     /// </summary>
     public void RequestHold(double seconds)
         => this.holdUntil = this.world.CurrentTime.AddSeconds(Math.Clamp(seconds, 0d, 30d));
+
+    /// <summary>
+    /// Go and stand within <paramref name="range"/> yalms of a point for the next few seconds -- a rotation
+    /// saying "I have to be near that": a dead healer with every healer down, and a Phoenix Down that reaches
+    /// fifteen yalms (Appalling Behavior, 2026-09-25: both healers-to-be were out of range and the corpse lay
+    /// there for three and a half minutes).
+    ///
+    /// <para>While it lasts it is the uptime goal, so the character walks in and then stays put rather than
+    /// drifting back to the boss. Danger still wins: it is a goal, not a path, and the dodge keeps the character
+    /// out of anything about to go off on the way and once there. Expires on its own and is re-asserted, like
+    /// <see cref="RequestPositional"/>; asking for 0 seconds releases it.</para>
+    /// </summary>
+    public void RequestStandNear(WPos point, float range, double seconds)
+    {
+        this.standNearPoint = point;
+        this.standNearRange = Math.Clamp(range, 1f, 30f);
+        this.standNearUntil = this.world.CurrentTime.AddSeconds(Math.Clamp(seconds, 0d, 30d));
+    }
 
     /// <summary>Whether a <see cref="RequestHold"/> is in force this frame.</summary>
     public bool HoldActive => this.holdUntil > this.world.CurrentTime;

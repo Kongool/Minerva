@@ -71,6 +71,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<ulong, bool> cleansePending;
     private readonly ICallGateProvider<int, double, bool> requestPositional;
     private readonly ICallGateProvider<double, bool> requestHold;
+    private readonly ICallGateProvider<System.Numerics.Vector3, float, double, bool> requestStandNear;
     private readonly ICallGateProvider<string[]> listPresets;
     private readonly ICallGateProvider<string> activePreset;
     private readonly ICallGateProvider<string, string, bool> applyPreset;
@@ -235,6 +236,15 @@ internal sealed class MinervaIpc : IDisposable
             return true;
         });
 
+        // "Be within this many yalms of that spot" -- a corpse to Phoenix Down when every healer is dead. It
+        // replaces uptime while it lasts; danger still overrides it. Re-assert it; it expires on its own.
+        this.requestStandNear = pi.GetIpcProvider<System.Numerics.Vector3, float, double, bool>("Minerva.RequestStandNear");
+        this.requestStandNear.RegisterFunc((point, range, seconds) =>
+        {
+            this.ai.RequestStandNear(new WPos(point.X, point.Z), range, seconds);
+            return true;
+        });
+
         // Presets are how a rotation states everything that is job-shaped rather than fight-shaped -- how
         // much clearance to keep, and how far inside a positional arc to stand (Monk wants the border,
         // Samurai does not care). One claimed slot rather than a setter per field: a plugin writing
@@ -316,6 +326,7 @@ internal sealed class MinervaIpc : IDisposable
         this.cleansePending.UnregisterFunc();
         this.requestPositional.UnregisterFunc();
         this.requestHold.UnregisterFunc();
+        this.requestStandNear.UnregisterFunc();
         this.listPresets.UnregisterFunc();
         this.activePreset.UnregisterFunc();
         this.applyPreset.UnregisterFunc();

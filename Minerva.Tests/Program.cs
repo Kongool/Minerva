@@ -3427,6 +3427,40 @@ t.Section("Uptime is a band, not a point");
             EdgeOf(drifted.End) >= withGroup.Low - 0.01f && EdgeOf(drifted.End) <= withGroup.High + 0.01f && withGroup.High < 5f);
     }
 
+    // Stand near a point: every healer dead and a Phoenix Down that reaches fifteen yalms. The request becomes the
+    // uptime goal -- a point, no hitbox, no band -- so the character walks into range of the corpse and stays there
+    // instead of being pulled back to the boss. Appalling Behavior, 2026-09-25: the one toon able to Phoenix Down
+    // was out of range, and the corpse lay there for three and a half minutes.
+    {
+        var corpse = new WPos(0f, 20f);
+        var near = new UptimeGoal(corpse, default, 12f);
+        (WPos End, int Frames) WalkTo(WPos from, Action<AIHints>? danger = null)
+        {
+            var at = from;
+            for (var i = 0; i < 400; ++i)
+            {
+                var h = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(30f), PlayerPosition = at };
+                danger?.Invoke(h);
+                var spot = ArenaPathfinder.Solve(h, now, goal: near, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+                if (!spot.NeedToMove)
+                    return (at, i);
+                var step = spot.Steer - at;
+                at = step.Length() <= 0.5f ? spot.Steer : at + (step.Normalized() * 0.5f);
+            }
+            return (at, 400);
+        }
+
+        var walked = WalkTo(new WPos(0f, -8f));
+        t.True($"a toon 28y from the corpse walks into Phoenix Down range and stops there ({(walked.End - corpse).Length():0.0}y)",
+            walked.Frames > 0 && (walked.End - corpse).Length() <= 12.01f && (walked.End - corpse).Length() >= 10f);
+        t.Eq("one already in range stays where it is", WalkTo(new WPos(3f, 12f)).Frames, 0);
+
+        // danger still wins: with a puddle about to go off across the way, the walk waits for it rather than cutting
+        // through -- the same rule as any walk back to uptime, and it resumes the frame the ground clears
+        var burning = WalkTo(new WPos(0f, -8f), h => h.AddForbiddenZone(new AOEShapeCircle(8f), new WPos(0f, 9f), default, now.AddSeconds(3d)));
+        t.True("and a telegraph across the way is waited out, not walked through", burning.Frames == 0 && burning.End == new WPos(0f, -8f));
+    }
+
     // inside the band every cell is equally good for uptime, so the dodge spends its budget on safety. This goal is
     // built by hand and so has no floor; the one UptimeGoal.For gives a backline job does (see the caster tests).
     var caster = new UptimeGoal(boss, default, 15f);
