@@ -3494,6 +3494,13 @@ t.Section("Uptime is a band, not a point");
             over.NeedToMove && over.Found && over.Target.ToVec2().Length() >= 9f);
     }
 
+    // A module can hold uptime for a mechanic (AIHints.UptimeHeld) -- only for the frame it says so.
+    {
+        var held = new AIHints { UptimeHeld = true };
+        held.Clear();
+        t.True("holding uptime is per frame: Clear lets go of it", !held.UptimeHeld);
+    }
+
     // Stand near a point: every healer dead and a Phoenix Down that reaches fifteen yalms. The request becomes the
     // uptime goal -- a point, no hitbox, no band -- so the character walks into range of the corpse and stays there
     // instead of being pulled back to the boss. Appalling Behavior, 2026-09-25: the one toon able to Phoenix Down

@@ -132,6 +132,17 @@ sealed class HellwardBound(ModuleBase module) : Components.GenericAOEs(module)
         }
     }
 
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+
+        // While the dash path is laid out the boss is going corner to corner, landing somewhere new every two
+        // seconds: don't chase it, just stay out of the lanes. 2026-09-26: uptime walked Korha and Saar after each
+        // landing -- 31 yalms in five seconds, back and forth -- and the boss came back to the middle anyway.
+        if (aoes.Count > 0)
+            hints.UptimeHeld = true;
+    }
+
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         var count = aoes.Count;

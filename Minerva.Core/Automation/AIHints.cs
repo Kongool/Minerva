@@ -156,6 +156,7 @@ public sealed class AIHints
         this.WalkableGround = null;
         this.PositioningZones.Clear();
         this.PositioningSuspended = false;
+        this.UptimeHeld = false;
         this.GoalZones.Clear();
         this.ForbiddenDirections.Clear();
         this.PredictedDamage.Clear();
@@ -225,6 +226,14 @@ public sealed class AIHints
     /// and the real danger: a spot to stand on is never worth a hit.
     /// </summary>
     public bool PositioningSuspended;
+
+    /// <summary>
+    /// The module says chasing the target is pointless right now: dodge, but make no walk for uptime. A boss that
+    /// dashes corner to corner lands somewhere new every two seconds, and uptime walked the melee after it each time
+    /// -- Accept No Imitators' Hellward Bound, 2026-09-26: Korha ran 31 yalms in five seconds, back and forth, and
+    /// the boss came back to the middle anyway. Per frame, like every other hint; <see cref="Clear"/> resets it.
+    /// </summary>
+    public bool UptimeHeld;
 
     /// <summary>
     /// Is this point outside ground a positioning instruction assigns?

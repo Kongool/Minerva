@@ -206,7 +206,7 @@ public sealed class AIManager
             goal = new UptimeGoal(this.standNearPoint, default, this.standNearRange);
             this.bandWalk.Reset();
         }
-        else if (target != null)
+        else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)
             goal = this.bandWalk.Apply(
                 UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc, target)),
                 pc.Position,
