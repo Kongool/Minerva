@@ -62,6 +62,40 @@ public readonly record struct RangeBand(float Min, float Preferred, float Max)
     /// <summary>Where a walk to the band stops: within the tolerance of Preferred, and never outside the band.</summary>
     public (float Low, float High) StopWindow
         => (MathF.Max(this.Preferred - StopTolerance, this.Min), MathF.Min(this.Preferred + StopTolerance, this.Max));
+
+    /// <summary>
+    /// This band, but never asking a caster to stand farther from the boss than the group does.
+    /// <para>A minimum measured from the boss alone runs a caster away from its own party. With the tank and melee
+    /// stacked on the boss, every step the boss takes toward the group puts the caster under its minimum, so it walks
+    /// out -- and the boss, still being tanked toward the group, follows. The user, 2026-09-25: "ranged and casters
+    /// need to stay with the group, not continue to run away from the group to maintain min distance."</para>
+    /// <para>So the minimum and the preferred distance are both capped at where the group stands: with the melee on
+    /// the boss a caster settles with them and walks back <i>to them</i>, and with the whole group out at range the
+    /// band applies as set. The maximum is untouched -- a group standing out of range is not followed out of it.</para>
+    /// </summary>
+    public RangeBand FollowGroup(float? groupDistance)
+    {
+        if (groupDistance is not { } g)
+            return this;
+        var min = MathF.Min(this.Min, g);
+        return new(min, MathF.Min(this.Preferred, MathF.Max(g, min)), this.Max);
+    }
+
+    /// <summary>
+    /// How far the rest of the group stands from the target's hitbox edge: the median, so one member running off to
+    /// a spread marker does not drag everybody after it. Null with nobody else to go by.
+    /// </summary>
+    public static float? GroupDistance(IReadOnlyList<WPos> others, WPos target, float hitboxRadius)
+    {
+        if (others.Count == 0)
+            return null;
+        var d = new float[others.Count];
+        for (var i = 0; i < d.Length; ++i)
+            d[i] = MathF.Max((others[i] - target).Length() - hitboxRadius, 0f);
+        Array.Sort(d);
+        var mid = d.Length / 2;
+        return d.Length % 2 == 1 ? d[mid] : (d[mid - 1] + d[mid]) / 2f;
+    }
 }
 
 /// <summary>

@@ -248,7 +248,7 @@ public sealed class MainWindow : Window, IDisposable
                     cfg.RangedBandMin = Math.Clamp(MathF.Round(bandMin), 0f, 15f);
                     changed = true;
                 }
-                UiKit.Tip($"Casters, ranged and healers keep at least this far off the target's hitbox. They move only when outside {cfg.RangedBandMin:0}-{cfg.RangedBandMax:0}y, then walk to {cfg.RangedBandPreferred:0}y.");
+                UiKit.Tip($"Casters, ranged and healers keep at least this far off the target's hitbox -- but never farther out than the rest of the party stands, so they stay with the group. They move only when outside {cfg.RangedBandMin:0}-{cfg.RangedBandMax:0}y, then walk to {cfg.RangedBandPreferred:0}y or the group, whichever is closer.");
 
                 ImGui.EndTable();
             }

@@ -197,7 +197,7 @@ public sealed class AIManager
         UptimeGoal? goal = null;
         if (target != null)
             goal = this.bandWalk.Apply(
-                UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc.Role)),
+                UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc, target)),
                 pc.Position,
                 pc.CastInfo != null);
         else
@@ -706,11 +706,26 @@ public sealed class AIManager
         return GameData.PathHasFloor(from, new Vector3(edge.X, pc.PosRot.Y, edge.Z));
     }
 
-    /// <summary>The configured band for a role: tanks and melee share one, everyone else the backline's.</summary>
-    private RangeBand BandFor(Role role)
-        => role is Role.Tank or Role.Melee
-            ? new RangeBand(0f, this.config.MeleeBandPreferred, this.config.MeleeBandMax)
-            : new RangeBand(this.config.RangedBandMin, this.config.RangedBandPreferred, this.config.RangedBandMax);
+    /// <summary>The configured band for a role: tanks and melee share one, everyone else the backline's -- and the
+    /// backline's never asks for more distance from the boss than the rest of the party is keeping.</summary>
+    private RangeBand BandFor(Actor pc, Actor target)
+    {
+        if (pc.Role is Role.Tank or Role.Melee)
+            return new RangeBand(0f, this.config.MeleeBandPreferred, this.config.MeleeBandMax);
+        var band = new RangeBand(this.config.RangedBandMin, this.config.RangedBandPreferred, this.config.RangedBandMax);
+        return band.FollowGroup(RangeBand.GroupDistance(this.GroupPositions(pc), target.Position, target.HitboxRadius));
+    }
+
+    /// <summary>Where the rest of the party stands: players only, living, and this party only -- an alliance in
+    /// Bozja or Occult Crescent is not the group a caster should keep with, and neither is an NPC standing in.</summary>
+    private List<WPos> GroupPositions(Actor pc)
+    {
+        var positions = new List<WPos>();
+        foreach (var member in this.world.Party.WithoutSlot(includeDead: false, excludeAlliance: true, excludeNPCs: true))
+            if (member.InstanceID != pc.InstanceID)
+                positions.Add(member.Position);
+        return positions;
+    }
 
     /// <summary>The enemy this picked last frame, so a tie between two mobs standing together stays where it was.</summary>
     private ulong lastPrioritised;

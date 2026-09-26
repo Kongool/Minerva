@@ -3247,6 +3247,57 @@ t.Section("Uptime is a band, not a point");
         t.True("with the walk still under way afterwards, to resume", resumed.Walking);
     }
 
+    // Casters stay with the group. A minimum measured from the boss alone ran casters away from their own party: the
+    // melee stack on the boss, the boss steps toward the group, the caster is under its minimum and walks out, and the
+    // boss follows. The user, 2026-09-25: "ranged and casters need to stay with the group, not continue to run away
+    // from the group to maintain min distance."
+    {
+        var ranged = RangeBand.Ranged;
+        t.True("with the group on the boss, the minimum comes in to meet it", ranged.FollowGroup(2f).Normalized() is { Min: 2f, Max: 15f });
+        t.True("and so does where a walk stops", ranged.FollowGroup(2f).Normalized().StopWindow == (2f, 4f));
+        t.True("with the group out at range, a caster keeps to the group", ranged.FollowGroup(10f).Normalized() is { Min: 8f, Preferred: 10f });
+        t.True("a group out of range is not followed out of it", ranged.FollowGroup(20f) == ranged);
+        t.True("and with nobody else to go by, the band is as set", ranged.FollowGroup(null) == ranged);
+
+        var centre = new WPos(0f, 0f);
+        t.Eq("the group's distance is its median member's, from the hitbox edge",
+            RangeBand.GroupDistance([new WPos(0f, 2f), new WPos(0f, 3f), new WPos(0f, 13f)], centre, 1f), 2f);
+        t.Eq("so one member off at a spread marker does not drag it",
+            RangeBand.GroupDistance([new WPos(0f, 2f), new WPos(0f, 2f), new WPos(0f, 40f)], centre, 1f), 1f);
+        t.Eq("an even count takes the middle two", RangeBand.GroupDistance([new WPos(0f, 3f), new WPos(0f, 5f)], centre, 1f), 3f);
+        t.Eq("someone inside the hitbox counts as on it", RangeBand.GroupDistance([new WPos(0f, 0.5f)], centre, 1f), 0f);
+        t.True("and nobody else means no answer", RangeBand.GroupDistance([], centre, 1f) == null);
+
+        // the whole thing, re-solved every frame the way the plugin drives it
+        var groupLord = new Actor(0x41, 0x100u, 0, "boss", 0u, ActorType.Enemy, new Vector4(0f, 0f, 0f, 0f), 1f);
+        WPos[] meleeStack = [new WPos(0.5f, 3f), new WPos(-0.5f, 3f), new WPos(0f, 3.5f)];   // edge two-ish, on the boss
+        var groupBand = RangeBand.Ranged.FollowGroup(RangeBand.GroupDistance(meleeStack, centre, groupLord.HitboxRadius));
+        float EdgeOf(WPos p) => (p - centre).Length() - groupLord.HitboxRadius;
+        (WPos End, int Frames) WalkWithGroup(WPos from)
+        {
+            var walk = new BandWalk();
+            var at = from;
+            for (var i = 0; i < 400; ++i)
+            {
+                var goal = walk.Apply(UptimeGoal.For(groupLord, Role.Ranged, band: groupBand), at, casting: false);
+                var h = new AIHints { Center = centre, Bounds = new ArenaBoundsSquare(40f), PlayerPosition = at };
+                var spot = ArenaPathfinder.Solve(h, now, goal: goal, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+                if (!spot.NeedToMove)
+                    return (at, i);
+                var step = spot.Target - at;
+                at = step.Length() <= 0.5f ? spot.Target : at + (step.Normalized() * 0.5f);
+            }
+            return (at, 400);
+        }
+
+        t.Eq("a caster standing with the melee stack stays there", WalkWithGroup(new WPos(0f, 5f)).Frames, 0);
+        t.Eq("and does not back off when the boss steps into the group", WalkWithGroup(new WPos(0f, 3.2f)).Frames, 0);
+        var drifted = WalkWithGroup(new WPos(0f, 22f));
+        var withGroup = groupBand.Normalized().StopWindow;
+        t.True($"a caster out of range walks back to the group, not to twelve yalms (stopped at {EdgeOf(drifted.End):0.00}y, window {withGroup.Low:0.00}-{withGroup.High:0.00})",
+            EdgeOf(drifted.End) >= withGroup.Low - 0.01f && EdgeOf(drifted.End) <= withGroup.High + 0.01f && withGroup.High < 5f);
+    }
+
     // inside the band every cell is equally good for uptime, so the dodge spends its budget on safety. This goal is
     // built by hand and so has no floor; the one UptimeGoal.For gives a backline job does (see the caster tests).
     var caster = new UptimeGoal(boss, default, 15f);
