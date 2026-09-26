@@ -155,7 +155,10 @@ internal sealed class DtrStatus : IDisposable
         if (this.modules.ActiveModuleInfo is not { } info)
             return "Idle";
 
-        var name = ModulesTab.ResolveBossName(info.Attr.NameID) ?? ModulesTab.Prettify(info.ModuleType.Name);
+        // BossName reads a FATE's or a CE's NameID from its own sheet. Read as an enemy name, Allure of the Occult's
+        // FATE row 2078 showed on the bar as "Ishgardian Archer" (2026-09-26) -- the modules tab was fixed for this
+        // on 2026-09-14 and the bar kept the old lookup.
+        var name = ModulesTab.BossName(info);
         return name.Length > MaxNameLength ? name[..(MaxNameLength - 1)] + "\u2026" : name;
     }
 
