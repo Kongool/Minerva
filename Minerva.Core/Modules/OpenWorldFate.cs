@@ -17,6 +17,9 @@ public abstract class OpenWorldFate(WorldState ws, Actor primary)
     /// <summary>BossmodReborn's own figure for an open-world fight.</summary>
     public const float DefaultRadius = 30f;
 
+    /// <summary>The last FATE the game reported with this boss inside it.</summary>
+    private FateState fought;
+
     protected override void OnUpdate()
     {
         // Prefer the FATE's own boundary. It is not a sealed arena — you can walk out, and walking out
@@ -25,6 +28,17 @@ public abstract class OpenWorldFate(WorldState ws, Actor primary)
         // will occasionally dodge a mechanic by leaving the FATE entirely. A radius the game states beats
         // both that and a guess: too small refuses safe ground, too large walks you out of the fight.
         var fate = this.World.ActiveFate;
+
+        // The game reports the FATE the player stands in, so it goes blank the moment the player steps out
+        // of it — which is exactly when the bound matters, because the way back in is measured against it.
+        // Iambe, 2026-09-25: the recorder was outside the FATE from 83s to 100s, across a forced march, and
+        // for those seventeen seconds the bound was a circle around the boss. So keep the last one the boss
+        // was inside; it is still where the fight is.
+        if (fate.Active && fate.Contains(this.PrimaryActor.Position))
+            this.fought = fate;
+        else if (!fate.Active)
+            fate = this.fought;
+
         if (fate.Active)
         {
             this.Center = fate.Center;

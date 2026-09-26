@@ -433,35 +433,17 @@ sealed class ForcedMarch : Components.GenericForcedMarch
         if (this.Facing(actor, turn) is not { } facing)
             return;
 
-        // leave only the quarter around the facing that aims the walk somewhere survivable, the same way
-        // an inverted gaze leaves only the quarter that faces it
-        hints.ForbiddenDirections.Add((facing + 180f.Degrees(), 135f.Degrees(), this.walks));
+        // forbid every facing but that one, so the turn lands on it rather than a gaze margin short of it
+        hints.ForbiddenDirections.Add(AimArc(facing, this.walks));
     }
 
-    /// <summary>The facing that sends the walk somewhere worth ending up, or null if nothing does.</summary>
+    /// <summary>The facing that sends the walk somewhere worth ending up, or null if nothing does. The walk goes
+    /// the facing plus the turn; among the facings that work, one with room either side and then the smallest
+    /// turn, so the dodge is not spun across the arena for a tie.</summary>
     private Angle? Facing(Actor actor, Angle turn)
     {
         var array = Module.FindComponent<ArcaneArray>();
-        Angle? best = null;
-        var bestSwing = float.MaxValue;
-
-        for (var step = 0; step < 36; ++step)
-        {
-            var heading = (step * 10f).Degrees();
-            if (!this.Survivable(actor, heading, array))
-                continue;
-
-            // among the headings that work, the one asking for the smallest turn, so the dodge is not
-            // spun across the arena for a tie
-            var swing = MathF.Abs((heading - turn - actor.Rotation).Normalized().Rad);
-            if (swing < bestSwing)
-            {
-                bestSwing = swing;
-                best = heading - turn;
-            }
-        }
-
-        return best;
+        return PickFacing(actor.Rotation, facing => this.Survivable(actor, facing + turn, array));
     }
 
     /// <summary>Does the whole walk stay on the floor and out of the burned rows?</summary>

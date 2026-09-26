@@ -14,16 +14,10 @@ sealed class SurgingCurrent(ModuleBase module) : Components.SimpleAOEs(module, (
 sealed class AquaBall(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AquaBall, 5f);
 sealed class Hydrocannon(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeRect(70f, 3f), (uint)IconID.TankLaserLockon, (uint)AID.Hydrocannon);
 sealed class HydrobulletSpread(ModuleBase module) : Components.SpreadFromCastTargets(module, (uint)AID.HydrobulletSpread, 15f);
-sealed class AlluringOrder(ModuleBase module) : Components.StatusDrivenForcedMarch(module, 3f, default, (uint)SID.AboutFace, (uint)SID.LeftFace, (uint)SID.RightFace)
-{
-    // draw expected AOE after forced march ends for other players?
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-    {
-        // TODO: add AI hints so it doesn't run out of arena
-        // each player has icon hydrobullets that resolve after end of forced move
-        // would need to calculate expected end position of each player and check that we don't get clipped by their AOE
-    }
-}
+// The march is aimed by StatusDrivenForcedMarch's shared facing search, which keeps the walk inside the arena --
+// the TODO this class carried from BossmodReborn. Still open from that TODO: each player's hydrobullet resolves
+// after the walk, around wherever the walk ends, so a walk ending beside another player's can clip them.
+sealed class AlluringOrder(ModuleBase module) : Components.StatusDrivenForcedMarch(module, 3f, default, (uint)SID.AboutFace, (uint)SID.LeftFace, (uint)SID.RightFace);
 sealed class TidalSpout(ModuleBase module) : Components.StackWithCastTargets(module, (uint)AID.Tidalspout, 6f, 1, 3)
 {
     private BitMask _spreads = default;

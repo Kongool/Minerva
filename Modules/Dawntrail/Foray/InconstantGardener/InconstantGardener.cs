@@ -40,21 +40,24 @@ public enum SID : uint
 sealed class GardenersHymn(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GardenersHymn, 5f);
 sealed class OdeOfTheUnderfoot(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.OdeOfTheUnderfoot, 10f);
 
+/// <summary>
+/// Iambic March, aimed by the shared facing search -- told only that the boss's own circle is coming.
+///
+/// <para>Ode of the Underfoot, a ten-yalm circle on the boss, lands 2.2 seconds after every walk (both 2026-09-25
+/// pulls: the march resolves 6.5s ahead, the walk, then Ode). So the walk must end clear of it. BossmodReborn's
+/// rule said so by pointing every character straight away from the boss, which is right about the circle and
+/// blind to what is behind: all eight walks that night went outward and two ended outside the FATE. Declaring the
+/// circle unsafe instead lets the search pick any facing that clears it and stays on the floor -- a toon already
+/// out near the edge walks round the boss rather than off the far side. Declared rather than read, because Ode's
+/// cast only begins 2.8s before the walk, and the march is decided before that.</para>
+/// </summary>
 sealed class IambicMarch(ModuleBase module) : Components.StatusDrivenForcedMarch(module, 2.0f, (uint)SID.ForwardMarch, (uint)SID.AboutFace, default, default)
 {
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-    {
-        base.AddAIHints(slot, actor, assignment, hints);
-        var state = State.GetValueOrDefault(actor.InstanceID);
-        if (state == null || state.PendingMoves.Count == 0)
-        {
-            return;
-        }
+    /// <summary>Ode of the Underfoot's radius and a yalm and a half to spare.</summary>
+    private const float OdeReach = 11.5f;
 
-        var move0 = state.PendingMoves[0];
-        var requiredFacing = Angle.FromDirection((actor.Position - Module.PrimaryActor.Position).Normalized()) - move0.dir;
-        hints.ForbiddenDirections.Add((requiredFacing + 180.0f.Degrees(), 170.0f.Degrees(), move0.activation));
-    }
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos)
+        => base.DestinationUnsafe(slot, actor, pos) || (pos - Module.PrimaryActor.Position).LengthSq() < OdeReach * OdeReach;
 }
 
 sealed class Burst(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Burst, 15.0f, riskyWithSecondsLeft: 6.0f)
@@ -108,8 +111,7 @@ sealed class InconstantGardenerStates : StateMachineBuilder
 
 [ModuleInfo(Group = ModuleGroup.ForayFATE, GroupID = 1093u, CFCID = 1093u, NameID = 2079u, PrimaryActorOID = (uint)OID.Iambe, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
-// BMR derives this from OpenWorldFate, which follows the boss and gates activation on the player being
-// within 30y. Minerva takes a fixed centre, so this is the centre of the cast locations across a real pull
-// (Iambe, recording 2026-08-24: 81 ground casts spanning 39x39y) with BMR's own 30y FATE radius.
-public sealed class InconstantGardener(WorldState ws, Actor primary)
-    : ModuleBase(ws, primary, new WPos(-168.8f, -503.7f), new ArenaBoundsCircle(30f));
+// The FATE's own circle, as BMR has it. This used to be a fixed centre fitted to one pull's cast locations
+// (2026-08-24), 3.9y off the circle the game reports -- (-170, -500), 30y, in both 2026-09-25 recordings --
+// and the march is aimed against these bounds, so a walk kept "inside" could still end outside the FATE.
+public sealed class InconstantGardener(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);

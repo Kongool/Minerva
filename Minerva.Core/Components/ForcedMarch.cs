@@ -40,6 +40,139 @@ public class GenericForcedMarch(ModuleBase module, float activationLimit = float
             hints.Add("Aim for safe spot!");
     }
 
+    /// <summary>
+    /// Aim the march. The walk goes the way the character faces when it starts, turned by the march's own
+    /// direction, so choosing the facing chooses where the walk ends -- which is how a player solves it. This
+    /// tries every facing, simulates the walk from each, keeps the ones that stay on the floor, do not end where
+    /// the module calls unsafe and do not end in anything still drawn when the walk begins, picks one of them
+    /// (<see cref="PickFacing"/>) and forbids every other facing: the channel an inverted gaze uses, so the code
+    /// that turns the character out of a gaze turns it into this. It needs Face on.
+    ///
+    /// <para>Nothing aimed marches at all before this, and the cost showed on 2026-09-25: of eight walks across
+    /// two Iambe pulls, all eight went outward and two ended outside the FATE -- the only rule there was
+    /// BossmodReborn's "walk directly away from the boss", right about the circle that lands on the boss after
+    /// the walk and blind to the edge behind the character.</para>
+    ///
+    /// <para>Not while walking: the game owns the feet and the facing for that. Not for a march whose
+    /// directions are absolute (<see cref="OverrideDirection"/>), where facing changes nothing. And nothing is
+    /// published when no facing is safe, rather than a least-bad one that reads as a solution.</para>
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (this.OverrideDirection || !this.State.TryGetValue(actor.InstanceID, out var state)
+            || state.PendingMoves.Count == 0 || state.ForcedEnd > this.World.CurrentTime)
+            return;
+
+        var starts = state.PendingMoves[0].activation;
+        if (this.AimFacing(slot, actor, state, starts) is { } facing)
+            hints.ForbiddenDirections.Add(AimArc(facing, starts));
+    }
+
+    /// <summary>The facing that sends the walk somewhere survivable, or null if none does.</summary>
+    public Angle? AimFacing(int slot, Actor actor, PlayerState state, DateTime starts)
+        => PickFacing(actor.Rotation, facing => this.WalkSurvivable(slot, actor, state, facing, starts));
+
+    /// <summary>How many ten-degree steps either side of an aimed facing should also work.</summary>
+    private const int SpareSteps = 2;
+
+    /// <summary>
+    /// Of the facings ten degrees apart that <paramref name="survivable"/> accepts, the one with the most room
+    /// either side -- up to twenty degrees -- and among those the smallest turn from <paramref name="current"/>.
+    ///
+    /// <para>The smallest turn alone is the wrong rule, because it always lands on the edge of what works: the
+    /// character faces somewhere that fails, so the nearest facing that does not is the one beside the first
+    /// that fails. A walk aimed there is one twitch from failing, and the twitch comes -- the turn interpolates,
+    /// the dodge keeps the character moving until the walk starts, and a rotation turns it toward its target.
+    /// The same lesson the gaze turn learnt with its margin.</para>
+    /// </summary>
+    public static Angle? PickFacing(Angle current, Func<Angle, bool> survivable)
+    {
+        var works = new bool[36];
+        for (var i = 0; i < 36; ++i)
+            works[i] = survivable((i * 10f).Degrees());
+
+        Angle? best = null;
+        var bestRoom = -1;
+        var bestSwing = float.MaxValue;
+        for (var i = 0; i < 36; ++i)
+        {
+            if (!works[i])
+                continue;
+            var room = 0;
+            while (room < SpareSteps && works[(i + room + 1) % 36] && works[(i + 36 - room - 1) % 36])
+                ++room;
+            var facing = (i * 10f).Degrees();
+            var swing = MathF.Abs((facing - current).Normalized().Rad);
+            if (room > bestRoom || (room == bestRoom && swing < bestSwing))
+            {
+                best = facing;
+                bestRoom = room;
+                bestSwing = swing;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The forbidden arc that turns the character onto <paramref name="facing"/> itself.
+    ///
+    /// <para>Not "everything but a quarter around it". The gaze turn stops a margin
+    /// (<see cref="AIHints.GazeFacingMargin"/>) inside the edge of what is allowed, not in the middle, so with a
+    /// quarter left open it stopped twenty degrees short of the aim -- far enough, from a character backed into
+    /// a wall, to walk it off the floor. Leaving exactly the margin open either side puts that stopping point on
+    /// the aim.</para>
+    /// </summary>
+    public static (Angle center, Angle halfWidth, DateTime activation) AimArc(Angle facing, DateTime starts)
+        => (facing + 180f.Degrees(), 180f.Degrees() - AIHints.GazeFacingMargin, starts);
+
+    /// <summary>Does the walk from this facing stay on the floor and end somewhere survivable? A character already
+    /// off the floor when it starts -- Iambe, 2026-09-25, one began 31 yalms out in a 30-yalm FATE -- is judged
+    /// by whether the walk brings it back and keeps it there, or every facing fails and none is aimed.</summary>
+    private bool WalkSurvivable(int slot, Actor actor, PlayerState state, Angle facing, DateTime starts)
+    {
+        var from = actor.Position;
+        var dir = facing;
+        var onFloor = this.Module.Bounds.Contains(this.Module.Center, from);
+        var limit = this.ActivationLimit < float.MaxValue ? this.World.FutureTime(this.ActivationLimit) : DateTime.MaxValue;
+        foreach (var move in state.PendingMoves)
+        {
+            if (move.activation > limit)
+                break;
+            dir += move.dir;
+            var to = this.Travel(from, dir, this.MovementSpeed * move.duration);
+            var leg = to - from;
+            var length = leg.Length();
+            for (var d = 1f; d < length; d += 1f)
+            {
+                if (this.Module.Bounds.Contains(this.Module.Center, from + (leg * (d / length))))
+                    onFloor = true;
+                else if (onFloor)
+                    return false;
+            }
+            from = to;
+        }
+
+        return !this.DestinationUnsafe(slot, actor, from) && !this.EndsInSomethingDrawn(slot, actor, from, starts);
+    }
+
+    /// <summary>Would the walk end inside an AOE the module is drawing that is still to come when the walk begins?
+    /// One resolving before then is gone by the time anyone arrives. With no start time known, all of them count.</summary>
+    private bool EndsInSomethingDrawn(int slot, Actor actor, WPos end, DateTime starts)
+    {
+        var gone = starts == default ? default : starts.AddSeconds(-0.5d);
+        foreach (var component in this.Module.Components)
+        {
+            if (component is not GenericAOEs aoes)
+                continue;
+            foreach (ref readonly var aoe in aoes.ActiveAOEs(slot, actor))
+                if ((aoe.Activation == default || aoe.Activation >= gone) && aoe.Check(end))
+                    return true;
+        }
+
+        return false;
+    }
+
     public override void DrawArenaForeground(int pcSlot, Actor pc)
     {
         foreach (var m in this.ForcedMovements(pc))

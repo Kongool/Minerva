@@ -155,6 +155,7 @@ public sealed class ReplayParser
         "FRAM" => BuildFrame(r),
         "ZONE" => new WorldState.OpZoneChange((ushort)r.NextU32(), (ushort)r.NextU32()),
         "ENVC" => new WorldState.OpMapEffect((byte)r.NextHex32(), r.NextHex32()),
+        "FATE" => new WorldState.OpActiveFate(new FateState(r.NextU32(), new WPos(r.NextFloat(), r.NextFloat()), r.NextFloat())),
         "WAY+" => new WaymarkState.OpWaymarkChange((Waymark)r.NextU32(), new Vector3(r.NextFloat(), r.NextFloat(), r.NextFloat())),
         "WAY-" => new WaymarkState.OpWaymarkChange((Waymark)r.NextU32(), null),
         "DIRU" => new WorldState.OpDirectorUpdate(r.NextHex32(), r.NextHex32(), r.NextHex32(), r.NextHex32(), r.NextHex32(), r.NextHex32()),

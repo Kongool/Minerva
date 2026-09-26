@@ -1656,6 +1656,93 @@ t.Section("Auto-dodge pathfinding");
     module.Dispose();
 }
 
+// Forced march, aimed. The walk goes the way the character faces when it starts, turned by the march's own
+// direction, so the facing decides where it ends. Iambe, 2026-09-25: eight walks, all outward, two off the FATE.
+t.Section("Forced march aim");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong lordId = 0x400000071;
+    ws.Execute(new ActorState.OpCreate(lordId, 0x1234, 0, "Boss", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 2f, default, true, false, 0));
+    var module = new TestModule(ws, ws.Actors.Find(lordId)!) { Arena = new NullArena() };   // square half-20 at (100, 100)
+    var starts = ws.CurrentTime.AddSeconds(4d);
+    var west = -90f.Degrees();
+    const float walk = 12f;                                                                     // 2s at the default 6 y/s
+
+    Actor Marcher(ulong id, float x, float z, Angle facing)
+        => new(id, 0, 0, "P", 0, ActorType.Player, new Vector4(x, 0f, z, facing.Rad));
+    WPos EndOf(Actor who, Angle facing, Angle turn) => who.Position + (walk * (facing + turn).ToDirection());
+    bool OnTheFloor(WPos p) => MathF.Abs(p.X - 100f) <= 20f && MathF.Abs(p.Z - 100f) <= 20f;
+    (Angle Centre, Angle Half, DateTime At)? Published(Minerva.Components.GenericForcedMarch march, Actor who)
+    {
+        var h = new AIHints();
+        march.AddAIHints(0, who, default, h);
+        return h.ForbiddenDirections.Count > 0 ? h.ForbiddenDirections[0] : null;
+    }
+
+    // backing into the east wall: facing the boss with About Face walks straight off the floor
+    var backed = Marcher(0x100000071, 112f, 100f, west);
+    var march = new Minerva.Components.GenericForcedMarch(module);
+    march.AddForcedMovement(backed, 180f.Degrees(), 2f, starts);
+    t.True("as it stands, the walk leaves the floor", !OnTheFloor(EndOf(backed, west, 180f.Degrees())));
+    var aim = march.AimFacing(0, backed, march.State[backed.InstanceID], starts);
+    t.True($"so another facing is chosen ({aim?.Deg:0} deg), whose walk stays on it",
+        aim is { } a && OnTheFloor(EndOf(backed, a, 180f.Degrees())));
+    t.True("with twenty degrees either side that stay on it too, not the first facing that just does",
+        aim is { } a1 && new[] { -20f, -10f, 10f, 20f }.All(off => OnTheFloor(EndOf(backed, a1 + off.Degrees(), 180f.Degrees()))));
+    var arc = Published(march, backed);
+    t.True("and every other facing is forbidden until the walk begins",
+        arc is { } f && f.At == starts && aim is { } a2 && MathF.Abs((f.Centre - a2 - 180f.Degrees()).Normalized().Deg) < 0.01f);
+    // the arc goes through the same turn a gaze does, which stops a margin inside the edge of what is allowed
+    var turnHints = new AIHints();
+    march.AddAIHints(0, backed, default, turnHints);
+    t.True("which turns the character onto the aim itself, not a gaze margin short of it",
+        turnHints.TryFindBestFacing(starts, backed.Rotation, out var turnedTo, out var arcsHit) && arcsHit == 0
+        && aim is { } a3 && MathF.Abs((turnedTo - a3).Normalized().Deg) < 0.5f);
+    var nearly = aim is { } a4 ? a4 + 5f.Degrees() : default;
+    t.True("and a facing already near it is brought onto it",
+        turnHints.TryFindBestFacing(starts, nearly, out var nudged, out _) && aim is { } a5 && MathF.Abs((nudged - a5).Normalized().Deg) < 0.5f);
+
+    // already fine: keep the facing, no turn asked for
+    var centred = Marcher(0x100000072, 100f, 100f, 0f.Degrees());
+    march.AddForcedMovement(centred, 180f.Degrees(), 2f, starts);
+    t.True("a walk that is already safe keeps the facing it has",
+        march.AimFacing(0, centred, march.State[centred.InstanceID], starts) is { } kept && MathF.Abs(kept.Deg) < 0.01f);
+
+    // Iambe: the boss's own circle lands after the walk, and the edge is behind the character
+    var odeMarch = new OdeMarch(module);
+    var nearEdge = Marcher(0x100000073, 112f, 100f, west);
+    odeMarch.AddForcedMovement(nearEdge, 180f.Degrees(), 2f, starts);
+    var odeAim = odeMarch.AimFacing(0, nearEdge, odeMarch.State[nearEdge.InstanceID], starts);
+    var landed = odeAim is { } oa ? EndOf(nearEdge, oa, 180f.Degrees()) : default;
+    t.True($"with the edge behind and the boss's circle ahead, the walk clears the circle and stays on the floor (ends {(landed - new WPos(100f, 100f)).Length():0.0}y from the boss)",
+        odeAim != null && OnTheFloor(landed) && (landed - new WPos(100f, 100f)).Length() >= OdeMarch.Reach);
+    t.True("which walking straight away from the boss would not have done", !OnTheFloor(EndOf(nearEdge, west, 180f.Degrees())));
+
+    // already off the floor when the walk starts: every walk leaves some of it outside, so judge where it ends
+    var strayed = Marcher(0x100000078, 121f, 100f, west);
+    march.AddForcedMovement(strayed, 180f.Degrees(), 2f, starts);
+    var back = march.AimFacing(0, strayed, march.State[strayed.InstanceID], starts);
+    t.True($"a character already off the floor is aimed back onto it ({back?.Deg:0} deg), not left to walk further out",
+        !OnTheFloor(EndOf(strayed, west, 180f.Degrees())) && back is { } b1 && OnTheFloor(EndOf(strayed, b1, 180f.Degrees())));
+
+    // when not to speak
+    var walking = Marcher(0x100000074, 100f, 100f, 0f.Degrees());
+    march.AddForcedMovement(walking, 180f.Degrees(), 2f, starts);
+    march.ActivateForcedMovement(walking, ws.CurrentTime.AddSeconds(2d));
+    t.True("nothing once the walk has begun: the game owns the facing", Published(march, walking) == null);
+    t.True("nothing with no march pending", Published(march, Marcher(0x100000075, 100f, 100f, 0f.Degrees())) == null);
+    var absolute = new Minerva.Components.GenericForcedMarch(module) { OverrideDirection = true };
+    var fixedDir = Marcher(0x100000076, 112f, 100f, west);
+    absolute.AddForcedMovement(fixedDir, 90f.Degrees(), 2f, starts);
+    t.True("and nothing for a march whose direction ignores facing", Published(absolute, fixedDir) == null);
+    var hemmed = Marcher(0x100000077, 100f, 100f, 0f.Degrees());
+    var cage = new CageMarch(module);
+    cage.AddForcedMovement(hemmed, 180f.Degrees(), 2f, starts);
+    t.True("nor when no facing is safe: no least-bad answer dressed as a solution", Published(cage, hemmed) == null);
+    module.Dispose();
+}
+
 // ---------------------------------------------------------------------------
 // 8. Mechanic component library (spread / stack / voidzone / gaze / knockback)
 // ---------------------------------------------------------------------------
@@ -2497,6 +2584,48 @@ t.Section("An open-world FATE is bounded by the FATE");
         replayed.Execute(op);
     t.Eq("and the opening snapshot carries it", replayed.ActiveFate.Radius, 45f);
     t.Eq("with the right id", replayed.ActiveFate.ID, 1234u);
+
+    // and a recording must read it back: the parser used to skip the line, so every offline check of a FATE
+    // module ran against a circle following the boss
+    var fateOut = new StringWriter();
+    var fateWs = new WorldState(10_000_000, "test");
+    using (new ReplayRecorder(fateWs, fateOut))
+    {
+        fateWs.Execute(new WorldState.OpFrameStart(new FrameState { Timestamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) }, TimeSpan.FromSeconds(1)));
+        fateWs.Execute(new WorldState.OpActiveFate(new FateState(2079u, new WPos(-170f, -500f), 30f)));
+    }
+    var fateBack = ReplayParser.ParseTimeline(new StringReader(fateOut.ToString())).Ops.Select(o => o.Op).OfType<WorldState.OpActiveFate>().LastOrDefault();
+    t.True("a recorded FATE parses back", fateBack?.Fate == new FateState(2079u, new WPos(-170f, -500f), 30f));
+
+    // The game reports the FATE the player stands in, so stepping out of it blanks the report -- and the
+    // module used to fall back to a circle round the boss at exactly the moment the way back was wanted.
+    var owf = new WorldState(10_000_000, "test");
+    owf.Execute(new WorldState.OpFrameStart(Frame(owf, 0), TimeSpan.Zero));
+    owf.Execute(new ActorState.OpCreate(0x400000091, 0x1234, 0, "Boss", 0, ActorType.Enemy, new Vector4(-160f, 0, -500f, 0), 3f, default, true, false, 0));
+    var fateBoss = owf.Actors.Find(0x400000091)!;
+    var fateModule = new FateProbeModule(owf, fateBoss) { Arena = new NullArena() };
+    owf.Execute(new WorldState.OpActiveFate(new FateState(2079u, new WPos(-170f, -500f), 30f)));
+    fateModule.Update();
+    t.True("inside the FATE, the bound is the FATE", fateModule.Center == new WPos(-170f, -500f));
+    owf.Execute(new WorldState.OpActiveFate(default));
+    owf.Execute(new ActorState.OpMove(0x400000091, new Vector4(-150f, 0, -500f, 0)));
+    fateModule.Update();
+    t.True("stepping out of it keeps the FATE, rather than a circle round the boss", fateModule.Center == new WPos(-170f, -500f));
+    t.True("at the FATE's radius", fateModule.Bounds is ArenaBoundsCircle { Radius: 30f });
+
+    // but only a FATE the boss was in: a player stood in some other FATE when the module woke says nothing
+    // about where this fight is
+    var elsewhere = new WorldState(10_000_000, "test");
+    elsewhere.Execute(new WorldState.OpFrameStart(Frame(elsewhere, 0), TimeSpan.Zero));
+    elsewhere.Execute(new ActorState.OpCreate(0x400000092, 0x1234, 0, "Boss", 0, ActorType.Enemy, new Vector4(0f, 0, 0f, 0), 3f, default, true, false, 0));
+    var otherModule = new FateProbeModule(elsewhere, elsewhere.Actors.Find(0x400000092)!) { Arena = new NullArena() };
+    elsewhere.Execute(new WorldState.OpActiveFate(new FateState(77u, new WPos(200f, 200f), 30f)));
+    otherModule.Update();
+    elsewhere.Execute(new WorldState.OpActiveFate(default));
+    otherModule.Update();
+    t.True("so leaving a FATE the boss was never in goes back to following the boss", otherModule.Center == new WPos(0f, 0f));
+    fateModule.Dispose();
+    otherModule.Dispose();
 }
 
 t.Section("Dragged-in trash is not a voidzone");
@@ -4707,6 +4836,22 @@ sealed class TimelineModuleStates : StateMachineBuilder
 
 sealed class TestModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(100f, 100f), new ArenaBoundsSquare(20f));
+
+// Iambe's rule in miniature: ending within the boss's circle is unsafe
+sealed class OdeMarch(ModuleBase module) : Minerva.Components.GenericForcedMarch(module)
+{
+    public const float Reach = 11.5f;
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos)
+        => base.DestinationUnsafe(slot, actor, pos) || (pos - Module.PrimaryActor.Position).Length() < Reach;
+}
+
+sealed class FateProbeModule(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
+
+// every destination unsafe: nothing to aim for
+sealed class CageMarch(ModuleBase module) : Minerva.Components.GenericForcedMarch(module)
+{
+    public override bool DestinationUnsafe(int slot, Actor actor, WPos pos) => true;
+}
 
 // exposes StayMove's protected SetState so the test can drive a requirement directly
 // a registrable module for the offline-validation round trip (CFC 9001, boss OID 0xBEEF)
