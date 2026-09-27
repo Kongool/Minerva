@@ -30,6 +30,9 @@ public sealed class ModuleRegistry
     public IReadOnlyDictionary<uint, List<Info>> ByCFC => this.byCFC;
     public int Count { get; private set; }
 
+    // quest modules still keyed on their quest id: nothing said which duty that quest runs in
+    private readonly List<Info> unplacedQuests = [];
+
     /// <summary>Build a registry from the given assemblies (defaults to the one defining modules).</summary>
     public static ModuleRegistry Build(params Assembly[] assemblies) => Build(null, assemblies);
 
@@ -61,14 +64,21 @@ public sealed class ModuleRegistry
                 var primaryOID = attr.PrimaryActorOID != 0 ? attr.PrimaryActorOID : InferBossOID(type);
                 var info = new Info(type, attr, primaryOID);
                 var key = attr.CFCID;
-                if (attr.Group == ModuleGroup.Quest && questDutyCFC != null)
+                // A CFCID past 65535 is a quest id whatever the group says: the game's duty ids are 16-bit, so no duty
+                // can ever report it. Sixteen ports carry one without Group = Quest -- The Resonant's Fordola (quest
+                // 68086) among them -- and sat under a key nothing could match.
+                var quest = attr.Group == ModuleGroup.Quest || attr.CFCID > ushort.MaxValue;
+                if (quest && questDutyCFC != null)
                 {
                     // the quest id lives in GroupID, or in CFCID where older ports put it
-                    var quest = attr.GroupID != 0 ? attr.GroupID : attr.CFCID;
-                    var duty = questDutyCFC(quest);
+                    var questID = attr.GroupID != 0 ? attr.GroupID : attr.CFCID;
+                    var duty = questDutyCFC(questID);
                     if (duty != 0)
                         key = duty;
                 }
+                // unplaced: nothing said which duty the quest runs in, and the attribute names none of its own
+                if (quest && key == attr.CFCID && (attr.GroupID == 0 || attr.CFCID == 0 || attr.CFCID == attr.GroupID))
+                    reg.unplacedQuests.Add(info);
                 if (!reg.byCFC.TryGetValue(key, out var list))
                     reg.byCFC[key] = list = [];
                 list.Add(info);
@@ -99,6 +109,17 @@ public sealed class ModuleRegistry
 
     /// <summary>Modules registered for a duty, or empty.</summary>
     public IReadOnlyList<Info> ForCFC(uint cfcID) => this.byCFC.TryGetValue(cfcID, out var list) ? list : [];
+
+    /// <summary>
+    /// The modules to try in a duty: those registered for it, or -- when there are none -- every quest module the game
+    /// data could not tie to a duty, to be matched on its boss alone.
+    /// <para>The quest-to-duty lookup goes through QuestBattle rows, and some solo duties are not built on one. The
+    /// Final Fantasy XV collaboration's Messenger of the Winds (CFC 646) is instanced content, so its Garuda module
+    /// stayed keyed on quest 68696 and never activated (2026-09-26). BossmodReborn matches quest modules on the boss
+    /// alone; this does the same, but only in a duty with no module of its own, so a dungeon or a trial is never
+    /// handed a quest module that happens to share a boss.</para>
+    /// </summary>
+    public IReadOnlyList<Info> ForDuty(uint cfcID) => this.byCFC.TryGetValue(cfcID, out var list) ? list : this.unplacedQuests;
 
     /// <summary>
     /// Modules whose state machine will never bind, so they activate with no components at all.

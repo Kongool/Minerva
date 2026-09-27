@@ -40,6 +40,21 @@ public static class UptimeTargeting
             : null);
 
     /// <summary>
+    /// Whether the walk to uptime runs at all, or the character only dodges (the user's calls, 2026-09-26):
+    /// <list type="bullet">
+    /// <item>Never in a solo duty, whatever the role.</item>
+    /// <item>Never for a character on the ranged band -- casters, physical ranged, healers, anyone whose role is
+    /// unknown -- with no other player in the party.</item>
+    /// </list>
+    /// <para>Solo, every enemy is on the caster: the band's floor backs it away from a mob that follows, the walk
+    /// in and out never ends, and each step cuts the cast the rotation just started. The Resonant, 2026-09-26: an
+    /// Astrologian lost 17 of 74 casts, four of them started while the walk was under way. Melee and tanks keep
+    /// theirs: their band is simply being in reach. NPC allies are not a group.</para>
+    /// </summary>
+    public static bool Walks(Role role, bool soloDuty, int otherPlayers)
+        => !soloDuty && (role is Role.Tank or Role.Melee || otherPlayers > 0);
+
+    /// <summary>
     /// The point on <paramref name="target"/>'s hitbox edge nearest <paramref name="from"/>, which is what the
     /// floor test walks to -- or null when that edge is already within a yalm, so there is nothing to test.
     /// <para>The edge and not the centre, because a huge boss (Shinryu is R22, its wings R15) often has its centre

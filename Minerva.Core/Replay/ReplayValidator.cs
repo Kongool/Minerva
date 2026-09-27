@@ -715,7 +715,7 @@ public sealed class ReplayValidator
     {
         if (world.CurrentCFCID == 0)
             return null;
-        foreach (var info in registry.ForCFC(world.CurrentCFCID))
+        foreach (var info in registry.ForDuty(world.CurrentCFCID))
             foreach (var actor in world.Actors)
                 if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed)
                 {

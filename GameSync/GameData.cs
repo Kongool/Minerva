@@ -38,8 +38,14 @@ internal static unsafe class GameData
 
     private static readonly Dictionary<ushort, bool> deepDungeonByCfc = [];
 
-    /// <summary>A solo duty: the ContentFinderCondition links a quest battle (link type 5), the same test
-    /// <see cref="QuestBattleDuties"/> uses to activate quest modules.</summary>
+    /// <summary>
+    /// A solo duty: the ContentFinderCondition links a quest battle (link type 5), or the game files it under
+    /// "Quest Battles" (ContentType 7).
+    /// <para>Both, because the game builds solo duties two ways. The 192 link-type-5 rows are quest battles proper;
+    /// the 85 ContentType 7 rows are instanced content, the Final Fantasy XV collaboration's Messenger of the Winds
+    /// (CFC 646) among them, and link-type 5 alone missed them. All 277 are one-member duties. Other one-member
+    /// content (Gold Saucer, Masked Carnivale, the Hall of the Novice) is neither.</para>
+    /// </summary>
     public static bool IsSoloDuty(ushort cfcId)
     {
         if (cfcId == 0)
@@ -47,7 +53,7 @@ internal static unsafe class GameData
         if (soloDutyByCfc.TryGetValue(cfcId, out var known))
             return known;
         var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
-        var solo = sheet != null && sheet.TryGetRow(cfcId, out var row) && row.ContentLinkType == 5;
+        var solo = sheet != null && sheet.TryGetRow(cfcId, out var row) && (row.ContentLinkType == 5 || row.ContentType.RowId == 7);
         soloDutyByCfc[cfcId] = solo;
         return solo;
     }

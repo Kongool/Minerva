@@ -46,17 +46,20 @@ class TerminusEst(ModuleBase module) : Components.GenericAOEs(module)
         var terminii = Module.Enemies((uint)OID.Terminus);
         var count = terminii.Count;
 
+        // Only the filled slots: a Terminus at the centre is skipped, and the empty instance it left behind had no
+        // shape, so the first check against it threw and the component was switched off for the fight.
         var aoes = new AOEInstance[count];
+        var n = 0;
         var act = Activation.Value;
         for (var i = 0; i < count; ++i)
         {
             var t = terminii[i];
             if (!t.Position.AlmostEqual(Center, 0.5f))
             {
-                aoes[i] = new(rect, t.Position, t.Rotation, activation: act);
+                aoes[n++] = new(rect, t.Position, t.Rotation, activation: act);
             }
         }
-        return aoes;
+        return aoes.AsSpan(0, n);
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)

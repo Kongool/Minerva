@@ -106,7 +106,7 @@ public sealed class ModuleManager : IDisposable
 
     private void TryActivate()
     {
-        var candidates = this.registry.ForCFC(this.world.CurrentCFCID);
+        var candidates = this.registry.ForDuty(this.world.CurrentCFCID);
         for (var i = 0; i < candidates.Count; ++i)
         {
             var info = candidates[i];

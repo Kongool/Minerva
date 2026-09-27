@@ -69,7 +69,7 @@ public sealed class ReplayTab
             cfg.AutoRecordEncounters = auto;
             cfg.Save();
         }
-        UiKit.Tip("Starts by itself when a boss is engaged, module or not, and stops when the fight ends.");
+        UiKit.Tip("Starts by itself when a boss is engaged, module or not, and stops when the fight ends. A solo duty is recorded whole, from entry until you leave it.");
 
         ImGui.Spacing();
         UiKit.Eyebrow("Recordings");

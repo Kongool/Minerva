@@ -301,6 +301,20 @@ t.Section("Module registry");
     t.Eq("without a resolver the quest id stays the key (dormant, as before)", reg.ForCFC(70001u).Count, 1);
     var unresolved = ModuleRegistry.Build(q => 0u, typeof(RegisteredTestModule).Assembly);
     t.Eq("a quest the game does not know stays on its quest id", unresolved.ForCFC(70001u).Count, 1);
+
+    // ... and is still found in a duty with no module of its own, by its boss alone (Messenger of the Winds, CFC 646,
+    // is instanced content, so the quest lookup never places Garuda's quest 68696)
+    t.True("an unplaced quest module is offered in a duty with no modules",
+        unresolved.ForDuty(646u).Any(i => i.ModuleType == typeof(QuestProbeModule)));
+    t.True("but not in a duty that has modules of its own", !unresolved.ForDuty(999u).Any(i => i.ModuleType == typeof(QuestProbeModule)));
+    t.True("nor once the game data has placed it", !quests.ForDuty(646u).Any(i => i.ModuleType == typeof(QuestProbeModule)));
+    t.True("offline, with no game data at all, the same fallback applies", reg.ForDuty(646u).Any(i => i.ModuleType == typeof(QuestProbeModule)));
+
+    // a quest id in CFCID without Group = Quest is still a quest (The Resonant's Fordola, quest 68086, CFC 269)
+    t.True("a module keyed on a quest id without the Quest group is offered too",
+        unresolved.ForDuty(269u).Any(i => i.ModuleType == typeof(QuestIdProbeModule)));
+    t.Eq("and placed when the game data knows its duty",
+        ModuleRegistry.Build(q => q == 70002u ? 4243u : 0u, typeof(RegisteredTestModule).Assembly).ForCFC(4243u).Count, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -3419,6 +3433,16 @@ t.Section("Uptime is a band, not a point");
             !tank.Supersedes(new WPos(159.5f, -685.2f), rimCell));   // 0.9y nearer
     }
 
+    // Who walks to uptime at all. Solo, a caster only dodges; a solo duty is dodge-only for everyone.
+    t.True("a caster in a group walks its band", UptimeTargeting.Walks(Role.Ranged, soloDuty: false, otherPlayers: 3));
+    t.True("a caster with no group only dodges", !UptimeTargeting.Walks(Role.Ranged, soloDuty: false, otherPlayers: 0));
+    t.True("nor does a healer with no group", !UptimeTargeting.Walks(Role.Healer, soloDuty: false, otherPlayers: 0));
+    t.True("nor anyone whose role is unknown", !UptimeTargeting.Walks(Role.None, soloDuty: false, otherPlayers: 0));
+    t.True("a melee with no group still closes to reach", UptimeTargeting.Walks(Role.Melee, soloDuty: false, otherPlayers: 0));
+    t.True("and so does a tank", UptimeTargeting.Walks(Role.Tank, soloDuty: false, otherPlayers: 0));
+    t.True("in a solo duty nobody walks for uptime", !UptimeTargeting.Walks(Role.Melee, soloDuty: true, otherPlayers: 0)
+        && !UptimeTargeting.Walks(Role.Ranged, soloDuty: true, otherPlayers: 3));
+
     // The range band: move only when outside [min, max], walk to preferred, stop within a yalm of it, and when too
     // close walk straight out. Everything below is measured from the hitbox edge.
     {
@@ -5108,6 +5132,11 @@ sealed class ValidateProbeModuleStates : StateMachineBuilder
 // a quest solo-duty module, keyed the way the MSQ ports are: the quest id in CFCID
 [ModuleInfo(Group = ModuleGroup.Quest, CFCID = 70001u, PrimaryActorOID = 0xBEEFu, NameID = 1u)]
 public sealed class QuestProbeModule(WorldState ws, Actor primary)
+    : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f));
+
+// a port that put the quest id in CFCID and never said Group = Quest
+[ModuleInfo(CFCID = 70002u, PrimaryActorOID = 0xBEF0u, NameID = 1u)]
+public sealed class QuestIdProbeModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f));
 
 sealed class QuestProbeModuleStates : StateMachineBuilder

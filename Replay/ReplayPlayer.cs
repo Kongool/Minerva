@@ -136,7 +136,7 @@ public sealed class ReplayPlayer : IDisposable
         }
         if (this.world.CurrentCFCID == 0)
             return;
-        foreach (var info in this.registry.ForCFC(this.world.CurrentCFCID))
+        foreach (var info in this.registry.ForDuty(this.world.CurrentCFCID))
             foreach (var actor in this.world.Actors)
                 if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed)
                 {

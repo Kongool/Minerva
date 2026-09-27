@@ -52,6 +52,11 @@ public sealed class ReplayService : IDisposable
     private bool recordingPrimaryEnds;    // ... the module deactivates and takes ActiveModule with it
     private string? recordingEncounterName; // Occult CE name, when the fight came from the director
 
+    // A solo duty is recorded whole (see UpdateRecording): the duty this recording is in, and the one auto-record last
+    // started in, so a recording stopped by hand inside the duty is not started again the next frame.
+    private ushort recordingSoloDuty;
+    private ushort autoRecordedSoloDuty;
+
     private ModuleRegistry? registry;
 
     public Configuration Config => this.config;
@@ -128,6 +133,7 @@ public sealed class ReplayService : IDisposable
         this.recordingPrimary = null;
         this.recordingPrimaryEnds = false;
         this.recordingEncounterName = null;
+        this.recordingSoloDuty = 0;
     }
 
     // make a boss name safe for a filename (keeps spaces/hyphens; replaces only the truly-invalid chars)
@@ -206,6 +212,37 @@ public sealed class ReplayService : IDisposable
     /// </summary>
     public string? UpdateRecording(TimeSpan realDt)
     {
+        // A solo duty is not one fight: you walk, fight trash, click things, walk on, and meet the boss at the end. The
+        // encounter rules below cut that into a file per pack -- eight seconds out of combat, or a big enemy's death,
+        // ends a recording -- and lose everything between. So in a solo duty a recording runs from entry until you
+        // leave, and auto-record starts one on entry (the user's call, 2026-09-26).
+        var cfc = this.world.CurrentCFCID;
+        var soloDuty = GameData.IsSoloDuty(cfc);
+        if (!soloDuty)
+            this.autoRecordedSoloDuty = 0;
+
+        if (this.IsRecording && soloDuty)
+        {
+            this.recordingSoloDuty = cfc;
+            return null;
+        }
+
+        if (this.IsRecording && this.recordingSoloDuty != 0)
+        {
+            var ops = this.Stop();
+            return $"Left the solo duty. Recording stopped: {ops} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
+        }
+
+        if (!this.IsRecording && soloDuty)
+        {
+            if (!this.config.AutoRecordEncounters || this.autoRecordedSoloDuty == cfc)
+                return null;
+            this.autoRecordedSoloDuty = cfc;
+            this.Start();
+            this.recordingSoloDuty = cfc;
+            return $"Auto-recording this solo duty, until you leave it, to {Path.GetFileName(this.currentPath)}.";
+        }
+
         if (!this.IsRecording)
         {
             // Start on a module activating OR on an unscripted boss appearing. The second case is the one
