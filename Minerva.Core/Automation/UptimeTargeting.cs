@@ -44,15 +44,28 @@ public static class UptimeTargeting
     /// <list type="bullet">
     /// <item>Never in a solo duty, whatever the role.</item>
     /// <item>Never for a character on the ranged band -- casters, physical ranged, healers, anyone whose role is
-    /// unknown -- with no other player in the party.</item>
+    /// unknown -- with nobody else in the party.</item>
     /// </list>
-    /// <para>Solo, every enemy is on the caster: the band's floor backs it away from a mob that follows, the walk
+    /// <para>Alone, every enemy is on the caster: the band's floor backs it away from a mob that follows, the walk
     /// in and out never ends, and each step cuts the cast the rotation just started. The Resonant, 2026-09-26: an
     /// Astrologian lost 17 of 74 casts, four of them started while the walk was under way. Melee and tanks keep
-    /// theirs: their band is simply being in reach. NPC allies are not a group.</para>
+    /// theirs: their band is simply being in reach.</para>
+    /// <para>Trust and Duty Support NPCs are a group: a tank of theirs holds the boss, and a caster that only dodged
+    /// never walked into range of it -- The Porta Decumana, 2026-09-27, the ranged toons never engaged.</para>
     /// </summary>
-    public static bool Walks(Role role, bool soloDuty, int otherPlayers)
-        => !soloDuty && (role is Role.Tank or Role.Melee || otherPlayers > 0);
+    public static bool Walks(Role role, bool soloDuty, int groupMembers)
+        => !soloDuty && (role is Role.Tank or Role.Melee || groupMembers > 0);
+
+    /// <summary>
+    /// Whether this character has to start the fight itself: a boss module's target that nothing is fighting yet, with
+    /// no other player in the party -- nobody, or only Trust and Duty Support NPCs, who wait for you to pull. Minerva
+    /// then publishes the boss as the one to pull (<c>Minerva.Hints.PullTarget</c>); the rotation plugin targets it
+    /// and opens from where the character stands, which for a caster is already in range of it.
+    /// <para>The Porta Decumana, 2026-09-27: an Astrologian with Duty Support stood 23y from Ultima for 49 seconds,
+    /// inside her cast range, and nothing happened until she was walked in by hand.</para>
+    /// </summary>
+    public static bool Pulls(bool hasModule, bool targetInCombat, int otherPlayers)
+        => hasModule && !targetInCombat && otherPlayers == 0;
 
     /// <summary>How near an object to interact with the walk ends, past its hitbox, in yalms: inside the game's
     /// interact range, which the rotation plugin checks exactly before it clicks.</summary>

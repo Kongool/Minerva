@@ -3433,6 +3433,12 @@ t.Section("Uptime is a band, not a point");
             !tank.Supersedes(new WPos(159.5f, -685.2f), rimCell));   // 0.9y nearer
     }
 
+    // Who has to start the fight: with only NPCs (or nobody) in the party, whoever reaches the idle boss pulls it.
+    t.True("a boss nobody is fighting, and no other player to pull it: this character pulls", UptimeTargeting.Pulls(hasModule: true, targetInCombat: false, otherPlayers: 0));
+    t.True("once the boss is in combat it goes back to its band", !UptimeTargeting.Pulls(hasModule: true, targetInCombat: true, otherPlayers: 0));
+    t.True("a party with another player leaves the pull to them", !UptimeTargeting.Pulls(hasModule: true, targetInCombat: false, otherPlayers: 1));
+    t.True("and trash with no module is not charged into", !UptimeTargeting.Pulls(hasModule: false, targetInCombat: false, otherPlayers: 0));
+
     // The walk to an object the fight needs clicked: to within reach of it, replacing uptime; never in a solo duty.
     {
         var vessel = new Actor(3ul, 0x1BAFu, -1, "Empty Vessel", 0u, ActorType.Enemy, new Vector4(246.4f, 0f, -73.6f, 0f), hitboxRadius: 0.5f);
@@ -3445,14 +3451,15 @@ t.Section("Uptime is a band, not a point");
     }
 
     // Who walks to uptime at all. Solo, a caster only dodges; a solo duty is dodge-only for everyone.
-    t.True("a caster in a group walks its band", UptimeTargeting.Walks(Role.Ranged, soloDuty: false, otherPlayers: 3));
-    t.True("a caster with no group only dodges", !UptimeTargeting.Walks(Role.Ranged, soloDuty: false, otherPlayers: 0));
-    t.True("nor does a healer with no group", !UptimeTargeting.Walks(Role.Healer, soloDuty: false, otherPlayers: 0));
-    t.True("nor anyone whose role is unknown", !UptimeTargeting.Walks(Role.None, soloDuty: false, otherPlayers: 0));
-    t.True("a melee with no group still closes to reach", UptimeTargeting.Walks(Role.Melee, soloDuty: false, otherPlayers: 0));
-    t.True("and so does a tank", UptimeTargeting.Walks(Role.Tank, soloDuty: false, otherPlayers: 0));
-    t.True("in a solo duty nobody walks for uptime", !UptimeTargeting.Walks(Role.Melee, soloDuty: true, otherPlayers: 0)
-        && !UptimeTargeting.Walks(Role.Ranged, soloDuty: true, otherPlayers: 3));
+    t.True("a caster in a group walks its band", UptimeTargeting.Walks(Role.Ranged, soloDuty: false, groupMembers: 3));
+    t.True("and so does one with a Trust or Duty Support party (The Porta Decumana, 2026-09-27)", UptimeTargeting.Walks(Role.Ranged, soloDuty: false, groupMembers: 3));
+    t.True("a caster alone only dodges", !UptimeTargeting.Walks(Role.Ranged, soloDuty: false, groupMembers: 0));
+    t.True("nor does a healer alone", !UptimeTargeting.Walks(Role.Healer, soloDuty: false, groupMembers: 0));
+    t.True("nor anyone whose role is unknown", !UptimeTargeting.Walks(Role.None, soloDuty: false, groupMembers: 0));
+    t.True("a melee alone still closes to reach", UptimeTargeting.Walks(Role.Melee, soloDuty: false, groupMembers: 0));
+    t.True("and so does a tank", UptimeTargeting.Walks(Role.Tank, soloDuty: false, groupMembers: 0));
+    t.True("in a solo duty nobody walks for uptime", !UptimeTargeting.Walks(Role.Melee, soloDuty: true, groupMembers: 0)
+        && !UptimeTargeting.Walks(Role.Ranged, soloDuty: true, groupMembers: 3));
 
     // The range band: move only when outside [min, max], walk to preferred, stop within a yalm of it, and when too
     // close walk straight out. Everything below is measured from the hitbox edge.

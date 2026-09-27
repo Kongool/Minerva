@@ -168,6 +168,7 @@ public sealed class AIManager
             // nothing authored and nothing guessable: stay out of the way rather than invent guidance
             this.movement.Stop();
             this.uptimeTargetId = 0ul;
+            this.PullTargetId = 0ul;
             this.bandWalk.Reset();
             this.Publish(this.Decide(false, false, default, DodgeReason.None, DodgeBlocker.NoModule, false));
             return;
@@ -196,9 +197,12 @@ public sealed class AIManager
         // Dodge-only in a solo duty, and for a caster with no group (UptimeTargeting.Walks). A rotation's stand-near
         // request below is not a band and still applies.
         var soloDuty = GameData.IsSoloDuty(this.world.CurrentCFCID);
-        var walks = UptimeTargeting.Walks(pc.Role, soloDuty, this.OtherPlayers(pc));
+        var otherPlayers = this.OtherPlayers(pc);
+        var walks = UptimeTargeting.Walks(pc.Role, soloDuty, otherPlayers + this.NpcPartyMembers());
         var target = walks ? this.UptimeTarget(module, pc) : null;
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
+        // Nobody else will start this fight (UptimeTargeting.Pulls): published for the rotation plugin to open on.
+        this.PullTargetId = target != null && UptimeTargeting.Pulls(module != null, target.InCombat, otherPlayers) ? target.InstanceID : 0ul;
         // The band says when to move (outside it) and where to stop (at its preferred distance); BandWalk is what
         // remembers a walk is under way, so crossing back into the band does not end it short of preferred.
         UptimeGoal? goal = null;
@@ -511,6 +515,10 @@ public sealed class AIManager
     /// <summary>Instance ID of the one thing the fight wants attacked, or 0. Outranks priorities.</summary>
     public ulong ForcedTargetId => this.HasSolution && this.hints.ForcedTarget is { IsDeadOrDestroyed: false } f ? f.InstanceID : 0uL;
 
+    /// <summary>Instance ID of the boss this character has to pull because nobody else will, or 0 (see
+    /// <see cref="UptimeTargeting.Pulls"/>).</summary>
+    public ulong PullTargetId { get; private set; }
+
     /// <summary>Instance ID of the object the fight wants this character to interact with, or 0: an Empty Vessel to
     /// return to, a fruit to eat, a lever. Minerva presses nothing; the rotation plugin does the clicking.</summary>
     public ulong InteractTargetId => this.HasSolution && this.hints.InteractWithTarget is { IsDestroyed: false } i ? i.InstanceID : 0uL;
@@ -743,12 +751,24 @@ public sealed class AIManager
         return band.FollowGroup(RangeBand.GroupDistance(this.GroupPositions(pc), target.Position, target.HitboxRadius));
     }
 
-    /// <summary>How many other players are in the party, living or dead. NPC allies and the alliance are not counted.</summary>
+    /// <summary>How many other players are in the party, living or dead. The alliance is not counted.</summary>
     private int OtherPlayers(Actor pc)
     {
         var n = 0;
         foreach (var member in this.world.Party.WithoutSlot(includeDead: true, excludeAlliance: true, excludeNPCs: true))
             if (member.InstanceID != pc.InstanceID)
+                ++n;
+        return n;
+    }
+
+    /// <summary>How many NPC party members are here -- Trust and Duty Support, the game's BattleNpc subkind 9
+    /// (<see cref="ActorType.Buddy"/>), which Daedalus keys its Trust allies on too. They are a group for the band, but
+    /// they do not pull.</summary>
+    private int NpcPartyMembers()
+    {
+        var n = 0;
+        foreach (var actor in this.world.Actors)
+            if (actor.Type == ActorType.Buddy)
                 ++n;
         return n;
     }

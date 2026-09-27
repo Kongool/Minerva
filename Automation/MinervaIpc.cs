@@ -62,6 +62,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<ulong[]> deprioritizedTargets;
     private readonly ICallGateProvider<ulong> forcedTarget;
     private readonly ICallGateProvider<ulong> interactTarget;
+    private readonly ICallGateProvider<ulong> pullTarget;
     private readonly ICallGateProvider<ulong[]> targetsToInterrupt;
     private readonly ICallGateProvider<ulong[]> targetsToStun;
     private readonly ICallGateProvider<ulong, int> pendingHPDifference;
@@ -190,6 +191,11 @@ internal sealed class MinervaIpc : IDisposable
         // walks the character there; the click is the rotation plugin's.
         this.interactTarget = pi.GetIpcProvider<ulong>("Minerva.Hints.InteractTarget");
         this.interactTarget.RegisterFunc(() => this.ai.InteractTargetId);
+
+        // The boss nobody else will pull: a boss fight not started yet, and no other player in the party -- only Trust
+        // or Duty Support NPCs, who wait for you. The rotation plugin targets it and opens from where it stands.
+        this.pullTarget = pi.GetIpcProvider<ulong>("Minerva.Hints.PullTarget");
+        this.pullTarget.RegisterFunc(() => this.ai.PullTargetId);
 
         this.targetsToInterrupt = pi.GetIpcProvider<ulong[]>("Minerva.Hints.TargetsToInterrupt");
         this.targetsToInterrupt.RegisterFunc(() => this.ai.TargetsToInterrupt);
@@ -323,6 +329,7 @@ internal sealed class MinervaIpc : IDisposable
         this.deprioritizedTargets.UnregisterFunc();
         this.forcedTarget.UnregisterFunc();
         this.interactTarget.UnregisterFunc();
+        this.pullTarget.UnregisterFunc();
         this.targetsToInterrupt.UnregisterFunc();
         this.targetsToStun.UnregisterFunc();
         this.pendingHPDifference.UnregisterFunc();
