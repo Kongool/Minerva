@@ -103,10 +103,10 @@ public sealed class AIHints
     public readonly List<(SpecialMode mode, DateTime activation, DateTime finish)> SpecialModes = [];
     public readonly ActionQueue ActionsToExecute = new();
 
-    // Intent a ported module expresses that is not about where to stand. Minerva neither presses buttons
-    // nor moves the player anywhere it was not asked to, so nothing reads these — but a module setting
-    // InteractWithOID is recording that this fight has an object you must click, which is a real fact about
-    // the fight and worth carrying rather than deleting from every port.
+    // Intent a ported module expresses that is not about where to stand. Minerva presses no buttons, but a
+    // module setting these is recording that this fight has an object you must click. InteractWithTarget is
+    // published as Minerva.Hints.InteractTarget for the rotation plugin to click (2026-09-27); InteractWithOID is
+    // not, since the one module using it (the Hall of the Novice) means an NPC whose dialogue must be walked.
 
     /// <summary>An interactable this fight requires (a lever, an aetheryte), by OID.</summary>
     public uint InteractWithOID;
@@ -150,6 +150,7 @@ public sealed class AIHints
     public void Clear()
     {
         this.touchZones = [];
+        this.touchValid = false;
         this.ForbiddenZones.Clear();
         this.PotentialTargets.Clear();
         this.TemporaryObstacles = [];
@@ -1032,6 +1033,11 @@ public sealed class AIHints
 
     // Which zones touch each cell of the last grid asked about; see ZoneTouches.
     private ulong[]? touchCells;
+
+    // The answers above belong to this frame's zones. Clear drops them without dropping the array, which is reused:
+    // emptying the zone list alone was not enough, since a frame with no zones then "matched" it, and the last
+    // frame's answers came back naming zones that no longer existed (ArgumentOutOfRangeException, 2026-09-27).
+    private bool touchValid;
     private ForbiddenZone[] touchZones = [];
     private WPos touchOrigin;
     private float touchCell;
@@ -1057,7 +1063,7 @@ public sealed class AIHints
         var zones = this.ForbiddenZones;
         if (zones.Count > 64)
             return null;
-        if (this.touchCells != null && this.touchOrigin == origin && this.touchCell == cell && this.touchWidth == width
+        if (this.touchValid && this.touchCells != null && this.touchOrigin == origin && this.touchCell == cell && this.touchWidth == width
             && this.touchHeight == height && this.touchMargin == margin && this.SameZonesAsTouches())
             return this.touchCells;
 
@@ -1080,6 +1086,7 @@ public sealed class AIHints
         }
 
         this.touchCells = cells;
+        this.touchValid = true;
         this.touchZones = [.. zones];
         this.touchOrigin = origin;
         this.touchCell = cell;

@@ -54,12 +54,13 @@ class ManaBurst(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.M
 class Demimagicks(ModuleBase module) : Components.SpreadFromCastTargets(module, (uint)AID.Demimagicks, 5f);
 class MindJack(ModuleBase module) : ModuleComponent(module)
 {
-    private readonly List<(WPos source, ulong target)> _tethers = [];
+    // the Empty Vessel each jacked player has to walk back to and interact with
+    private readonly List<(Actor vessel, ulong target)> _tethers = [];
 
     public override void OnTethered(Actor source, in ActorTetherInfo tether)
     {
         if (tether.ID == (uint)TetherID.MindJack)
-            _tethers.Add(new(source.Position, tether.Target));
+            _tethers.Add(new(source, tether.Target));
     }
 
     public override void OnUntethered(Actor source, in ActorTetherInfo tether)
@@ -73,11 +74,23 @@ class MindJack(ModuleBase module) : ModuleComponent(module)
                 var t = _tethers[i];
                 if (t.target == id)
                 {
-                    _tethers.RemoveAt(0);
+                    // this player's entry, not the first one: removing [0] (as BossmodReborn does) left a toon that was
+                    // already back in its body pinned to it, and the one still out with no way back drawn
+                    _tethers.RemoveAt(i);
                     return;
                 }
             }
         }
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints)
+    {
+        for (var i = 0; i < _tethers.Count; ++i)
+            if (_tethers[i].target == actor.InstanceID)
+            {
+                hints.Add("Walk back to your body and interact with it!");
+                return;
+            }
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
@@ -91,7 +104,14 @@ class MindJack(ModuleBase module) : ModuleComponent(module)
             var t = _tethers[i];
             if (t.target == id)
             {
-                hints.AddForbiddenZone(new SDInvertedCircle(t.source, 2f));
+                // "Back to your body" is somewhere to go, not a hit: at MaxValue it is a positioning instruction, and the
+                // Magitek Rays still come first. Added as live danger (BossmodReborn's way), everything but the body was
+                // lethal, so whenever a ray crossed the body no cell was safe and the solver stood still -- Think Twice,
+                // 2026-09-27, three rounds of rays out of his body, walked back by hand.
+                hints.AddForbiddenZone(new SDInvertedCircle(t.vessel.Position, 2f), DateTime.MaxValue);
+                // Walking there is not the whole of it: the body has to be interacted with. Minerva presses nothing, so
+                // this is recorded for whatever does (and the radar says it, below).
+                hints.InteractWithTarget = t.vessel;
                 return;
             }
         }

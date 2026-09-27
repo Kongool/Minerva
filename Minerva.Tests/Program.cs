@@ -3600,6 +3600,29 @@ t.Section("Uptime is a band, not a point");
         var fresh = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f);
         t.True($"and after Clear, a new list of the same size is measured afresh ({fresh.Target.ToVec2().Length():0.0}y out of a 12y circle)",
             fresh.Found && fresh.Target.ToVec2().Length() >= 12f);
+
+        // ... and after Clear with nothing left at all. The cached zone list was emptied but not the per-cell answers,
+        // so zero zones "matched" zero and the old answers came back, pointing at zones that no longer existed. With
+        // no zones the grid is built only for a character off the floor -- knocked out, or in a barrier margin -- so
+        // it threw ArgumentOutOfRangeException every frame someone stood there (the roommate's box, 2026-09-27).
+        var outside = new WPos(0f, 32f);
+        h.Clear();
+        h.PlayerPosition = outside;
+        h.AddForbiddenZone(new AOEShapeCircle(6f), new WPos(0f, 22f), default, now.AddSeconds(3d));
+        ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f);
+        h.Clear();
+        h.PlayerPosition = outside;
+        var quiet = default(SafeSpot);
+        var threw = false;
+        try
+        {
+            quiet = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            threw = true;
+        }
+        t.True("and after Clear with no zones left, a character off the floor is walked back in instead of throwing", !threw && quiet.Found);
     }
 
     // Never walk into a hit to escape a later one. Alabaster Blade, 2026-09-26: four Occult Aero lines boxed Korha

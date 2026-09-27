@@ -61,6 +61,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<ulong[]> forbiddenTargets;
     private readonly ICallGateProvider<ulong[]> deprioritizedTargets;
     private readonly ICallGateProvider<ulong> forcedTarget;
+    private readonly ICallGateProvider<ulong> interactTarget;
     private readonly ICallGateProvider<ulong[]> targetsToInterrupt;
     private readonly ICallGateProvider<ulong[]> targetsToStun;
     private readonly ICallGateProvider<ulong, int> pendingHPDifference;
@@ -184,6 +185,11 @@ internal sealed class MinervaIpc : IDisposable
 
         this.forcedTarget = pi.GetIpcProvider<ulong>("Minerva.Hints.ForcedTarget");
         this.forcedTarget.RegisterFunc(() => this.ai.ForcedTargetId);
+
+        // The object the fight needs clicked -- Aulus mal Asina's Empty Vessel, Aurum Vale's fruit, Naadam's ovoo. Minerva
+        // walks the character there; the click is the rotation plugin's.
+        this.interactTarget = pi.GetIpcProvider<ulong>("Minerva.Hints.InteractTarget");
+        this.interactTarget.RegisterFunc(() => this.ai.InteractTargetId);
 
         this.targetsToInterrupt = pi.GetIpcProvider<ulong[]>("Minerva.Hints.TargetsToInterrupt");
         this.targetsToInterrupt.RegisterFunc(() => this.ai.TargetsToInterrupt);
@@ -316,6 +322,7 @@ internal sealed class MinervaIpc : IDisposable
         this.forbiddenTargets.UnregisterFunc();
         this.deprioritizedTargets.UnregisterFunc();
         this.forcedTarget.UnregisterFunc();
+        this.interactTarget.UnregisterFunc();
         this.targetsToInterrupt.UnregisterFunc();
         this.targetsToStun.UnregisterFunc();
         this.pendingHPDifference.UnregisterFunc();

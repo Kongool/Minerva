@@ -502,6 +502,10 @@ public sealed class AIManager
     /// <summary>Instance ID of the one thing the fight wants attacked, or 0. Outranks priorities.</summary>
     public ulong ForcedTargetId => this.HasSolution && this.hints.ForcedTarget is { IsDeadOrDestroyed: false } f ? f.InstanceID : 0uL;
 
+    /// <summary>Instance ID of the object the fight wants this character to interact with, or 0: an Empty Vessel to
+    /// return to, a fruit to eat, a lever. Minerva presses nothing; the rotation plugin does the clicking.</summary>
+    public ulong InteractTargetId => this.HasSolution && this.hints.InteractWithTarget is { IsDestroyed: false } i ? i.InstanceID : 0uL;
+
     /// <summary>Instance IDs whose current cast the module wants interrupted.</summary>
     public ulong[] TargetsToInterrupt => this.Collect(static e => e.ShouldBeInterrupted);
 
