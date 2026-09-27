@@ -54,6 +54,19 @@ public static class UptimeTargeting
     public static bool Walks(Role role, bool soloDuty, int otherPlayers)
         => !soloDuty && (role is Role.Tank or Role.Melee || otherPlayers > 0);
 
+    /// <summary>How near an object to interact with the walk ends, past its hitbox, in yalms: inside the game's
+    /// interact range, which the rotation plugin checks exactly before it clicks.</summary>
+    public const float InteractReach = 2f;
+
+    /// <summary>
+    /// The walk to an object the fight needs clicked (<see cref="AIHints.InteractWithTarget"/>), or null for none. It
+    /// replaces uptime while it lasts, as BossmodReborn's AI goes to the object before it clicks; danger still comes
+    /// first. Not in a solo duty, which is played by hand and dodge-only (the user's call, 2026-09-26). Targetability is
+    /// not asked: the module named the object, and an Empty Vessel spawns untargetable.
+    /// </summary>
+    public static UptimeGoal? InteractGoal(Actor? target, bool soloDuty)
+        => soloDuty || target is not { IsDestroyed: false } t ? null : new UptimeGoal(t.Position, default, t.HitboxRadius + InteractReach);
+
     /// <summary>
     /// The point on <paramref name="target"/>'s hitbox edge nearest <paramref name="from"/>, which is what the
     /// floor test walks to -- or null when that edge is already within a yalm, so there is nothing to test.

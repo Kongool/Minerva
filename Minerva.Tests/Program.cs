@@ -3433,6 +3433,17 @@ t.Section("Uptime is a band, not a point");
             !tank.Supersedes(new WPos(159.5f, -685.2f), rimCell));   // 0.9y nearer
     }
 
+    // The walk to an object the fight needs clicked: to within reach of it, replacing uptime; never in a solo duty.
+    {
+        var vessel = new Actor(3ul, 0x1BAFu, -1, "Empty Vessel", 0u, ActorType.Enemy, new Vector4(246.4f, 0f, -73.6f, 0f), hitboxRadius: 0.5f);
+        var go = UptimeTargeting.InteractGoal(vessel, soloDuty: false);
+        t.True("an object to click is walked to", go is { } g && g.Target == vessel.Position && MathF.Abs(g.Range - 2.5f) < 0.001f);
+        t.True("from ten yalms out the walk has ground to cover", go is { } g2 && g2.ExcessRange(new WPos(236.4f, -73.6f)) > 0f);
+        t.True("and within reach it is done", go is { } g3 && g3.ExcessRange(new WPos(248.4f, -73.6f)) == 0f);
+        t.True("not in a solo duty, which is played by hand", UptimeTargeting.InteractGoal(vessel, soloDuty: true) == null);
+        t.True("nor with nothing named", UptimeTargeting.InteractGoal(null, soloDuty: false) == null);
+    }
+
     // Who walks to uptime at all. Solo, a caster only dodges; a solo duty is dodge-only for everyone.
     t.True("a caster in a group walks its band", UptimeTargeting.Walks(Role.Ranged, soloDuty: false, otherPlayers: 3));
     t.True("a caster with no group only dodges", !UptimeTargeting.Walks(Role.Ranged, soloDuty: false, otherPlayers: 0));

@@ -195,7 +195,8 @@ public sealed class AIManager
         // scoring both against melee reach is what walks a caster into the boss to save a yard of travel.
         // Dodge-only in a solo duty, and for a caster with no group (UptimeTargeting.Walks). A rotation's stand-near
         // request below is not a band and still applies.
-        var walks = UptimeTargeting.Walks(pc.Role, GameData.IsSoloDuty(this.world.CurrentCFCID), this.OtherPlayers(pc));
+        var soloDuty = GameData.IsSoloDuty(this.world.CurrentCFCID);
+        var walks = UptimeTargeting.Walks(pc.Role, soloDuty, this.OtherPlayers(pc));
         var target = walks ? this.UptimeTarget(module, pc) : null;
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
         // The band says when to move (outside it) and where to stop (at its preferred distance); BandWalk is what
@@ -207,6 +208,14 @@ public sealed class AIManager
             // most. It replaces uptime outright rather than competing with it: a band pulling back toward the
             // boss is how the character ends up out of range again halfway through an eight-second cast.
             goal = new UptimeGoal(this.standNearPoint, default, this.standNearRange);
+            this.bandWalk.Reset();
+        }
+        else if (UptimeTargeting.InteractGoal(this.hints.InteractWithTarget, soloDuty) is { } interact)
+        {
+            // Something to click (an Empty Vessel, a fruit, the converter): walk to it, and the rotation plugin clicks
+            // once in range (Minerva.Hints.InteractTarget). Recorded as the walk's target so a replay shows where it went.
+            goal = interact;
+            this.uptimeTargetId = this.hints.InteractWithTarget!.InstanceID;
             this.bandWalk.Reset();
         }
         else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)

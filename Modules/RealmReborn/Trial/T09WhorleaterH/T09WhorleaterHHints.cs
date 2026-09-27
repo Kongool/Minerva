@@ -43,6 +43,30 @@ class Hints(ModuleBase module) : ModuleComponent(module)
         }
     }
 
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var converters = Module.Enemies((uint)OID.Converter);
+        if (converters.Count == 0 || converters[0] is not { IsTargetable: true } converter)
+            return;
+
+        // One click is enough, so one player goes: the living party member nearest the converter, first slot on a
+        // tie. Every client works out the same one, so a boxed group does not all leave the boss for it.
+        Actor? nearest = null;
+        var best = float.MaxValue;
+        foreach (var member in Raid.WithoutSlot())
+        {
+            var d = (member.Position - converter.Position).LengthSq();
+            if (d < best)
+            {
+                best = d;
+                nearest = member;
+            }
+        }
+
+        if (nearest == actor)
+            hints.InteractWithTarget = converter;
+    }
+
     public override void AddHints(int slot, Actor actor, TextHints hints)
     {
         var tails = Module.Enemies((uint)OID.Tail);
