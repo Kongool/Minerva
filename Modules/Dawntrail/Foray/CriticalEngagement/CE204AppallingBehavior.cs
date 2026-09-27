@@ -371,6 +371,9 @@ public sealed class CE204AppallingBehavior(WorldState ws, Actor primary)
     /// </summary>
     private const float SafeRadius = 18f;
 
+    /// <summary>The floor above is already the safe one; the general margin would take it to 16.</summary>
+    protected override float BarrierMargin => 0f;
+
     /// <summary>Activation is judged against the real ring, not the shrunken floor: someone standing at
     /// 19y when the engagement starts is in this fight and needs the module.</summary>
     protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InCircle(Module.Center, 20f);

@@ -38,6 +38,22 @@ internal static unsafe class GameData
 
     private static readonly Dictionary<ushort, bool> deepDungeonByCfc = [];
 
+    /// <summary>A solo duty: the ContentFinderCondition links a quest battle (link type 5), the same test
+    /// <see cref="QuestBattleDuties"/> uses to activate quest modules.</summary>
+    public static bool IsSoloDuty(ushort cfcId)
+    {
+        if (cfcId == 0)
+            return false;
+        if (soloDutyByCfc.TryGetValue(cfcId, out var known))
+            return known;
+        var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
+        var solo = sheet != null && sheet.TryGetRow(cfcId, out var row) && row.ContentLinkType == 5;
+        soloDutyByCfc[cfcId] = solo;
+        return solo;
+    }
+
+    private static readonly Dictionary<ushort, bool> soloDutyByCfc = [];
+
     public static ushort CurrentContentFinderConditionId()
     {
         var gm = GameMain.Instance();

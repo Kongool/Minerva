@@ -1799,6 +1799,60 @@ t.Section("Rotating AOE sequences");
     module.Dispose();
 }
 
+// Occult Crescent's barriers kill, and a module's floor is the barrier: the dodge keeps two yalms inside it.
+t.Section("A barrier floor is dodged from two yalms in");
+{
+    t.Near("an Occult Crescent critical engagement gets the margin",
+        ModuleBase.DefaultBarrierMargin(new ModuleInfoAttribute { Group = ModuleGroup.CriticalEngagement, CFCID = 1093u }), 2f);
+    t.Near("in either zone", ModuleBase.DefaultBarrierMargin(new ModuleInfoAttribute { Group = ModuleGroup.CriticalEngagement, CFCID = 1018u }), 2f);
+    t.Near("a Bozja one does not", ModuleBase.DefaultBarrierMargin(new ModuleInfoAttribute { Group = ModuleGroup.CriticalEngagement, CFCID = 735u }), 0f);
+    t.Near("nor an ordinary duty", ModuleBase.DefaultBarrierMargin(new ModuleInfoAttribute { CFCID = 1093u }), 0f);
+
+    var c = new WPos(238f, 352f);
+    t.True("a square shrinks on every side", new ArenaBoundsSquare(20f).Inset(2f) is ArenaBoundsSquare { HalfWidth: 18f });
+    t.Near("a circle by its radius", new ArenaBoundsCircle(24f).Inset(2f).Radius, 22f);
+    var custom = new ArenaBoundsCustom([new Polygon(c, 24.5f, 32)], [new Rectangle(c + new WDir(0f, 10f), 2f, 2f)]);
+    var shrunk = custom.Inset(2f);
+    t.True("a custom floor's polygon shrinks about its centre",
+        !shrunk.Contains(c, c + new WDir(0f, -23f)) && shrunk.Contains(c, c + new WDir(0f, -21.5f)) && custom.Contains(c, c + new WDir(0f, -23f)));
+    t.True("and its obstacle stays where it was", !shrunk.Contains(c, c + new WDir(0f, 10f)));
+
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x400000091, 0x1234, 0, "Boss", 0, ActorType.Enemy, new Vector4(238, 0, 352, 0), 2f, default, true, false, 0));
+    var boss = ws.Actors.Find(0x400000091)!;
+    var walled = new WalledModule(ws, boss) { Arena = new NullArena() };
+    var built = new AIHints();
+    walled.BuildAIHints(0, boss, built);
+    var first = built.Bounds;
+    walled.BuildAIHints(0, boss, built);
+    t.True("the module's hints carry the inset floor, and the radar's is untouched",
+        first is ArenaBoundsSquare { HalfWidth: 18f } && walled.Bounds is ArenaBoundsSquare { HalfWidth: 20f });
+    t.True("the same inset object frame after frame, so the rasterised floor is kept", ReferenceEquals(first, built.Bounds));
+    walled.Bounds = new ArenaBoundsCircle(25f);
+    walled.BuildAIHints(0, boss, built);
+    t.Near("a floor swapped mid-fight is inset too", built.Bounds.Radius, 23f);
+    walled.Dispose();
+
+    // Atlas Carbuncle, 2026-09-26, 166.6s: ten Topaz Ray circles (r4) go down, one over Saar at (+2.0, +16.6) from the
+    // centre of the 20y square. The solve took the nearest clear cell, 0.3y inside the barrier.
+    var now = DateTime.Now;
+    var rays = new (float X, float Z)[] { (-15.0f, 9.0f), (-15.0f, -1.0f), (-5.0f, 5.0f), (15.5f, 15.5f), (-1.0f, -5.0f),
+        (15.0f, -1.0f), (5.0f, 15.0f), (-14.5f, -15.5f), (1.0f, -15.0f), (-9.0f, 15.0f) };
+    SafeSpot SolveTopaz(ArenaBounds floor)
+    {
+        var hints = new AIHints { Center = c, Bounds = floor, PlayerPosition = c + new WDir(2.0f, 16.6f) };
+        foreach (var r in rays)
+            hints.AddForbiddenZone(new AOEShapeCircle(4f), c + new WDir(r.X, r.Z), default, now.AddSeconds(3d));
+        return ArenaPathfinder.Solve(hints, now, horizonSeconds: 5f, safetyMargin: 0.5f);
+    }
+    var bare = SolveTopaz(new ArenaBoundsSquare(20f));
+    var kept = SolveTopaz(new ArenaBoundsSquare(20f).Inset(ModuleBase.OccultCrescentBarrierMargin));
+    t.True($"Topaz Ray: the bare floor's answer hugs the barrier ({MathF.Abs(bare.Target.Z - c.Z):0.0}y out)", bare.Found && MathF.Abs(bare.Target.Z - c.Z) > 18.5f);
+    t.True($"and with the margin it stays two yalms in ({MathF.Max(MathF.Abs(kept.Target.X - c.X), MathF.Abs(kept.Target.Z - c.Z)):0.0}y out)",
+        kept.Found && MathF.Abs(kept.Target.X - c.X) <= 18f + 0.01f && MathF.Abs(kept.Target.Z - c.Z) <= 18f + 0.01f);
+}
+
 // ---------------------------------------------------------------------------
 // 8. Mechanic component library (spread / stack / voidzone / gaze / knockback)
 // ---------------------------------------------------------------------------
@@ -5026,6 +5080,12 @@ sealed class OdeMarch(ModuleBase module) : Minerva.Components.GenericForcedMarch
 }
 
 sealed class FateProbeModule(WorldState ws, Actor primary) : OpenWorldFate(ws, primary);
+
+// a module walled by a killing barrier, as an Occult Crescent critical engagement is
+sealed class WalledModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(238f, 352f), new ArenaBoundsSquare(20f))
+{
+    protected override float BarrierMargin => ModuleBase.OccultCrescentBarrierMargin;
+}
 
 // every destination unsafe: nothing to aim for
 sealed class CageMarch(ModuleBase module) : Minerva.Components.GenericForcedMarch(module)

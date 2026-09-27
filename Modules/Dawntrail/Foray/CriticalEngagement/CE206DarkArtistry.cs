@@ -141,6 +141,9 @@ public sealed class CE206DarkArtistry(WorldState ws, Actor primary) : ModuleBase
     /// </summary>
     private const float SafeHalfWidth = 18f;
 
+    /// <summary>The floor above is already the safe one; the general margin would take it to 16.</summary>
+    protected override float BarrierMargin => 0f;
+
     /// <summary>Activation is judged against the real square, not the shrunken floor: someone standing at 19 yalms
     /// when the engagement starts is in this fight and needs the module.</summary>
     protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InSquare(Module.Center, 20f);

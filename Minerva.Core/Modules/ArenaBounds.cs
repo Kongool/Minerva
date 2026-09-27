@@ -100,6 +100,13 @@ public abstract class ArenaBounds(float radius)
     public abstract bool Contains(WPos center, WPos point);
 
     /// <summary>
+    /// The same floor with its outer edge pulled in by <paramref name="margin"/> yalms: where the dodge may stand
+    /// when that edge is a wall that kills (see <c>ModuleBase.BarrierMargin</c>). Obstacles inside the floor are
+    /// not moved. Shapes that do not say how to shrink come back unchanged.
+    /// </summary>
+    public virtual ArenaBounds Inset(float margin) => this;
+
+    /// <summary>
     /// Is a point inside, given as an OFFSET from the arena centre? BossmodReborn's form, which its
     /// modules call as <c>Bounds.Contains(pc.Position - Center)</c>.
     ///
@@ -181,6 +188,7 @@ public sealed class ArenaBoundsCircle(float radius) : ArenaBounds(radius)
 {
     public override bool Contains(WPos center, WPos point) => point.InCircle(center, this.Radius);
     public override IReadOnlyList<WPos> Contour(WPos center) => Circle(center, this.Radius);
+    public override ArenaBounds Inset(float margin) => new ArenaBoundsCircle(MathF.Max(this.Radius - margin, 0f)) { MapResolution = this.MapResolution };
 }
 
 /// <remarks>
@@ -194,6 +202,8 @@ public sealed class ArenaBoundsSquare(float halfWidth, Angle rotation = default,
 
     public override bool Contains(WPos center, WPos point)
         => MathF.Abs(point.X - center.X) <= this.HalfWidth && MathF.Abs(point.Z - center.Z) <= this.HalfWidth;
+
+    public override ArenaBounds Inset(float margin) => new ArenaBoundsSquare(MathF.Max(this.HalfWidth - margin, 0f)) { MapResolution = this.MapResolution };
 
     public override IReadOnlyList<WPos> Contour(WPos center)
     {
@@ -363,6 +373,21 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     }
 
     public override IReadOnlyList<WPos> Contour(WPos center) => LargestShape(this.UnionShapes).ContourWorld();
+
+    /// <summary>Each union polygon shrunk about its own centre, the holes left where they are. Only for a floor built
+    /// from <see cref="Polygon"/>s, which is every custom Occult Crescent arena; anything else comes back unchanged.</summary>
+    public override ArenaBounds Inset(float margin)
+    {
+        var union = new Shape[this.UnionShapes.Length];
+        for (var i = 0; i < union.Length; ++i)
+        {
+            if (this.UnionShapes[i] is not Polygon p)
+                return this;
+            union[i] = new Polygon(p.Center, MathF.Max(p.Radius - margin, 0f), p.Edges, p.Rotation);
+        }
+        return new ArenaBoundsCustom(union, this.DifferenceShapes, MapResolution: this.MapResolution) { IsCircle = this.IsCircle };
+    }
+
     public override IReadOnlyList<IReadOnlyList<WPos>> Obstacles(WPos center)
     {
         var n = this.DifferenceShapes.Length;

@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace Minerva;
 
 /// <summary>
@@ -532,6 +534,45 @@ public abstract class ModuleBase : IDisposable
             this.components[i].AddHints(slot, actor, hints);
     }
 
+    /// <summary>How far inside an Occult Crescent critical engagement's floor the dodge keeps, in yalms.</summary>
+    public const float OccultCrescentBarrierMargin = 2f;
+
+    /// <summary>
+    /// How far inside <see cref="Bounds"/> the dodge keeps, in yalms. The radar still draws <see cref="Bounds"/>.
+    ///
+    /// <para>Every Occult Crescent critical engagement is walled by a barrier that kills, and a module's floor is the
+    /// barrier itself, so the dodge parked people on it with nothing to spare. Atlas Carbuncle, 2026-09-26: a Topaz Ray
+    /// dodge sent Saar to 0.3y inside the 20y square, the nearest clear cell, and he stopped at 19.5. Appalling Behavior
+    /// and Phantom Necromancer had already been given 18-yalm floors inside their 20 for the same reason, one module at
+    /// a time; this is the same two yalms for all of them, and it follows a module that swaps its floor mid-fight.</para>
+    /// </summary>
+    protected virtual float BarrierMargin => this.barrierMargin ??= DefaultBarrierMargin(this.GetType().GetCustomAttribute<ModuleInfoAttribute>());
+
+    private float? barrierMargin;
+
+    /// <summary>The margin a module gets from what it is: <see cref="OccultCrescentBarrierMargin"/> for a critical
+    /// engagement in either Occult Crescent zone (duties 1018 and 1093), none for anything else.</summary>
+    public static float DefaultBarrierMargin(ModuleInfoAttribute? info)
+        => info is { Group: ModuleGroup.CriticalEngagement, CFCID: 1018u or 1093u } ? OccultCrescentBarrierMargin : 0f;
+
+    private ArenaBounds? insetFrom;
+    private ArenaBounds? inset;
+
+    /// <summary><see cref="Bounds"/> less <see cref="BarrierMargin"/>. Kept until the module swaps its floor: the
+    /// pathfinder caches its rasterised floor on the bounds object, and a fresh one each frame would throw that away.</summary>
+    private ArenaBounds DodgeBounds()
+    {
+        var margin = this.BarrierMargin;
+        if (margin <= 0f)
+            return this.Bounds;
+        if (!ReferenceEquals(this.insetFrom, this.Bounds))
+        {
+            this.insetFrom = this.Bounds;
+            this.inset = this.Bounds.Inset(margin);
+        }
+        return this.inset!;
+    }
+
     /// <summary>Populate the auto-dodge hints from every component, for the given player. The party
     /// role <paramref name="assignment"/> is passed through to components (Unassigned by default, since
     /// Minerva has no role-config UI yet).</summary>
@@ -540,7 +581,7 @@ public abstract class ModuleBase : IDisposable
         hints.Clear();
         hints.PlayerPosition = actor.Position;
         hints.Center = this.Center;
-        hints.Bounds = this.Bounds;
+        hints.Bounds = this.DodgeBounds();
         this.SeedPotentialTargets(hints);
         for (var i = 0; i < this.components.Count; ++i)
         {

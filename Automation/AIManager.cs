@@ -193,7 +193,9 @@ public sealed class AIManager
         // Give up as little uptime as safety allows, rather than taking the first cell out of the AOE -- and
         // let the role say what uptime means. A tank and a Black Mage do not want the same distance, and
         // scoring both against melee reach is what walks a caster into the boss to save a yard of travel.
-        var target = this.UptimeTarget(module, pc);
+        // Solo duties are dodge-only: nothing walks the character toward or away from its target there, whatever the
+        // role (the user's call, 2026-09-26). A rotation's stand-near request below is not a band and still applies.
+        var target = GameData.IsSoloDuty(this.world.CurrentCFCID) ? null : this.UptimeTarget(module, pc);
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
         // The band says when to move (outside it) and where to stop (at its preferred distance); BandWalk is what
         // remembers a walk is under way, so crossing back into the band does not end it short of preferred.
