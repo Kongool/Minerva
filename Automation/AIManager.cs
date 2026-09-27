@@ -245,7 +245,7 @@ public sealed class AIManager
 
         this.Current = this.SolveOrReuse(pc, now, horizon, margin, goal, moveSpeed, lead);
         // the hold has to judge safety on the same clock the solve did, or it keeps a target the solve rejected
-        this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed);
+        this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed, goal);
         this.Current = this.RejectFloorless(pc, this.Current, now, margin, goal, horizon);
         this.Current = this.KeepMoving(pc, now, margin, horizon + lead);
         this.HasSolution = true;
@@ -1220,7 +1220,7 @@ public sealed class AIManager
     /// alternate frames, which reads in game as pulsing — it looks like the AI cannot tell you are already
     /// clear. Committing to a destination until it is reached or genuinely becomes unsafe removes both.</para>
     /// </summary>
-    private SafeSpot HoldCommitment(Actor pc, DateTime now, DateTime deadline, float margin, float moveSpeed)
+    private SafeSpot HoldCommitment(Actor pc, DateTime now, DateTime deadline, float margin, float moveSpeed, UptimeGoal? goal)
     {
         if (!this.Current.NeedToMove || !this.Current.Found)
         {
@@ -1228,7 +1228,13 @@ public sealed class AIManager
             return this.Current;
         }
 
-        if (this.committedTarget is { } prev && (prev - pc.Position).Length() > ArrivedRange)
+        // A walk back to uptime is kept only while it still leads there (UptimeGoal.Supersedes). Only when nothing
+        // threatens the character where it stands: during a dodge the fresh answer nearly always has the better
+        // uptime, and trading on that would reopen the shuffle this hold exists to stop.
+        var outdated = this.committedTarget is { } was && goal is { } g && g.Supersedes(this.Current.Target, was)
+            && !this.hints.InImminentDanger(pc.Position, deadline, margin);
+
+        if (this.committedTarget is { } prev && (prev - pc.Position).Length() > ArrivedRange && !outdated)
         {
             // The destination is still safe, and so is the way to it: keep going.
             if (!this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev)

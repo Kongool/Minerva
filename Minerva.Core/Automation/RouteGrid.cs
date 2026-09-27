@@ -145,6 +145,49 @@ public sealed class RouteGrid
 
     public WPos Center(int x, int z) => new(this.origin.X + (x * this.cell), this.origin.Z + (z * this.cell));
 
+    /// <summary>For each cell outside the floor, how many steps it is from the nearest cell that is not; zero for
+    /// those. A breadth-first flood inward from the floor's own edge.</summary>
+    private int[] OutsideDepth()
+    {
+        var n = this.w * this.h;
+        var depth = new int[n];
+        var queue = new Queue<int>();
+        for (var k = 0; k < n; ++k)
+        {
+            if (this.outside[k])
+            {
+                depth[k] = int.MaxValue;
+            }
+            else
+            {
+                queue.Enqueue(k);
+            }
+        }
+
+        while (queue.TryDequeue(out var k))
+        {
+            var kx = k % this.w;
+            var kz = k / this.w;
+            for (var dz = -1; dz <= 1; ++dz)
+            {
+                for (var dx = -1; dx <= 1; ++dx)
+                {
+                    var nx = kx + dx;
+                    var nz = kz + dz;
+                    if (nx < 0 || nx >= this.w || nz < 0 || nz >= this.h)
+                        continue;
+                    var j = (nz * this.w) + nx;
+                    if (depth[j] != int.MaxValue)
+                        continue;
+                    depth[j] = depth[k] + 1;
+                    queue.Enqueue(j);
+                }
+            }
+        }
+
+        return depth;
+    }
+
     public bool TryCellOf(WPos p, out int x, out int z)
     {
         x = (int)MathF.Round((p.X - this.origin.X) / this.cell);
@@ -333,6 +376,13 @@ public sealed class RouteGrid
         this.length[start] = 0f;
         var startZones = this.zones[start];   // what the character is standing in: leaving it is not a new hit
 
+        // From outside the floor, outside ground is the way back in and nothing else: each step through it must be
+        // nearer the floor than the last. Priced like floor and walkable in any direction, it was also a way AROUND:
+        // Appalling Behavior, 2026-09-26, Saar stood 0.8y past the 18y floor with a circle about to fire between him and
+        // the safe spot, and the cheapest route ran along the outside at 19-20.5y -- the barrier's ring -- and he
+        // followed it into the barrier.
+        var depth = this.outside[start] ? this.OutsideDepth() : null;
+
         var open = new PriorityQueue<int, float>();
         open.Enqueue(start, 0f);
         var settled = new bool[this.w * this.h];
@@ -365,7 +415,8 @@ public sealed class RouteGrid
                     // or another outside cell, an outside cell is walkable. Once inside, nothing leads back out. Lost on
                     // the Wind, 2026-09-14: 1.8 yalms into the death wall, every neighbour was out of bounds, nothing
                     // inside was reachable, and the dodge stood still in the wall.
-                    var escaping = (i == start || this.outside[i]) && this.outside[j] && !this.solid[j];
+                    var escaping = (i == start || this.outside[i]) && this.outside[j] && !this.solid[j]
+                        && depth != null && depth[j] < depth[i];
                     if (this.blocked[j] && !escaping)
                         continue;
 

@@ -150,8 +150,17 @@ sealed class EsotericInstruction(ModuleBase module) : Components.GenericAOEs(mod
                     // was caught crossing a zone as it fired (2026-09-06, screenshot -- ours solid red where
                     // BossmodReborn still had the later zones yellow). Same stagger the cast-finish handler
                     // uses, so the estimate is only ever refined by it, never contradicted.
+                    //
+                    // Counted from the end of Esoteric Instruction when the boss is still casting it, which is when the
+                    // markers appear: counted from the marker, the first zone read as live 12.6s early (2026-09-26:
+                    // markers 47.6-56.7s, cast ends 60.1s, zones fire 66.2/70.8/75.2/79.7s) and the dodge routed round
+                    // a cone that had not gone off, along the arena's edge and into the barrier.
+                    var cast = Module.PrimaryActor.CastInfo;
+                    var from = cast != null && cast.Action.ID is (uint)AID.EsotericInstruction or (uint)AID.EsotericInstructionSwap
+                        ? Module.CastFinishAt(cast).AddSeconds(cast.Action.ID == (uint)AID.EsotericInstructionSwap ? 6.6d : 0d)
+                        : World.CurrentTime;
                     _aoes.Add(new(isstate10002 ? cone : circle, pos.Quantized(), actor.Rotation,
-                        World.FutureTime(6d + (_aoes.Count * 4.5d)), actorID: keeper.InstanceID));
+                        from.AddSeconds(6d + (_aoes.Count * 4.5d)), actorID: keeper.InstanceID));
                     break;
                 }
             }

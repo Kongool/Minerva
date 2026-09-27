@@ -84,16 +84,43 @@ public class GenericRotatingAOE(ModuleBase module) : GenericAOEs(module)
     }
 
     public bool AdvanceSequence(WPos origin, Angle rotation, DateTime currentTime, bool removeWhenFinished = true)
+        => this.AdvanceMatching(origin, rotation, null, currentTime, removeWhenFinished);
+
+    /// <summary>How many steps past the expected one a cast may land and still be recognised. See <see cref="AdvanceMatching"/>.</summary>
+    private const int MaxStepsAhead = 2;
+
+    /// <summary>
+    /// Advance the sequence this cast belongs to: the one it continues exactly, else -- only when none does -- one it
+    /// continues a step or two ahead of where the sequence thought it was, consuming the steps in between.
+    ///
+    /// <para>Steps can arrive out of order within a frame. Imbalanced Diet's Spinning Inhale, 2026-09-26: 75 degrees,
+    /// then 45 and 60 in the same frame. Matched strictly, 45 was refused, 60 was taken, and the sequence then waited
+    /// for a 45 that had already gone by -- so 30, 15 and 0 were refused too, the sequence never finished, and its
+    /// cones and the module's "stay by the middle" hint stayed up for the rest of the fight, holding a melee toon
+    /// fifteen yalms from the boss. Now 45 is taken as the step after next and 60 with it, the late 60 matches
+    /// nothing and is ignored, and the rest complete the sequence.</para>
+    ///
+    /// <para>The exact match is tried against every sequence first, so two sequences sharing an origin (lasers
+    /// turning opposite ways from one boss) cannot steal each other's casts through the lookahead.</para>
+    /// </summary>
+    private bool AdvanceMatching(WPos origin, Angle rotation, ulong? instanceID, DateTime currentTime, bool removeWhenFinished)
     {
-        for (var i = 0; i < this.Sequences.Count; ++i)
+        for (var ahead = 0; ahead <= MaxStepsAhead; ++ahead)
         {
-            var s = this.Sequences[i];
-            if (s.Origin.AlmostEqual(origin, 1f) && s.Rotation.AlmostEqual(rotation, 0.05f))
+            for (var i = 0; i < this.Sequences.Count; ++i)
             {
-                this.AdvanceSequence(i, currentTime, removeWhenFinished);
+                var s = this.Sequences[i];
+                if (ahead >= s.NumRemainingCasts || !s.Origin.AlmostEqual(origin, 1f) || (instanceID is { } id && s.ActorID != id))
+                    continue;
+                if (!(s.Rotation + (s.Increment * ahead)).AlmostEqual(rotation, 0.05f))
+                    continue;
+
+                for (var step = 0; step <= ahead; ++step)
+                    this.AdvanceSequence(i, currentTime, removeWhenFinished);
                 return true;
             }
         }
+
         return false;
     }
 
@@ -102,19 +129,7 @@ public class GenericRotatingAOE(ModuleBase module) : GenericAOEs(module)
     /// sequences share a spot, where position alone would advance the wrong one.
     /// </summary>
     public bool AdvanceSequence(WPos origin, Angle rotation, ulong instanceID, DateTime currentTime, bool removeWhenFinished = true)
-    {
-        for (var i = 0; i < this.Sequences.Count; ++i)
-        {
-            var s = this.Sequences[i];
-            if (s.Origin.AlmostEqual(origin, 1f) && s.Rotation.AlmostEqual(rotation, 0.05f) && s.ActorID == instanceID)
-            {
-                this.AdvanceSequence(i, currentTime, removeWhenFinished);
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => this.AdvanceMatching(origin, rotation, instanceID, currentTime, removeWhenFinished);
 
     public bool AdvanceSequence(ulong instanceID, DateTime currentTime, bool removeWhenFinished = true)
     {

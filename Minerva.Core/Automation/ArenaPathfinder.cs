@@ -156,6 +156,21 @@ public readonly record struct UptimeGoal(WPos Target, Angle Rotation, float Rang
         return d < this.MinRange ? this.MinRange - d : 0f;   // too close is out of position too, for a backline job
     }
 
+    /// <summary>How much nearer the band a fresh destination has to be before it replaces one already being walked
+    /// to: a cell. Any less and two neighbouring cells that both sit in the band could trade places every frame.</summary>
+    private const float ReplanGain = 1f;
+
+    /// <summary>
+    /// Whether a destination chosen earlier has stopped being the way to this goal: <paramref name="fresh"/> is more
+    /// than a cell nearer the band than <paramref name="committed"/>.
+    /// <para>A destination is committed to so the walk does not re-pick a cell every frame, and it was kept for as
+    /// long as it stayed safe and unreached -- whether or not it still led anywhere. Cresceregina, 2026-09-26: Korha,
+    /// 56y out and off the floor, was given the nearest rim cell as his way in, 30y from the boss. He was walked to
+    /// the boss by hand, and when the keys were let go the commitment walked him back out to that rim cell, then in
+    /// again. A boss that walks off does the same thing to a spot that was in the band when it was chosen.</para>
+    /// </summary>
+    public bool Supersedes(WPos fresh, WPos committed) => this.ExcessRange(committed) > this.ExcessRange(fresh) + ReplanGain;
+
     /// <summary>
     /// How far this point sits, in degrees, from the best place to stand inside the required arc — or null
     /// when no side is required and anywhere will do.

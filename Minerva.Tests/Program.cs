@@ -1303,6 +1303,23 @@ t.Section("Auto-dodge pathfinding");
             back.NeedToMove && back.Found && (back.Target - new WPos(0f, 0f)).Length() < 23f);
     }
 
+    // ... but only IN. From outside, outside ground is the way back and nothing else. Appalling Behavior, 2026-09-26:
+    // Saar 0.8y past the 18y floor, a circle about to fire between him and the safe spot along the edge, and the route
+    // ran round it along the outside at 19-20.5y -- through the barrier's ring.
+    {
+        // the recorded geometry, relative to the arena centre: an 18y floor; Saar at (4.6, -18.2); a cone from the south
+        // edge that had already gone off and was still drawn; the 30y circle from the east edge he was standing in
+        var start = new WPos(4.6f, -18.2f);
+        var rim = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(18f), PlayerPosition = start };
+        rim.AddForbiddenZone(new AOEShapeCone(50f, 50f.Degrees()), new WPos(0f, -20f), 0f.Degrees(), now.AddSeconds(-5.2d));
+        rim.AddForbiddenZone(new AOEShapeCircle(30f), new WPos(20f, 0f), default, now.AddSeconds(2.4d));
+        var rimGrid = new RouteGrid(rim, now.AddSeconds(5d), start, 1f, 1f, now, ArenaPathfinder.DefaultMoveSpeed);
+        var rimRoute = rimGrid.Route(start, new WPos(-6.8f, -15.8f));
+        var deepest = rimRoute.Count == 0 ? float.MaxValue : rimRoute.Max(p => p.ToVec2().Length());
+        t.True($"from just outside the floor, the route never goes further out than it started (deepest {deepest:0.0}y, started {start.ToVec2().Length():0.0}y)",
+            rimRoute.Count > 0 && deepest <= start.ToVec2().Length() + 0.01f);
+    }
+
     // The same, while escaping something that fires before the walk is over. Claret Dragon, 2026-09-14: Rosa
     // ran out of a breath cone through the edge of a standing haze. Every yalm of that escape is priced as
     // lethal, so a straight line that trades cone ground for haze ground cost the simplifier nothing, and one
@@ -1740,6 +1757,45 @@ t.Section("Forced march aim");
     var cage = new CageMarch(module);
     cage.AddForcedMovement(hemmed, 180f.Degrees(), 2f, starts);
     t.True("nor when no facing is safe: no least-bad answer dressed as a solution", Published(cage, hemmed) == null);
+    module.Dispose();
+}
+
+// Rotating sequences survive steps that arrive out of order. Imbalanced Diet's Spinning Inhale, 2026-09-26: 45 and 60
+// came in the same frame in that order, the strict match refused every step after, and the sequence's cones -- and
+// the module's "stay by the middle" hint -- stayed up for the rest of the fight.
+t.Section("Rotating AOE sequences");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong rotId = 0x400000081;
+    ws.Execute(new ActorState.OpCreate(rotId, 0x1234, 0, "Boss", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 2f, default, true, false, 0));
+    var module = new TestModule(ws, ws.Actors.Find(rotId)!) { Arena = new NullArena() };
+    var origin = new WPos(100f, 100f);
+    var cone = new AOEShapeCone(30f, 15f.Degrees());
+    var now = ws.CurrentTime;
+
+    var inOrder = new Minerva.Components.GenericRotatingAOE(module);
+    inOrder.Sequences.Add(new(cone, origin, 0f.Degrees(), -15f.Degrees(), now, 0.2d, 5));
+    foreach (var deg in new[] { 0f, -15f, -30f, -45f, -60f })
+        inOrder.AdvanceSequence(origin, deg.Degrees(), now);
+    t.Eq("in order, a sequence finishes exactly as before", inOrder.Sequences.Count, 0);
+
+    var swapped = new Minerva.Components.GenericRotatingAOE(module);
+    swapped.Sequences.Add(new(cone, origin, 0f.Degrees(), -15f.Degrees(), now, 0.2d, 5));
+    var accepted = new[] { 0f, -15f, -45f, -30f, -60f }.Select(deg => swapped.AdvanceSequence(origin, deg.Degrees(), now)).ToArray();
+    t.Eq("two steps swapped within a frame still finish the sequence", swapped.Sequences.Count, 0);
+    t.True("with the late step ignored rather than miscounted", accepted.SequenceEqual(new[] { true, true, true, false, true }));
+
+    var twin = new Minerva.Components.GenericRotatingAOE(module);
+    twin.Sequences.Add(new(cone, origin, 0f.Degrees(), -15f.Degrees(), now, 0.2d, 4));   // turning one way
+    twin.Sequences.Add(new(cone, origin, -30f.Degrees(), 15f.Degrees(), now, 0.2d, 4));  // and the other, from the same spot
+    twin.AdvanceSequence(origin, (-30f).Degrees(), now);
+    t.True("an exact match on one sequence wins over the lookahead of another at the same origin",
+        MathF.Abs(twin.Sequences[0].Rotation.Deg - 0f) < 0.01f && MathF.Abs(twin.Sequences[1].Rotation.Deg - (-15f)) < 0.01f);
+
+    var far = new Minerva.Components.GenericRotatingAOE(module);
+    far.Sequences.Add(new(cone, origin, 0f.Degrees(), -15f.Degrees(), now, 0.2d, 10));
+    t.True("but a cast three steps ahead is not taken for this sequence", !far.AdvanceSequence(origin, (-45f).Degrees(), now) && far.Sequences[0].NumRemainingCasts == 10);
     module.Dispose();
 }
 
@@ -3292,6 +3348,22 @@ t.Section("Uptime is a band, not a point");
     t.Near("and the backline's too", UptimeGoal.For(fatBoss, Role.Ranged).Range, 23f);
     t.Near("its floor included", UptimeGoal.For(fatBoss, Role.Ranged).MinRange, 16f);
     t.True("and the ring it walks to", UptimeGoal.For(fatBoss, Role.Ranged).Aim == (19f, 21f));
+
+    // A destination already being walked to is kept until reached -- unless it has stopped leading to uptime.
+    // Cresceregina, 2026-09-26: the rim cell Korha was given 56y out, 30y from the boss, was walked back to after he
+    // had reached the boss by hand. Recorded geometry: the boss's hitbox is 7 yalms, Korha is a tank.
+    {
+        var regina = new Actor(2ul, 0x4D63u, -1, "Cresceregina", 0u, ActorType.Enemy, new Vector4(140.7f, 0f, -708.1f, 0f), hitboxRadius: 7f);
+        var tank = UptimeGoal.For(regina, Role.Tank);
+        var rimCell = new WPos(160.1f, -684.5f);   // committed at 5.2s
+        var byTheBoss = new WPos(147.6f, -704.3f); // where a fresh solve from 12y out sends him
+        t.True("a spot in the band supersedes a committed rim cell 30y from the boss", tank.Supersedes(byTheBoss, rimCell));
+        t.True("but not the other way round", !tank.Supersedes(rimCell, byTheBoss));
+        t.True("and two neighbouring cells in the band do not trade places",
+            !tank.Supersedes(byTheBoss, byTheBoss + new WDir(0.7f, 0.7f)) && !tank.Supersedes(byTheBoss + new WDir(0.7f, 0.7f), byTheBoss));
+        t.True("nor do two partial steps toward a boss still far off",
+            !tank.Supersedes(new WPos(159.5f, -685.2f), rimCell));   // 0.9y nearer
+    }
 
     // The range band: move only when outside [min, max], walk to preferred, stop within a yalm of it, and when too
     // close walk straight out. Everything below is measured from the hitbox edge.
