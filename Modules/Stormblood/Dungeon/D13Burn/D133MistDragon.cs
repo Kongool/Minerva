@@ -362,6 +362,19 @@ public sealed class D133MistDragon(WorldState ws, Actor primary) : ModuleBase(ws
 
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        // While a Draconic Regard lives, the boss is not to be hit: Cold Fog grows until the heads are dead. The boss
+        // is normally Invincible (775) through that window, which already forbids it (the Burn, 2026-09-28: on from
+        // Vaporize to the end of Cold Fog); this holds without that status.
+        var headsUp = false;
+        foreach (var head in Enemies((uint)OID.DraconicRegard))
+        {
+            if (!head.IsDead)
+            {
+                headsUp = true;
+                break;
+            }
+        }
+
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i)
         {
@@ -370,6 +383,7 @@ public sealed class D133MistDragon(WorldState ws, Actor primary) : ModuleBase(ws
             {
                 (uint)OID.Mist => 2,
                 (uint)OID.DraconicRegard => 1,
+                (uint)OID.Boss when headsUp => AIHints.Enemy.PriorityForbidden,
                 _ => 0
             };
         }
