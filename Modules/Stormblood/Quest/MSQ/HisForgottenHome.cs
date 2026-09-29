@@ -70,12 +70,15 @@ public sealed class SlickshellCaptain(WorldState ws, Actor primary) : ModuleBase
 
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        // attack anyone targeting isse
+        // The Softshells go first, then anything on Isse, then the Captain (the user, 2026-09-28: "need to kill adds
+        // first"). BossmodReborn ranked only "attacking Isse", which left the Captain level with the adds.
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i)
         {
             var h = hints.PotentialTargets[i];
-            h.Priority = World.Actors.Find(h.Actor.TargetID)?.OID == 0x2138u ? 1 : 0;
+            h.Priority = h.Actor.OID is (uint)OID.SoftshellOfTheRed1 or (uint)OID.SoftshellOfTheRed2 or (uint)OID.SoftshellOfTheRed3 ? 2
+                : World.Actors.Find(h.Actor.TargetID)?.OID == 0x2138u ? 1
+                : 0;
         }
     }
 }

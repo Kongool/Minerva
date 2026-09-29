@@ -122,24 +122,29 @@ public sealed class ReplayPlayer : IDisposable
 
     private void TryActivateModule()
     {
+        // the live manager's lifetime (ModuleLifetime): a module with an end of its own outlives its boss, and gives way
+        // to another whose boss turns up
         if (this.module != null)
         {
-            if (this.module.PrimaryActor.IsDestroyed)
+            if (ModuleLifetime.Ended(this.module.Finished, this.world.CurrentCFCID == 0, this.module.HasOwnEnd, this.module.PrimaryActor.IsDestroyed, false))
             {
                 this.module.Dispose();
                 this.module = null;
             }
-            else
+            else if (!ModuleLifetime.MayGiveWay(this.module.HasOwnEnd, this.module.PrimaryActor.IsDead, this.module.PrimaryActor.IsDestroyed))
             {
                 return;
             }
         }
         if (this.world.CurrentCFCID == 0)
             return;
+        var outgoing = this.module;
         foreach (var info in this.registry.ForDuty(this.world.CurrentCFCID))
             foreach (var actor in this.world.Actors)
-                if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed)
+                if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed
+                    && (outgoing == null || (!actor.IsDead && actor.InstanceID != outgoing.PrimaryActor.InstanceID)))
                 {
+                    outgoing?.Dispose();
                     this.module = info.Create(this.world, actor);
                     return;
                 }

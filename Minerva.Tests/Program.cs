@@ -2380,6 +2380,66 @@ t.Section("Encounter teardown");
     t.True("a dead boss is still present, not destroyed", actor.IsDead && !actor.IsDestroyed);
 }
 
+// A module that says when its fight ends runs until then, not until its first actor dies (Hope on the Waves, 2026-09-28).
+t.Section("A module runs until its own end");
+{
+    t.True("a module with no end of its own ends when its boss despawns", ModuleLifetime.Ended(false, false, hasOwnEnd: false, primaryDestroyed: true, primaryDeathEndsIt: false));
+    t.True("or dies, where that ends the encounter", ModuleLifetime.Ended(false, false, hasOwnEnd: false, primaryDestroyed: false, primaryDeathEndsIt: true));
+    t.True("one with its own end outlives its boss", !ModuleLifetime.Ended(false, false, hasOwnEnd: true, primaryDestroyed: true, primaryDeathEndsIt: true));
+    t.True("until that end comes", ModuleLifetime.Ended(finished: true, false, hasOwnEnd: true, primaryDestroyed: false, primaryDeathEndsIt: false));
+    t.True("and leaving the duty ends any module", ModuleLifetime.Ended(false, leftDuty: true, hasOwnEnd: true, primaryDestroyed: false, primaryDeathEndsIt: false));
+    t.True("running past its boss, it gives way to another", ModuleLifetime.MayGiveWay(hasOwnEnd: true, primaryDead: true, primaryDestroyed: false));
+    t.True("but not while its boss lives", !ModuleLifetime.MayGiveWay(hasOwnEnd: true, primaryDead: false, primaryDestroyed: false));
+
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000A1, 0xA1u, 0, "Centurion", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1.5f, default, true, false, 0));
+    var owned = new EndsOnFlagModule(ws, ws.Actors.Find(0x4000000A1)!) { Arena = new NullArena() };
+    owned.BuildStates();
+    t.True("the last phase's end condition is seen", owned.HasOwnEnd);
+    owned.Update();
+    t.True("and it has not ended while the condition is false", !owned.Finished);
+    EndsOnFlagModuleStates.Over = true;
+    owned.Update();
+    t.True("it finishes when the condition holds", owned.Finished);
+    EndsOnFlagModuleStates.Over = false;
+    owned.Dispose();
+
+    var plain = new TestModule(ws, ws.Actors.Find(0x4000000A1)!) { Arena = new NullArena() };
+    plain.BuildStates();
+    t.True("a module with no end condition has no end of its own", !plain.HasOwnEnd);
+    plain.Dispose();
+}
+
+// A module's own AI hints (CalculateModuleAIHints) reach the hints: 262 ported overrides rank targets, and nothing
+// called them until 2026-09-28 (His Forgotten Home: "need to kill adds first").
+t.Section("A module's own AI hints are applied");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000B1, 0xB1u, 0, "Captain", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1.5f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x4000000B2, 0xB2u, 1, "Softshell", 0, ActorType.Enemy, new Vector4(5, 0, 0, 0), 1.6f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCombat(0x4000000B1, true));
+    ws.Execute(new ActorState.OpCombat(0x4000000B2, true));
+    var captain = ws.Actors.Find(0x4000000B1)!;
+    var ranked = new AddsFirstModule(ws, captain) { Arena = new NullArena() };
+    ranked.BuildStates();
+    var hints = new AIHints();
+    ranked.BuildAIHints(0, captain, hints);
+    t.True("the module's own ranking reaches the hints", hints.PotentialTargets.Any(e => e.Actor.OID == 0xB2u && e.Priority == 2));
+    ranked.Dispose();
+
+    var broken = new ThrowingHintsModule(ws, captain) { Arena = new NullArena() };
+    broken.BuildStates();
+    var hints2 = new AIHints();
+    var threw = false;
+    try { broken.BuildAIHints(0, captain, hints2); broken.BuildAIHints(0, captain, hints2); }
+    catch (Exception) { threw = true; }
+    t.True("a module whose own hints throw does not take the tick down", !threw);
+    t.Eq("and is only asked once", ThrowingHintsModule.Calls, 1);
+    broken.Dispose();
+}
+
 t.Section("Gaze facing hints");
 {
     // A gaze is the one mechanic where position does not matter and facing is everything, so the arc has to
@@ -5193,6 +5253,36 @@ sealed class StayMoveProbe(ModuleBase module) : Minerva.Components.StayMove(modu
 }
 
 // paired states builder discovered by ModuleBase.BuildStates() via the "<Module>States" convention
+// ranks the add above the boss from the module itself, as 262 ported modules do
+sealed class AddsFirstModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(30f))
+{
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var e in hints.PotentialTargets)
+            e.Priority = e.Actor.OID == 0xB2u ? 2 : 0;
+    }
+}
+
+sealed class ThrowingHintsModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(30f))
+{
+    public static int Calls;
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        ++Calls;
+        throw new InvalidOperationException("ported module bug");
+    }
+}
+
+// ends when its flag is set, as a ported module's Raw.Update ends it
+sealed class EndsOnFlagModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f));
+
+sealed class EndsOnFlagModuleStates : StateMachineBuilder
+{
+    public static bool Over;
+    public EndsOnFlagModuleStates(ModuleBase module) : base(module)
+        => this.TrivialPhase().Raw.Update = () => Over;
+}
+
 sealed class TestModuleStates : StateMachineBuilder
 {
     public TestModuleStates(ModuleBase module) : base(module)

@@ -56,15 +56,18 @@ public sealed class ModuleManager : IDisposable
         // Drop the active module once it's no longer valid. A killed boss is not *destroyed* — the corpse
         // lingers for a while — so death has to be checked separately or the module keeps running over a
         // dead encounter and its components keep painting whatever AOEs they were left holding.
-        if (this.ActiveModule != null && (this.ActiveModule.PrimaryActor.IsDestroyed || this.world.CurrentCFCID == 0 || this.EncounterOver()))
+        // A module with an end of its own runs until it (ModuleLifetime).
+        if (this.ActiveModule is { } active && ModuleLifetime.Ended(active.Finished, this.world.CurrentCFCID == 0, active.HasOwnEnd,
+                active.PrimaryActor.IsDestroyed, this.EncounterOver()))
         {
             this.ActiveModule.Dispose();
             this.ActiveModule = null;
             this.ActiveModuleInfo = null;
         }
 
-        // try to activate a module for the current duty + a present boss actor
-        if (this.ActiveModule == null && this.world.CurrentCFCID != 0)
+        // try to activate a module for the current duty + a present boss actor -- also over one still running past its boss
+        if (this.world.CurrentCFCID != 0 && (this.ActiveModule is not { } running
+                || ModuleLifetime.MayGiveWay(running.HasOwnEnd, running.PrimaryActor.IsDead, running.PrimaryActor.IsDestroyed)))
             this.TryActivate();
 
         this.ActiveModule?.Update();
@@ -106,6 +109,8 @@ public sealed class ModuleManager : IDisposable
 
     private void TryActivate()
     {
+        // non-null only for a module running past its boss: it gives way to a live boss other than its own
+        var outgoing = this.ActiveModule;
         var candidates = this.registry.ForDuty(this.world.CurrentCFCID);
         for (var i = 0; i < candidates.Count; ++i)
         {
@@ -113,8 +118,15 @@ public sealed class ModuleManager : IDisposable
             foreach (var actor in this.world.Actors)
             {
                 // ... and don't immediately re-activate on that same corpse
-                if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed && !(info.Attr.PrimaryActorDeathEndsEncounter && actor.IsDead))
+                if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed && !(info.Attr.PrimaryActorDeathEndsEncounter && actor.IsDead)
+                    && (outgoing == null || (!actor.IsDead && actor.InstanceID != outgoing.PrimaryActor.InstanceID)))
                 {
+                    if (outgoing != null)
+                    {
+                        Service.Log.Information($"Minerva: {outgoing.GetType().Name} gives way to {info.ModuleType.Name} for boss {actor.Name}.");
+                        outgoing.Dispose();
+                    }
+
                     this.ActiveModule = info.Create(this.world, actor);
                     this.ActiveModuleInfo = info;
                     Service.Log.Information($"Minerva: activated module {info.ModuleType.Name} for boss {actor.Name}.");

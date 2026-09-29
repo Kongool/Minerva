@@ -179,6 +179,13 @@ public abstract class ModuleBase : IDisposable
             this.DeactivateComponent(t);
     }
 
+    /// <summary>The module says when its fight is over: its last phase has an end condition (a ported <c>Raw.Update</c>
+    /// or <c>TransitionOn</c>). Such a module runs until that holds, not until its boss dies (see <see cref="ModuleLifetime"/>).</summary>
+    public bool HasOwnEnd => this.states is { Phases.Count: > 0 } s && s.Phases[^1].Transition != null;
+
+    /// <summary>The end condition of <see cref="HasOwnEnd"/> has held.</summary>
+    public bool Finished { get; private set; }
+
     // advance through as many phases as fire this frame (a guard prevents a bad predicate from looping forever)
     private void AdvancePhase()
     {
@@ -192,6 +199,11 @@ public abstract class ModuleBase : IDisposable
             this.ExitPhase();
             this.EnterPhase(this.currentPhase + 1);
         }
+
+        // the last phase's transition is the fight's own end; nothing reads it but this
+        if (!this.Finished && this.currentPhase == this.states.Phases.Count - 1
+            && this.states.Phases[this.currentPhase].Transition is { } end && end())
+            this.Finished = true;
     }
 
     /// <summary>True if any actor of <paramref name="oid"/> exists in the world and is targetable.</summary>
@@ -421,8 +433,8 @@ public abstract class ModuleBase : IDisposable
     public void ReportError(string message) => this.ReportError(null, message);
 
     // module-level virtuals BMR's BossModule exposes, so ported modules that override them compile.
-    // Minerva does not yet call CheckPull/UpdateModule/CalculateModuleAIHints/CheckReset in its loop, nor
-    // read ShouldPrioritizeAllEnemies (tracked). They are declared rather than deleted because a ported
+    // CalculateModuleAIHints is called from BuildAIHints (2026-09-28); Minerva does not yet call
+    // CheckPull/UpdateModule/CheckReset in its loop, nor read ShouldPrioritizeAllEnemies (tracked). They are declared rather than deleted because a ported
     // module overriding one is recording something real about the fight.
     protected virtual bool CheckPull() => this.PrimaryActor.IsTargetable && this.PrimaryActor.InCombat;
 
@@ -602,9 +614,26 @@ public abstract class ModuleBase : IDisposable
                 this.ReportBrokenComponent(c, ex);
             }
         }
+
+        // The module's own hints, after its components as BossmodReborn orders them. 262 of the 263 ported overrides
+        // rank targets -- "kill the adds first" -- and nothing called this until 2026-09-28 (His Forgotten Home: the
+        // Softshells were never put ahead of the Slickshell Captain). Contained like a component: reported once, then off.
+        if (!this.moduleHintsBroken)
+        {
+            try
+            {
+                this.CalculateModuleAIHints(slot, actor, assignment, hints);
+            }
+            catch (Exception ex)
+            {
+                this.moduleHintsBroken = true;
+                this.ReportError($"CalculateModuleAIHints threw ({ex.GetType().Name}: {ex.Message}); the module's own hints are off for the rest of the encounter, its components keep running.");
+            }
+        }
     }
 
     private readonly HashSet<ModuleComponent> brokenHints = [];
+    private bool moduleHintsBroken;
 
     /// <summary>Says a component was dropped. Overridable so the plugin can log it; the default is silent
     /// because Minerva.Core has no logger of its own.</summary>
