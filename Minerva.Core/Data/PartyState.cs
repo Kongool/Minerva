@@ -3,7 +3,8 @@ namespace Minerva;
 /// <summary>
 /// The player's party as a fixed set of slots. Phase 1 keeps this minimal — each slot holds a
 /// content id + the actor instance id — enough to tell which world actors are party members
-/// (what the radar needs). Buddies/alliance and richer membership come later.
+/// (what the radar needs). Trust and Duty Support NPCs hold the slots the game's party list leaves empty
+/// (<see cref="SeatNpcMembers"/>); the alliance is not tracked.
 /// </summary>
 public sealed class PartyState
 {
@@ -78,9 +79,9 @@ public sealed class PartyState
     /// Party members paired with their slot index (skipping empty/unresolved/dead slots).
     /// <para><paramref name="excludeAlliance"/> and <paramref name="excludeNPCs"/> exist so BossmodReborn
     /// modules port unchanged, but are no-ops for the same reason they are on <see cref="WithoutSlot"/>:
-    /// Minerva's PartyState holds only the player's own 8 slots, so neither alliance members nor NPCs are in
-    /// it to exclude. BMR's equivalents index past slot 8 into alliance and NPC ranges Minerva does not
-    /// track.</para>
+    /// Minerva's PartyState holds only the player's own 8 slots, so neither alliance members nor allied NPCs
+    /// are in it to exclude. BMR's equivalents index past slot 8 into alliance and NPC ranges Minerva does not
+    /// track. Trust and Duty Support members sit in the 8 slots, as in BMR, whose flag keeps them too.</para>
     /// </summary>
     public (int slot, Actor actor)[] WithSlot(bool includeDead = false, bool excludeAlliance = false, bool excludeNPCs = false)
     {
@@ -94,7 +95,8 @@ public sealed class PartyState
     /// <summary>
     /// Party member actors (skipping empty/unresolved/dead slots). <paramref name="excludeAlliance"/> and
     /// <paramref name="excludeNPCs"/> exist so BMR modules port unchanged, but are no-ops: Minerva's
-    /// PartyState holds only the player's own 8 slots, so neither alliance members nor NPCs are in it.
+    /// PartyState holds only the player's own 8 slots, so neither alliance members nor allied NPCs are in it.
+    /// Trust and Duty Support members are (<see cref="SeatNpcMembers"/>), and stay in, as in BMR.
     /// </summary>
     public Actor[] WithoutSlot(bool includeDead = false, bool excludeAlliance = false, bool excludeNPCs = false)
     {
@@ -103,6 +105,36 @@ public sealed class PartyState
             if (this.Actor(i) is { } a && (includeDead || !a.IsDeadOrDestroyed))
                 result.Add(a);
         return [.. result];
+    }
+
+    /// <summary>
+    /// Which NPC party members -- Trust and Duty Support, <see cref="ActorType.Buddy"/> -- hold slots 1..7 while the
+    /// game's party list is empty, as BossmodReborn seats them. Returns the instance id for each of those slots
+    /// (0 for empty): a member already seated keeps its slot, one that has gone frees it, and a new one takes the
+    /// first free slot.
+    /// <para>Without them the party was the player alone, so every party-aware mechanic ignored the NPCs: the
+    /// Burn, 2026-09-28, a paladin baiting the Mist Dragon's Frost Breath was never told to keep the cone off
+    /// Yugiri, Y'shtola and Alisaie.</para>
+    /// </summary>
+    public static ulong[] SeatNpcMembers(ReadOnlySpan<Member> current, IReadOnlyList<ulong> npcs)
+    {
+        var seats = new ulong[MaxSlots - 1];
+        for (var i = 1; i < MaxSlots && i < current.Length; ++i)
+        {
+            var id = current[i].InstanceID;
+            if (id != 0 && current[i].ContentID == 0 && npcs.Contains(id))
+                seats[i - 1] = id;
+        }
+        foreach (var id in npcs)
+        {
+            if (id == 0 || Array.IndexOf(seats, id) >= 0)
+                continue;
+            var free = Array.IndexOf(seats, 0ul);
+            if (free < 0)
+                break;
+            seats[free] = id;
+        }
+        return seats;
     }
 
     /// <summary>Slot index of the member with the given instance id, or -1.</summary>

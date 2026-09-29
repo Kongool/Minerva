@@ -751,12 +751,13 @@ public sealed class AIManager
         return band.FollowGroup(RangeBand.GroupDistance(this.GroupPositions(pc), target.Position, target.HitboxRadius));
     }
 
-    /// <summary>How many other players are in the party, living or dead. The alliance is not counted.</summary>
+    /// <summary>How many other players are in the party, living or dead. The alliance is not counted, nor are the
+    /// Trust and Duty Support NPCs seated in the party (<see cref="NpcPartyMembers"/> counts those).</summary>
     private int OtherPlayers(Actor pc)
     {
         var n = 0;
         foreach (var member in this.world.Party.WithoutSlot(includeDead: true, excludeAlliance: true, excludeNPCs: true))
-            if (member.InstanceID != pc.InstanceID)
+            if (member.InstanceID != pc.InstanceID && member.Type == ActorType.Player)
                 ++n;
         return n;
     }
@@ -779,7 +780,7 @@ public sealed class AIManager
     {
         var positions = new List<WPos>();
         foreach (var member in this.world.Party.WithoutSlot(includeDead: false, excludeAlliance: true, excludeNPCs: true))
-            if (member.InstanceID != pc.InstanceID)
+            if (member.InstanceID != pc.InstanceID && member.Type == ActorType.Player)
                 positions.Add(member.Position);
         return positions;
     }

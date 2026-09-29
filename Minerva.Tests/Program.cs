@@ -2440,6 +2440,72 @@ t.Section("A module's own AI hints are applied");
     broken.Dispose();
 }
 
+// Trust and Duty Support NPCs are the party when the game's party list is empty, as BossmodReborn seats them (the Burn,
+// 2026-09-28: nothing party-aware saw Yugiri, Y'shtola or Alisaie).
+t.Section("NPC party members are seated");
+{
+    var empty = new PartyState.Member[PartyState.MaxSlots];
+    empty[0] = new PartyState.Member(0, 0x10);
+    var seats = PartyState.SeatNpcMembers(empty, [0xA1ul, 0xA2ul, 0xA3ul]);
+    t.True("new NPC members take the free slots in order", seats[0] == 0xA1ul && seats[1] == 0xA2ul && seats[2] == 0xA3ul && seats[3] == 0ul);
+
+    var seated = (PartyState.Member[])empty.Clone();
+    seated[1] = new PartyState.Member(0, 0xA1);
+    seated[2] = new PartyState.Member(0, 0xA2);
+    seated[3] = new PartyState.Member(0, 0xA3);
+    var after = PartyState.SeatNpcMembers(seated, [0xA3ul, 0xA1ul]);
+    t.True("a seated member keeps its slot and one that has gone frees it", after[0] == 0xA1ul && after[1] == 0ul && after[2] == 0xA3ul);
+    var refill = PartyState.SeatNpcMembers(seated, [0xA1ul, 0xA3ul, 0xA4ul]);
+    t.True("a newcomer takes the freed slot", refill[0] == 0xA1ul && refill[1] == 0xA4ul && refill[2] == 0xA3ul);
+
+    var many = new List<ulong>();
+    for (var i = 0; i < 10; ++i)
+        many.Add(0xB0ul + (ulong)i);
+    t.Eq("no more than the seven free slots are filled", PartyState.SeatNpcMembers(empty, many).Count(id => id != 0), PartyState.MaxSlots - 1);
+}
+
+// The baiter of a cone or line keeps it off the rest of the party (the Mist Dragon's Frost Breath, the Burn, 2026-09-28).
+t.Section("A cone bait is kept off the party");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000C1, 0xC1u, 0, "Dragon", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 3f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x100000C2, 0u, 1, "Tank", 0, ActorType.Player, new Vector4(0, 0, 10, 0), 0.5f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x4000000C3, 0xC3u, 2, "Yugiri", 0, ActorType.Buddy, new Vector4(5, 0, 9, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpCreate(0x4000000C4, 0xC4u, 3, "Fallen", 0, ActorType.Buddy, new Vector4(0, 0, -10, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, 0x100000C2)));
+    ws.Execute(new PartyState.OpModify(1, new PartyState.Member(0, 0x4000000C3)));
+    ws.Execute(new PartyState.OpModify(2, new PartyState.Member(0, 0x4000000C4)));
+    var dragon = ws.Actors.Find(0x4000000C1)!;
+    var tank = ws.Actors.Find(0x100000C2)!;
+    ws.Execute(new ActorState.OpDead(0x4000000C4, true));
+    var mod = new TestModule(ws, dragon) { Arena = new NullArena() };
+    var breath = new Minerva.Components.GenericBaitAway(mod);
+    breath.CurrentBaits.Add(new(dragon, tank, new AOEShapeCone(21f, 60f.Degrees()), ws.FutureTime(4d)));
+    var h = new AIHints();
+    breath.AddAIHints(0, tank, PartyRolesConfig.Assignment.Unassigned, h);
+    bool Forbidden(float x, float z) => h.ForbiddenZones.Any(f => f.ShapeDistance.Contains(new WPos(x, z)));
+    t.True("where the cone would take the NPC in, the baiter may not stand", Forbidden(0, 10));
+    t.True("well round the boss from the NPC it may", !Forbidden(-10, 3));
+    t.True("a dead member's direction is left open", !Forbidden(0, -10));
+    t.Eq("one direction is forbidden per living member", h.ForbiddenZones.Count, 1);
+
+    var line = new Minerva.Components.GenericBaitAway(mod);
+    line.CurrentBaits.Add(new(dragon, tank, new AOEShapeRect(40f, 3f), ws.FutureTime(6d)));
+    var hl = new AIHints();
+    line.AddAIHints(0, tank, PartyRolesConfig.Assignment.Unassigned, hl);
+    t.True("a line bait keeps the NPC out of its width", hl.ForbiddenZones.Any(f => f.ShapeDistance.Contains(new WPos(10f, 18f))));
+    t.True("but not more than its width", !hl.ForbiddenZones.Any(f => f.ShapeDistance.Contains(new WPos(0f, 10f))));
+
+    var other = new Minerva.Components.GenericBaitAway(mod);
+    var yugiri = ws.Actors.Find(0x4000000C3)!;
+    other.CurrentBaits.Add(new(dragon, yugiri, new AOEShapeCone(21f, 60f.Degrees()), ws.FutureTime(4d)));
+    var ho = new AIHints();
+    other.AddAIHints(0, tank, PartyRolesConfig.Assignment.Unassigned, ho);
+    t.True("someone else's cone is still avoided as before", ho.ForbiddenZones.Count == 1 && ho.ForbiddenZones[0].ShapeDistance.Contains(new WPos(5f, 9f)));
+    mod.Dispose();
+}
+
 t.Section("Gaze facing hints");
 {
     // A gaze is the one mechanic where position does not matter and facing is everything, so the arc has to

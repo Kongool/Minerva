@@ -7,7 +7,7 @@ namespace Minerva.Components;
 /// must carry it clear of the group. Draws the local player's own bait as an outline and others' baits
 /// filled, warns when baiting into people or being clipped, and feeds the auto-dodge engine. Ported from
 /// BossmodReborn's GenericBaitAway (BSD-3; see THIRD-PARTY-NOTICES.txt), simplified for Minerva: no
-/// predicted-damage weighting and cone/rect self-baits use a coarser AI hint (no ShapeDistance).
+/// predicted-damage weighting.
 /// </summary>
 public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysDrawOtherBaits = true, bool centerAtTarget = false, bool tankbuster = false, bool onlyShowOutlines = false) : CastCounter(module, aid)
 {
@@ -133,20 +133,33 @@ public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysD
         }
     }
 
-    // for the player's own bait: avoid clipping party members. Position-anchored shapes (circle/donut/
-    // cross) can be forbidden at each other member's position; source-anchored shapes (cone/rect) are
-    // left to the "bait away" text hint (Minerva has no ShapeDistance cones for AI yet).
+    // for the player's own bait: avoid clipping party members, as BossmodReborn does. Position-anchored shapes
+    // (circle/donut/cross) are forbidden at each other member's position. A cone or line from the source points
+    // wherever the baiter stands, so each member's direction from the source is forbidden, as Cleave does: the
+    // Mist Dragon's Frost Breath was carried into Yugiri (the Burn, 2026-09-28) with only a text hint to go on.
     private void AddTargetSpecificHints(Actor actor, in Bait bait, AIHints hints)
     {
         if (bait.Source == bait.Target)
             return;
-        if (bait.Shape is not (AOEShapeCircle or AOEShapeDonut or AOEShapeCross))
-            return;
         for (var i = 0; i < PartyState.MaxSlots; ++i)
         {
             var a = this.World.Party.Actor(i);
-            if (a != null && a != actor)
-                hints.AddForbiddenZone(bait.Shape, a.Position - bait.Offset, bait.Rotation, bait.Activation);
+            if (a == null || a == actor || a.IsDead)
+                continue;
+            switch (bait.Shape)
+            {
+                case AOEShapeCircle or AOEShapeDonut or AOEShapeCross:
+                    hints.AddForbiddenZone(bait.Shape, a.Position - bait.Offset, bait.Rotation, bait.Activation);
+                    break;
+                case AOEShapeCone cone when !this.CenterAtTarget:
+                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), cone.HalfAngle), bait.Activation);
+                    break;
+                case AOEShapeRect rect when !this.CenterAtTarget:
+                    var dist = (a.Position - bait.Source.Position).Length();
+                    if (dist > 0f)
+                        hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), Angle.Asin(Math.Min(1f, rect.HalfWidth / dist))), bait.Activation);
+                    break;
+            }
         }
     }
 

@@ -455,8 +455,15 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         if (count == 0)
         {
             this.SetPartySlot(0, 0, Service.ObjectTable[0]?.GameObjectId ?? 0);
+
+            // Trust and Duty Support: the game's party list is empty, but its NPC members are the party
+            var npcs = new List<ulong>();
+            foreach (var actor in this.ws.Actors)
+                if (actor.Type == ActorType.Buddy)
+                    npcs.Add(actor.InstanceID);
+            var seats = PartyState.SeatNpcMembers(this.ws.Party.Slots, npcs);
             for (var i = 1; i < PartyState.MaxSlots; ++i)
-                this.SetPartySlot(i, 0, 0);
+                this.SetPartySlot(i, 0, seats[i - 1]);
             return;
         }
         for (var i = 0; i < PartyState.MaxSlots; ++i)
