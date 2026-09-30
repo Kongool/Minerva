@@ -506,7 +506,9 @@ public sealed class ReplayValidator
                 else if (myCasts.Count > 0 && myCasts[^1].End == long.MaxValue)
                     myCasts[^1] = myCasts[^1] with { End = ticks };
             }
-            if (op is ActorState.OpCreate made && made.Type == ActorType.Player)
+            // Trust and Duty Support NPCs are people here: they share stacks and take raidwides, and without them every
+            // stack done with them read "you took it alone" (the Ghimlyt Dark, 2026-09-29: Magitek Ray hit all four)
+            if (op is ActorState.OpCreate made && made.Type is ActorType.Player or ActorType.Buddy)
                 playersSeen.Add(made.InstanceID);
             if (op is PartyState.OpModify joined && joined.Member.InstanceID != 0)
                 partySeen.Add(joined.Member.InstanceID);
