@@ -34,6 +34,7 @@ public enum AID : uint
     ViolentEarth = 13236, // 233C->location, 3.0s cast, range 6 circle
     WindChisel = 13518, // 233C->self, 2.0s cast, range 34+R 20-degree cone
     TranquilAnnihilation = 13233, // _Gen_DaidukulTheMirthful->24A3, 15.0s cast, single-target
+    CrushWeapon = 13234, // Hien->249F, 4.7s cast, single-target: breaks one enrage staff
 }
 
 public enum SID : uint
@@ -52,9 +53,30 @@ public class FlatlandFury(ModuleBase module) : Components.SimpleAOEs(module, (ui
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        // if all 9 adds are alive, instead of drawing forbidden zones (which would fill the whole arena), force AI to target nearest one to kill it
-        if (ActiveCasters.Length == 9)
-            hints.ForcedTarget = Module.Enemies((uint)OID.TheScaleOfTheFather).MinBy(actor.DistanceToHitbox);
+        // All nine circles cover the arena, so nothing is forbidden yet: kill the centre staff, and the middle is safe --
+        // the ring's circles stop 4y short of it. BossmodReborn forced the nearest staff; the user, 2026-09-29: "the
+        // early staffs need to target the center one to make a safe spot". Daedalus reads the priority list, not the
+        // forced target, so the centre staff also goes above Magnai (1).
+        var casters = ActiveCasters;
+        if (casters.Length == 9)
+        {
+            var centre = 0ul;
+            var best = float.MaxValue;
+            foreach (ref readonly var c in casters)
+            {
+                var d = (c.Origin - Module.Center).Length();
+                if (d < best)
+                {
+                    best = d;
+                    centre = c.ActorID;
+                }
+            }
+            if (World.Actors.Find(centre) is { } staff)
+            {
+                hints.ForcedTarget = staff;
+                hints.SetPriority(staff, 2);
+            }
+        }
         else
             base.AddAIHints(slot, actor, assignment, hints);
     }
@@ -62,10 +84,31 @@ public class FlatlandFury(ModuleBase module) : Components.SimpleAOEs(module, (ui
 
 public class FlatlandFuryEnrage(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.FlatlandFuryEnrage, 10f)
 {
+    // The staff Hien breaks with Crush Weapon is the way out: its circle never lands. His cast names it about 13s before
+    // the fury resolves; the staff only dies 3.7s before, too late to walk there from across the arena (2026-09-29:
+    // "hien makes a safe spot near the end ... need to make sure that one move there").
+    private ulong broken;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast)
+    {
+        base.OnCastStarted(caster, cast);
+        if (cast.Action.ID == (uint)AID.CrushWeapon)
+            broken = cast.TargetID;
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (ActiveCasters.Length < 9)
-            base.AddAIHints(slot, actor, assignment, hints);
+        var casters = ActiveCasters;
+        var named = false;
+        foreach (ref readonly var c in casters)
+            named |= c.ActorID == broken;
+
+        // all nine still up and none named: they cover the arena, and there is nowhere to aim for yet
+        if (!named && casters.Length >= 9)
+            return;
+        foreach (ref readonly var c in casters)
+            if (c.ActorID != broken)
+                hints.AddForbiddenZone(c);
     }
 }
 
@@ -73,6 +116,48 @@ public class ViolentEarth(ModuleBase module) : Components.SimpleAOEs(module, (ui
 public class WindChisel(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.WindChisel, new AOEShapeCone(34f, 10f.Degrees()));
 
 public class Scales(ModuleBase module) : Components.Adds(module, (uint)OID.TheScaleOfTheFather);
+
+// Y'shtola, whom you play against Magnai, ported from BossmodReborn's AutoYshtola. Hien falling fails the duty, so he
+// is healed first, and to a higher floor while Daidukul casts Tranquil Annihilation on him (2026-09-29, Khun Shavar:
+// he fell to 15% under Tomahawk and then that).
+class AutoYshtola(ModuleBase module, WorldState ws) : QuestBattle.UnmanagedRotation(ws, 25f)
+{
+    private const uint AeroIIStatus = 144; // her Aero II applies White Mage's DoT
+
+    protected override void Exec(Actor? primaryTarget)
+    {
+        var magnai = module.GetActor((uint)OID.Magnai);
+        var hien = module.GetActor((uint)OID.Hien);
+        var daidukul = module.GetActor((uint)OID.Daidukul);
+
+        // MaxHP 0 is HP not yet known: the recording had none for Hien until 30s after he appeared, and read as 0 it
+        // asked for Cure II on a full-health Hien all that time
+        if (hien is { IsDead: false } && hien.HPMP.MaxHP > 0)
+        {
+            var hienMinHP = daidukul?.CastInfo?.Action.ID == (uint)AID.TranquilAnnihilation ? 28000 : 10000;
+            if (hien.PendingHPRaw < hienMinHP)
+            {
+                if (Player.DistanceToHitbox(hien) > 25f)
+                    Hints.ForcedMovement = Player.DirectionTo(hien);
+                UseAction(Roleplay.AID.CureIISeventhDawn, hien);
+            }
+
+            // Hien's Crush Weapon breaks the staff that makes the safe spot; stay by him
+            if (hien.CastInfo?.Action.ID == (uint)AID.CrushWeapon)
+                Hints.GoalZones.Add(AIHints.GoalSingleTarget(hien.Position, 2f, 5f));
+        }
+
+        if (magnai is { IsDead: false } && StatusDetails(magnai, AeroIIStatus, Player.InstanceID).Left < 4.6f)
+            UseAction(Roleplay.AID.AeroIISeventhDawn, magnai);
+
+        UseAction(Roleplay.AID.StoneIVSeventhDawn, primaryTarget);
+
+        if (Player.HPMP.CurMP < 5000)
+            UseAction(Roleplay.AID.Aetherwell, Player);
+    }
+}
+
+class YshtolaAI(ModuleBase module) : QuestBattle.RotationModule<AutoYshtola>(module);
 class P1Hints(ModuleBase module) : ModuleComponent(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
@@ -124,9 +209,13 @@ class SaduHeavensflameStates : StateMachineBuilder
             .ActivateOnEnter<FlatlandFuryEnrage>()
             .ActivateOnEnter<ViolentEarth>()
             .ActivateOnEnter<WindChisel>()
+            // last: it picks its target from the priorities the components above have set (the centre staff)
+            .ActivateOnEnter<YshtolaAI>()
             .OnEnter(() =>
             {
-                module.Arena.Center = new(-186.5f, 550.5f);
+                // the module's centre, not the radar's: the ported Arena.Center moved only the drawing, and the
+                // dodge kept the first arena, 48y away (Magnai, 2026-09-29: "it tries to run you out of the arena")
+                module.Center = new(-186.5f, 550.5f);
             })
             .Raw.Update = () => module.Raid.Player()?.IsDeadOrDestroyed ?? true;
     }

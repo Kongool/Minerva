@@ -241,6 +241,18 @@ public abstract class ModuleBase : IDisposable
     // BMR-compatible helpers used by ported modules' phase-completion predicates
     public Actor? GetActor(ulong instanceID) => this.World.Actors.Find(instanceID);
 
+    /// <summary>
+    /// The first actor of <paramref name="oid"/>, or null: BossmodReborn's <c>GetActor(uint)</c>, which ported modules
+    /// call 132 times as <c>GetActor((uint)OID.X)</c>. Until 2026-09-29 only the instance-id overload above existed,
+    /// so every one of those calls widened the OID to an instance id and found nothing (A13 Ark Angels' three bosses,
+    /// The Will of the Moon's Daidukul). An exact <c>uint</c> match wins overload resolution, so this catches them all.
+    /// </summary>
+    public Actor? GetActor(uint oid)
+    {
+        var actors = this.Enemies(oid);
+        return actors.Count != 0 ? actors[0] : null;
+    }
+
     /// <summary>The first targetable, living candidate, or null.</summary>
     public static Actor? GetActiveActor(List<Actor> candidates)
     {

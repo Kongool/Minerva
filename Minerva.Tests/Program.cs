@@ -2506,6 +2506,56 @@ t.Section("A cone bait is kept off the party");
     mod.Dispose();
 }
 
+// BossmodReborn's GetActor(uint) finds an actor by OID; ported modules call it 132 times. Minerva only had the
+// instance-id overload, so each call found nothing (2026-09-29).
+t.Section("GetActor finds an actor by OID");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000D1, 0xD1u, 0, "Boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x4000000D2, 0x24A2u, 1, "Daidukul", 0, ActorType.Enemy, new Vector4(5, 0, 0, 0), 0.5f, default, true, false, 0));
+    var mod = new TestModule(ws, ws.Actors.Find(0x4000000D1)!) { Arena = new NullArena() };
+    t.True("an OID finds the actor of that OID", mod.GetActor(0x24A2u)?.InstanceID == 0x4000000D2);
+    t.True("an absent OID finds nothing", mod.GetActor(0x9999u) == null);
+    t.True("an instance id still finds by instance id", mod.GetActor(0x4000000D2ul)?.OID == 0x24A2u);
+    mod.Dispose();
+}
+
+// A quest battle's kit rotation decides what the character you play presses; Minerva publishes the role-play actions
+// and the rotation plugin presses them (the user, 2026-09-29: "full kits for all the solo fights").
+t.Section("Role-play kit rotations");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000E1, 0xE1u, 0, "Magnai", 0, ActorType.Enemy, new Vector4(0, 0, 10, 0), 1f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x4000000E2, 0xE2u, 1, "Staff", 0, ActorType.Enemy, new Vector4(0, 0, 20, 0), 1f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x4000000E3, 0xE3u, 2, "Near", 0, ActorType.Enemy, new Vector4(0, 0, 3, 0), 1f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x100000E4, 0u, 3, "Yshtola", 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, default, true, false, 0));
+    foreach (var id in new ulong[] { 0x4000000E1, 0x4000000E2, 0x4000000E3 })
+        ws.Execute(new ActorState.OpCombat(id, true));
+    var magnai = ws.Actors.Find(0x4000000E1)!;
+    var pc = ws.Actors.Find(0x100000E4)!;
+    var mod = new KitModule(ws, magnai) { Arena = new NullArena() };
+    mod.BuildStates();
+    var h = new AIHints();
+    mod.BuildAIHints(0, pc, h);
+    var asked = Minerva.QuestBattle.RoleplayRequests.From(h.ActionsToExecute);
+    t.True("the rotation aims at the highest priority, not the nearest", asked.Any(a => a.ActionId == (uint)Roleplay.AID.StoneIVSeventhDawn && a.TargetId == 0x4000000E2));
+    t.True("and makes it the forced target", h.ForcedTarget?.InstanceID == 0x4000000E2);
+    t.True("a heal it asked for first comes first", asked.Length > 0 && asked[0].ActionId == (uint)Roleplay.AID.CureIISeventhDawn);
+    t.True("the module-and-world constructor is used", KitRotation.Built == 1);
+    t.True("Arm's Length on the same queue is not a role-play action, so it is not published",
+        h.ActionsToExecute.Entries.Any(e => e.action.ID == ActionDefinitions.Armslength.ID) && asked.All(a => a.ActionId != ActionDefinitions.Armslength.ID));
+    var q = new ActionQueue();
+    q.Push(ActionID.MakeSpell(Roleplay.AID.StoneIVSeventhDawn), pc, 3000f);
+    q.Push(ActionID.MakeSpell(Roleplay.AID.Aetherwell), pc, 3500f);
+    q.Push(ActionID.MakeSpell(Roleplay.AID.AeroIISeventhDawn), pc, 3000f);
+    var ordered = Minerva.QuestBattle.RoleplayRequests.From(q);
+    t.True("best priority first, ties in the order asked", ordered.Select(a => a.ActionId).SequenceEqual(new[] { (uint)Roleplay.AID.Aetherwell, (uint)Roleplay.AID.StoneIVSeventhDawn, (uint)Roleplay.AID.AeroIISeventhDawn }));
+    t.True("no facing is NaN, not north", float.IsNaN(ordered[0].FacingRad));
+    mod.Dispose();
+}
+
 t.Section("Gaze facing hints");
 {
     // A gaze is the one mechanic where position does not matter and facing is everything, so the arc has to
@@ -5258,6 +5308,38 @@ sealed class TimelineModuleStates : StateMachineBuilder
     }
 }
 
+
+// a kit module: the staff outranks Magnai, and the rotation heals before it attacks
+sealed class KitModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(30f));
+
+sealed class KitModuleStates : StateMachineBuilder
+{
+    public KitModuleStates(ModuleBase module) : base(module)
+        => this.TrivialPhase().ActivateOnEnter<KitPriorities>().ActivateOnEnter<KitAI>();
+}
+
+sealed class KitPriorities(ModuleBase module) : ModuleComponent(module)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var e in hints.PotentialTargets)
+            e.Priority = e.Actor.OID == 0xE2u ? 2 : e.Actor.OID == 0xE1u ? 1 : 0;
+        hints.ActionsToExecute.Push(ActionDefinitions.Armslength, actor, 3000f);
+    }
+}
+
+sealed class KitRotation : Minerva.QuestBattle.UnmanagedRotation
+{
+    public static int Built;
+    public KitRotation(ModuleBase module, WorldState ws) : base(ws, 25f) => ++Built;
+    protected override void Exec(Actor? primaryTarget)
+    {
+        UseAction(Roleplay.AID.CureIISeventhDawn, Player);
+        UseAction(Roleplay.AID.StoneIVSeventhDawn, primaryTarget);
+    }
+}
+
+sealed class KitAI(ModuleBase module) : Minerva.QuestBattle.RotationModule<KitRotation>(module);
 
 sealed class TestModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(100f, 100f), new ArenaBoundsSquare(20f));

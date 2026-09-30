@@ -123,6 +123,10 @@ def port(text):
     # 'Holder.Arena.Center' has to keep it. Without the lookbehind this rule eats that too, and the
     # result still compiles wherever the holder exposes a Center of its own -- a wrong arena centre
     # with no error to find it by.
+    # The lookbehind also skips 'module.Arena.Center', which BMR writes inside state-machine lambdas
+    # (The Will of the Moon's second arena): the module's own name goes first, so it is retargeted here.
+    text = re.sub(r'\b([Mm]odule)\.(?:Mini)?Arena\.(Bounds|Center|InBounds|IntersectRayBounds|ClampToBounds)\b',
+                  r'\1.\2', text)
     text = re.sub(r'(?<![.\w])Arena\.(Bounds|Center)\b', r'Module.\1', text)
     # Same reasoning for the three bounds QUERIES, which compute purely from Bounds+Center. The other
     # Arena.*Bounds members (ActorsInBounds, ActorInsideBounds) genuinely draw, so they stay on the

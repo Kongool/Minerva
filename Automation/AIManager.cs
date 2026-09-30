@@ -512,6 +512,14 @@ public sealed class AIManager
     public bool CleansePending(ulong instanceId)
         => this.world.Actors.Find(instanceId)?.PendingDispels.Count > 0;
 
+    /// <summary>
+    /// The actions the character you are playing in a quest battle should use now, best first -- Y'shtola's Cure II on
+    /// Hien before her Stone IV. Decided by the module's kit rotation (<see cref="QuestBattle.UnmanagedRotation"/>);
+    /// the rotation plugin presses them. Empty outside a role-play fight.
+    /// </summary>
+    public (uint ActionId, ulong TargetId, float Priority, Vector3 TargetPos, float FacingRad)[] RoleplayActions
+        => this.HasSolution ? QuestBattle.RoleplayRequests.From(this.hints.ActionsToExecute) : [];
+
     /// <summary>Instance ID of the one thing the fight wants attacked, or 0. Outranks priorities.</summary>
     public ulong ForcedTargetId => this.HasSolution && this.hints.ForcedTarget is { IsDeadOrDestroyed: false } f ? f.InstanceID : 0uL;
 
