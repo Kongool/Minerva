@@ -42,6 +42,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<bool> mustNotActGate;
     private readonly ICallGateProvider<bool> mustNotMoveGate;
     private readonly ICallGateProvider<string> activeModule;
+    private readonly ICallGateProvider<bool> bossEngaged;
     private readonly ICallGateProvider<bool> mustNotTurnGate;
     private readonly ICallGateProvider<bool> isSteering;
     private readonly ICallGateProvider<float> safeFacingGate;
@@ -62,6 +63,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<ulong[]> deprioritizedTargets;
     private readonly ICallGateProvider<ulong> forcedTarget;
     private readonly ICallGateProvider<ulong> interactTarget;
+    private readonly ICallGateProvider<(uint, ulong, float, System.Numerics.Vector3, float)[]> roleplayActions;
     private readonly ICallGateProvider<ulong> pullTarget;
     private readonly ICallGateProvider<ulong[]> targetsToInterrupt;
     private readonly ICallGateProvider<ulong[]> targetsToStun;
@@ -100,6 +102,13 @@ internal sealed class MinervaIpc : IDisposable
 
         this.activeModule = pi.GetIpcProvider<string>("Minerva.ActiveModule");
         this.activeModule.RegisterFunc(() => modules.ActiveModule?.GetType().Name ?? string.Empty);
+
+        // A module is up from the moment its boss exists, well before anyone touches it. A duty runner
+        // needs the other fact -- whether the boss is fighting -- to tell the encounter from a trash pack
+        // pulled in earshot of it: The Ghimlyt Dark's second boss had its module loaded through the pack
+        // before it, and "module up and in combat" read as the boss fight.
+        this.bossEngaged = pi.GetIpcProvider<bool>("Minerva.BossEngaged");
+        this.bossEngaged.RegisterFunc(() => modules.ActiveModule?.PrimaryActor.InCombat ?? false);
 
         this.mustNotTurnGate = pi.GetIpcProvider<bool>("Minerva.MustNotTurn");
         this.mustNotTurnGate.RegisterFunc(() => this.ai.FacingConstrained);
@@ -191,6 +200,12 @@ internal sealed class MinervaIpc : IDisposable
         // walks the character there; the click is the rotation plugin's.
         this.interactTarget = pi.GetIpcProvider<ulong>("Minerva.Hints.InteractTarget");
         this.interactTarget.RegisterFunc(() => this.ai.InteractTargetId);
+
+        // The role-play kit's choices, best first: (action id, target instance id, priority, ground position, facing in
+        // radians or NaN). Spell actions from the Roleplay table only; the rotation plugin presses them while you play
+        // someone else in a quest battle (2026-09-29).
+        this.roleplayActions = pi.GetIpcProvider<(uint, ulong, float, System.Numerics.Vector3, float)[]>("Minerva.Hints.RoleplayActions");
+        this.roleplayActions.RegisterFunc(() => this.ai.RoleplayActions);
 
         // The boss nobody else will pull: a boss fight not started yet, and no other player in the party -- only Trust
         // or Duty Support NPCs, who wait for you. The rotation plugin targets it and opens from where it stands.
@@ -309,6 +324,7 @@ internal sealed class MinervaIpc : IDisposable
         this.mustNotActGate.UnregisterFunc();
         this.mustNotMoveGate.UnregisterFunc();
         this.activeModule.UnregisterFunc();
+        this.bossEngaged.UnregisterFunc();
         this.mustNotTurnGate.UnregisterFunc();
         this.isSteering.UnregisterFunc();
         this.safeFacingGate.UnregisterFunc();
@@ -329,6 +345,7 @@ internal sealed class MinervaIpc : IDisposable
         this.deprioritizedTargets.UnregisterFunc();
         this.forcedTarget.UnregisterFunc();
         this.interactTarget.UnregisterFunc();
+        this.roleplayActions.UnregisterFunc();
         this.pullTarget.UnregisterFunc();
         this.targetsToInterrupt.UnregisterFunc();
         this.targetsToStun.UnregisterFunc();
