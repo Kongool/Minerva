@@ -410,7 +410,8 @@ public static class ArenaPathfinder
             if (!TryNearestSafe(hints, soon, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
                 continue;
             var staged = Settle(hints, soon, player, spot, cellSize, safetyMargin);
-            if (staged.NeedToMove ? hints.InImminentDanger(player, soon, safetyMargin) : !(leavingIsClear ??= LeavingIsClear()))
+            if (LeavesTimeToEscape(hints, staged.NeedToMove ? staged.Target : player, soon, deadline, safetyMargin, moveSpeed, clearanceLead)
+                && (staged.NeedToMove ? hints.InImminentDanger(player, soon, safetyMargin) : !(leavingIsClear ??= LeavingIsClear())))
                 return staged;
         }
 
@@ -429,9 +430,27 @@ public static class ArenaPathfinder
         // whole floor within the five-second horizon, and the dodge stood in the first wave for three
         // seconds reporting "no safe spot" while a cell four yalms away was clear of it. Every frame
         // re-solves, so the second wave is dodged from wherever the first was dodged to, as a person does.
-        foreach (var earlier in ActivationsBefore(hints, deadline, now))
-            if (TryNearestSafe(hints, earlier, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
-                return Settle(hints, earlier, player, spot, cellSize, safetyMargin);
+        //
+        // The same test as the stages above: an answer that holds the character inside something firing right after
+        // its stage protects from nothing, and without the safety margin a cell may exist that clears both. The
+        // Ghimlyt Dark, 2026-09-29: with the margin the latest stage was a hold 0.05s before Angry Salamander, 2.5
+        // yalms inside it; without, three yalms east cleared the line and the tanks. The first answer found is kept
+        // for when nothing better turns up, so this never ends worse than it used to.
+        SafeSpot? firstStage = null;
+        foreach (var margin in safetyMargin > 0f ? [safetyMargin, 0f] : new[] { safetyMargin })
+        {
+            foreach (var earlier in ActivationsBefore(hints, deadline, now))
+            {
+                if (!TryNearestSafe(hints, earlier, solveNow, now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out spot))
+                    continue;
+                var settled = Settle(hints, earlier, player, spot, cellSize, margin);
+                firstStage ??= settled;
+                if (LeavesTimeToEscape(hints, settled.NeedToMove ? settled.Target : player, earlier, deadline, margin, moveSpeed, clearanceLead))
+                    return settled;
+            }
+        }
+        if (firstStage is { } stage)
+            return stage;
 
         // A positioning instruction is advice, danger is not. If nothing honours both, answer the danger
         // alone, as though the module had never asked: a spot to stand on is never worth a hit.
@@ -530,6 +549,33 @@ public static class ArenaPathfinder
         times.Sort();
         times.Reverse();
         return times;
+    }
+
+    /// <summary>
+    /// A stage -- ground clear of everything that fires by <paramref name="soon"/> -- is only a plan if, once that wave
+    /// has fired, the character can still walk out of whatever else it stands in at <paramref name="at"/> (where the stage
+    /// puts it: the spot it walks to, or where it holds) before that fires. Stages exist for waves: clear of the first,
+    /// inside the second, deal with the first and then leave. With nothing but a moment between them there is no "then".
+    /// <para>The Ghimlyt Dark, 2026-09-29: clear of two Ceruleum Tank bursts due in 2.05s, 2.5 yalms inside Angry
+    /// Salamander due in 2.10s. The stage at 2.05s ignored the line, found the spot clear, and held there for two
+    /// seconds (earlier, it walked one yalm along the line); it was hit, and the late walk out ran into the next pair
+    /// of tanks.</para>
+    /// </summary>
+    private static bool LeavesTimeToEscape(AIHints hints, WPos at, DateTime soon, DateTime deadline, float margin, float moveSpeed, float lead)
+    {
+        foreach (var z in hints.ForbiddenZones)
+        {
+            if (z.Activation <= soon || z.Activation > deadline)
+                continue;
+            var depth = margin - z.ShapeDistance.Distance(at);
+            if (depth < 0f)
+                continue; // not standing in it
+            var walk = depth / MathF.Max(moveSpeed, 0.01f);
+            if ((z.Activation - soon).TotalSeconds < walk + lead)
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>

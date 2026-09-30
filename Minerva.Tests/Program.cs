@@ -2556,6 +2556,27 @@ t.Section("Role-play kit rotations");
     mod.Dispose();
 }
 
+// A stage is only a plan if the character can get out of what fires right after it. The Ghimlyt Dark, 2026-09-29: clear
+// of two Ceruleum Tank bursts due in 2.05s, 2.5 yalms inside Angry Salamander due in 2.10s; the solver held there.
+t.Section("A stage does not hold you inside what fires right after it");
+{
+    var now = new DateTime(2026, 9, 29, 21, 42, 30, DateTimeKind.Utc);
+    var pov = new WPos(371.5f, -247.2f);
+    var hints = new AIHints { Center = new WPos(371f, -265f), Bounds = new ArenaBoundsCircle(19.5f), PlayerPosition = pov };
+    var line = new WPos(371f, -242f);
+    hints.AddForbiddenZone(new AOEShapeRect(45.6f, 3f), line, Angle.FromDirection(new WDir(0f, -1f)), now.AddSeconds(2.10));
+    var tankW = new WPos(362.5f, -256.6f);
+    var tankE = new WPos(379.5f, -256.6f);
+    hints.AddForbiddenZone(new AOEShapeCircle(11f), tankW, default, now.AddSeconds(2.05));
+    hints.AddForbiddenZone(new AOEShapeCircle(11f), tankE, default, now.AddSeconds(2.05));
+    hints.AddForbiddenZone(new AOEShapeCircle(11f), new WPos(371f, -253f), default, now.AddSeconds(4.55));
+    var spot = ArenaPathfinder.Solve(hints, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True("it moves", spot.NeedToMove && spot.Found);
+    t.True("out of the line", MathF.Abs(spot.Target.X - line.X) > 3f || spot.Target.Z > line.Z);
+    t.True("without stepping into the tanks", (spot.Target - tankW).Length() > 11f && (spot.Target - tankE).Length() > 11f);
+    t.True("and it is a step, not a run across the arena", (spot.Target - pov).Length() < 8f);
+}
+
 t.Section("Gaze facing hints");
 {
     // A gaze is the one mechanic where position does not matter and facing is everything, so the arc has to
