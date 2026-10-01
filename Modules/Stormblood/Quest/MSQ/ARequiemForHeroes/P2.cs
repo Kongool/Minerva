@@ -82,6 +82,31 @@ class DarkAether(ModuleBase module) : Components.Voidzone(module, 1.5f, GetVoidz
     }
 }
 
+// Dark Aether orbs come out of the middle in pairs every 3.2s and drift outward at about a yalm a second; one that
+// comes within about a yalm of you bursts (Burst, radius 6 on the sheet, no cast bar). DarkAether above draws each orb
+// once it exists, which cannot cover one spawning on top of you: newtoon2 stood in the middle and took four Bursts in
+// 13s (2026-09-30, The Storm recording, 451-465s; every orb that burst was 0.9-1.1y away when it did, and none that
+// stayed 1.3y or more did). So the spawn point is kept clear until the next pair is due, and a little after.
+class DarkAetherSpawn(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private const double Period = 3.2d;
+    private static readonly AOEShapeCircle circle = new(2.5f); // contact ~1.1y, spawns scatter ~0.5y, erring wide
+    private WPos spawn;
+    private DateTime nextSpawn;
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+        => nextSpawn != default && World.CurrentTime < nextSpawn.AddSeconds(1d) ? new[] { new AOEInstance(circle, spawn, default, nextSpawn) } : [];
+
+    public override void OnActorCreated(Actor actor)
+    {
+        if (actor.OID == (uint)OID.DarkAether)
+        {
+            spawn = actor.Position;
+            nextSpawn = World.FutureTime(Period);
+        }
+    }
+}
+
 class Adds(ModuleBase module) : Components.AddsMulti(module, [(uint)OID.TheStorm, (uint)OID.TheSwell, (uint)OID.AmeNoHabakiri]);
 
 // Unmoving Troika: an instant frontal cone, then two more from a helper along the same facing, 1.4s and 1.8s after. The
@@ -113,6 +138,7 @@ public class ZenosP2States : StateMachineBuilder
             .ActivateOnEnter<ArtOfTheStorm>()
             .ActivateOnEnter<EntropicFlame>()
             .ActivateOnEnter<DarkAether>()
+            .ActivateOnEnter<DarkAetherSpawn>()
             .ActivateOnEnter<StormUnbound>()
             .ActivateOnEnter<Adds>()
             .ActivateOnEnter<UnmovingTroikaSecond>()

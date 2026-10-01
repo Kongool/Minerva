@@ -43,4 +43,16 @@ public enum AID : uint
     UnmovingTroikaSecond = 14830, // Helper->self, 1.4s cast, range 9+R 120-degree cone
     UnmovingTroikaLast = 14831, // Helper->self, 1.8s cast, range 9+R 120-degree cone
     Concentrativity = 14834, // Boss->self, range larger than the arena: raidwide
+
+    // Phase 1, played as Hien: its own ids, none of which P2's components answer to. From the recording (2026-09-30,
+    // newtoon2) and the Action sheet; BossmodReborn's P1 has none of them.
+    ConcentrativityP1 = 14795, // BossP1->self, 3.7s cast, range 40 circle: raidwide
+    ArtOfTheSwellP1 = 14796, // BossP1->self, 5.7s cast, range 33 circle, knockback
+    UnmovingTroikaP1Second = 14792, // Helper->self, 1.4s cast, range 9+R 120-degree cone
+    UnmovingTroikaP1Last = 14793, // Helper->self, 1.8s cast, range 9+R 120-degree cone
+    VeinSplitterP1 = 14418, // BossP1->self, 5.7s cast, range 10 circle
+    ThunderousForce = 14587, // 268F (The Storm)->self, 4.7s cast, range 8 circle
+    ArtOfTheSwordP1A = 14857, // Helper->self at a Specter of Zenos, 37.7s cast, range 40 width 6 rect
+    ArtOfTheSwordP1B = 14800, // Helper->self at a Specter of Zenos, 38.2s cast, range 40 width 6 rect
+    DarknessP1 = 14805, // Helper->self, 2.7s cast, range 100 circle: raidwide
 }

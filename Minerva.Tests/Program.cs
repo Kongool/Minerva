@@ -2653,6 +2653,7 @@ t.Section("A recording started before the player is known still records the play
     foreach (var (_, op) in replay.Ops)
         rw.Execute(op);
     t.True("and replays where it went", rw.Actors.Find(me) is { } back && MathF.Abs(back.Position.X - 5f) < 0.01f && MathF.Abs(back.Position.Z - 6f) < 0.01f);
+    t.Eq("with no player in the header, the parser takes whoever sits in slot 0", replay.PlayerInstanceID, me);
 }
 
 t.Section("Gaze facing hints");

@@ -86,6 +86,11 @@ public sealed class ReplayParser
                 continue;
             if (op is WorldState.OpFrameStart fs && fs.Frame.Timestamp.Ticks != 0)
                 frameTicks = fs.Frame.Timestamp.Ticks; // frames define the clock; other ops inherit it
+            // A recording started before the player was known (a solo duty, from zone-in) has no player in its header;
+            // the game seats the player in slot 0, so the first to sit there is the player (A Requiem for Heroes,
+            // 2026-09-30: the validator found no player and reported no hits)
+            if (pov == 0 && op is PartyState.OpModify { Slot: 0 } seat && seat.Member.InstanceID != 0)
+                pov = seat.Member.InstanceID;
             ops.Add((frameTicks, op));
         }
         return new ReplayTimeline { QPF = qpf, GameVersion = gameVersion, Ops = ops, PlayerInstanceID = pov };
