@@ -58,6 +58,22 @@ public sealed class DodgePresets(Configuration config)
     /// <summary>Plugin that claimed the active slot, or null when the user is driving.</summary>
     public string? Owner { get; private set; }
 
+    /// <summary>
+    /// The user's own live settings from the moment a plugin claimed the slot, put back when it lets go.
+    /// <para>Release used to apply the built-in Default, which has auto-dodge and trash guessing off. Someone who runs
+    /// with both on and never saved a preset lost them every time a driver finished a fight: Odysseus, 2026-09-30, after
+    /// A Requiem for Heroes ("somethign keeps turning off ai and trash dodge").</para>
+    /// </summary>
+    private DodgePreset? beforeClaim;
+
+    // A plugin taking the slot from the user: remember what the user had. One plugin taking it from another keeps the
+    // user's settings from before the first.
+    private void NoteClaim()
+    {
+        if (this.Owner == null)
+            this.beforeClaim = this.Current();
+    }
+
     /// <summary>Name of the preset currently applied. Never empty — there is always one.</summary>
     public string Active => this.config.ActivePreset;
 
@@ -110,6 +126,20 @@ public sealed class DodgePresets(Configuration config)
         if (this.Find(name) is not { } preset)
             return false;
 
+        if (owner != null)
+            this.NoteClaim();
+        else
+            this.beforeClaim = null; // the user chose; there is nothing to go back to
+
+        this.Write(preset);
+        this.Owner = owner;
+        this.config.Save();
+        return true;
+    }
+
+    // Copy a preset's settings into the live configuration.
+    private void Write(DodgePreset preset)
+    {
         this.config.AutoDodgeEnabled = preset.AutoDodgeEnabled;
         this.config.AutoDodgeGuidance = preset.AutoDodgeGuidance;
         this.config.AutoDodgeSafetyMargin = Math.Clamp(preset.AutoDodgeSafetyMargin, 0f, 10f);
@@ -117,9 +147,6 @@ public sealed class DodgePresets(Configuration config)
         this.config.UseNavmesh = preset.UseNavmesh;
         this.config.PositionalArcMarginDeg = Math.Clamp(preset.PositionalArcMarginDeg, 0f, 44f);
         this.config.ActivePreset = preset.Name;
-        this.Owner = owner;
-        this.config.Save();
-        return true;
     }
 
     /// <summary>
@@ -161,8 +188,8 @@ public sealed class DodgePresets(Configuration config)
     /// <summary>
     /// Turn auto-dodge on for a plugin that is driving, and off again.
     /// <para>The slot's rule applies unchanged: turning it on claims the slot, a plugin cannot take it from
-    /// another that already holds it, and turning it off is <see cref="Release"/> — so the user's Default
-    /// comes back rather than whatever the driver happened to leave behind.</para>
+    /// another that already holds it, and turning it off is <see cref="Release"/> — so the user's own settings
+    /// come back rather than whatever the driver happened to leave behind.</para>
     /// <para>This exists because a duty runner wants one thing ("fight this, then stop") and has nothing to
     /// say about clearance or positional arcs. Making it name a preset would force every caller to create
     /// one in Minerva first, and a caller that writes <c>AutoDodgeEnabled</c> directly is indistinguishable
@@ -177,6 +204,7 @@ public sealed class DodgePresets(Configuration config)
         if (this.Owner is { } held && !string.Equals(held, owner, StringComparison.Ordinal))
             return false; // someone else is driving; two managers fighting over the slot is the failure mode
 
+        this.NoteClaim();
         this.Owner = owner;
         this.config.AutoDodgeEnabled = true;
         this.config.Save();
@@ -192,6 +220,13 @@ public sealed class DodgePresets(Configuration config)
         if (this.Owner != owner)
             return false;
         this.Owner = null;
-        return this.Apply(DefaultName);
+        if (this.beforeClaim is not { } mine)
+            return this.Apply(DefaultName);
+
+        // the user's own settings, exactly as they were, under the name they had
+        this.beforeClaim = null;
+        this.Write(mine);
+        this.config.Save();
+        return true;
     }
 }
