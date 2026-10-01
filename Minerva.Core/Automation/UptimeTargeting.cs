@@ -40,11 +40,13 @@ public static class UptimeTargeting
             : null);
 
     /// <summary>
-    /// Whether the walk to uptime runs at all, or the character only dodges (the user's calls, 2026-09-26):
+    /// Whether the walk to uptime runs at all, or the character only dodges (the user's calls, 2026-09-26 and -30):
     /// <list type="bullet">
-    /// <item>Never in a solo duty, whatever the role.</item>
+    /// <item>Melee and tanks always close to reach, in a solo duty too: A Requiem for Heroes, 2026-09-30, a paladin
+    /// run by Odysseus threw Shield Lob from across the arena ("im not moving to the boss"). Solo duties were
+    /// dodge-only until then.</item>
     /// <item>Never for a character on the ranged band -- casters, physical ranged, healers, anyone whose role is
-    /// unknown -- with nobody else in the party.</item>
+    /// unknown -- with nobody else in the party, nor in a solo duty.</item>
     /// </list>
     /// <para>Alone, every enemy is on the caster: the band's floor backs it away from a mob that follows, the walk
     /// in and out never ends, and each step cuts the cast the rotation just started. The Resonant, 2026-09-26: an
@@ -54,7 +56,29 @@ public static class UptimeTargeting
     /// never walked into range of it -- The Porta Decumana, 2026-09-27, the ranged toons never engaged.</para>
     /// </summary>
     public static bool Walks(Role role, bool soloDuty, int groupMembers)
-        => !soloDuty && (role is Role.Tank or Role.Melee || groupMembers > 0);
+        => role is Role.Tank or Role.Melee || !soloDuty && groupMembers > 0;
+
+    /// <summary>
+    /// The role uptime is judged by while a role-play kit plays the fight: its reach, not the job underneath. Hien's
+    /// kit is melee (3 yalms) whatever job you queued as; Y'shtola's is ranged (25). <paramref name="kitRange"/> 0 is no
+    /// kit, and the job's role stands.
+    /// <para>A Requiem for Heroes, 2026-09-30: with the kit pressing Hien's buttons, a solo duty's dodge-only rule left
+    /// him wherever the fight put him, out of reach of Zenos. With a kit, the solo-duty rule steps aside
+    /// (<see cref="Walks"/> is asked as though it were not one) and the kit's role decides: melee walks in, a ranged kit
+    /// alone still only dodges.</para>
+    /// </summary>
+    public static Role KitRole(Role jobRole, float kitRange)
+        => kitRange <= 0f ? jobRole : kitRange <= 5f ? Role.Melee : Role.Ranged;
+
+    /// <summary>
+    /// The side worth walking to for a positional: none while the enemy is attacking you. It turns to face its target, so
+    /// the rear or flank you walk to swings round with you and the walk never ends; truly solo, that is every fight.
+    /// With someone else holding it, the side stands.
+    /// <para>The Will of the Moon, 2026-09-30: a ninja circled Sadu for 28.7 seconds ("need to not allow positionals when
+    /// truely solo, all you do is spin around the mob").</para>
+    /// </summary>
+    public static Positional PositionalWorthWalking(Positional wanted, Actor target, ulong self)
+        => target.TargetID == self ? Positional.Any : wanted;
 
     /// <summary>
     /// Whether this character has to start the fight itself: a boss module's target that nothing is fighting yet, with

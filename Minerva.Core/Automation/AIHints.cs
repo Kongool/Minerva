@@ -147,8 +147,16 @@ public sealed class AIHints
     /// <summary>The fight is starting and the player is still mounted.</summary>
     public bool WantDismount;
 
+    /// <summary>
+    /// The reach of the role-play kit being played (<see cref="QuestBattle.UnmanagedRotation"/>), 0 when none: Hien 3
+    /// yalms, Y'shtola 25. While a kit plays the fight, it, not the job underneath, says whether uptime is melee
+    /// (<see cref="UptimeTargeting.KitRole"/>).
+    /// </summary>
+    public float RoleplayKitRange;
+
     public void Clear()
     {
+        this.RoleplayKitRange = 0f;
         this.touchZones = [];
         this.touchValid = false;
         this.ForbiddenZones.Clear();

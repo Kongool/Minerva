@@ -28,6 +28,12 @@ public sealed class ClientState
     /// </summary>
     public readonly DutyAction[] DutyActions = new DutyAction[NumDutyActions];
 
+    /// <summary>
+    /// The action the game's combo continues from, 0 when no combo is running: what a role-play kit reads to press the
+    /// next step (Hien's Kyokufu, Gofu, Yagetsu). Written by the sync each frame, like the duty actions; not recorded.
+    /// </summary>
+    public uint ComboAction;
+
     /// <summary>Does this duty grant any action at all?</summary>
     public bool HasDutyActions
     {

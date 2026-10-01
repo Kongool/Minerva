@@ -2577,6 +2577,57 @@ t.Section("A stage does not hold you inside what fires right after it");
     t.True("and it is a step, not a run across the arena", (spot.Target - pov).Length() < 8f);
 }
 
+// A module loads when its boss exists, often packs early; it runs the AI once its fight starts (its own CheckPull, as
+// BossmodReborn) or once the player is in its arena. The Ghimlyt Dark, 2026-09-30: "once the module loads ai wont dodge
+// trash aoes".
+t.Section("A module runs the AI from its pull or its arena");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000F1, 0xF1u, 0, "Colossus", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 3f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x100000F2, 0u, 1, "Miso", 0, ActorType.Player, new Vector4(0, 0, 60, 0), 0.5f, default, true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, 0x100000F2)));
+    ws.Party.PlayerInstanceID = 0x100000F2;
+    var boss = ws.Actors.Find(0x4000000F1)!;
+    var pc = ws.Actors.Find(0x100000F2)!;
+
+    var arena = new ArenaPullModule(ws, boss) { Arena = new NullArena() };
+    arena.BuildStates();
+    arena.Update();
+    t.True("loaded two packs early, it does not run the AI from outside its arena", !arena.InCharge(pc.Position));
+    ws.Execute(new ActorState.OpCombat(0x4000000F1, true));
+    arena.Update();
+    t.True("its own pull test waits for the player in the arena", !arena.Pulled);
+    ws.Execute(new ActorState.OpMove(0x100000F2, new Vector4(0, 0, 10, 0)));
+    t.True("in its arena it runs the AI", arena.InCharge(pc.Position));
+    arena.Update();
+    t.True("and the fight starts by its own rule", arena.Pulled);
+    ws.Execute(new ActorState.OpMove(0x100000F2, new Vector4(0, 0, 60, 0)));
+    arena.Update();
+    t.True("the pull latches: knocked out of the arena, it still runs the AI", arena.InCharge(pc.Position));
+    arena.Dispose();
+
+    var broken = new ThrowingPullModule(ws, boss) { Arena = new NullArena() };
+    broken.BuildStates();
+    var threw = false;
+    try { broken.Update(); } catch (Exception) { threw = true; }
+    t.True("a pull test that throws does not take the tick down", !threw);
+    t.True("and falls back to the boss in combat", broken.Pulled);
+    broken.Dispose();
+
+    ws.Execute(new ActorState.OpCombat(0x4000000F1, false));
+    ws.Execute(new ActorState.OpTargetable(0x4000000F1, false));
+    var plain = new TestModule(ws, boss) { Arena = new NullArena() };
+    plain.BuildStates();
+    ws.Execute(new ActorState.OpCombat(0x4000000F1, true));
+    plain.Update();
+    t.True("by default an untargetable boss in combat has not been pulled", !plain.Pulled);
+    ws.Execute(new ActorState.OpTargetable(0x4000000F1, true));
+    plain.Update();
+    t.True("targetable and in combat, it has", plain.Pulled);
+    plain.Dispose();
+}
+
 // A recording started before the player is known (a solo duty, recorded from zone-in) dropped the player as "another
 // player" for the whole of it: The Will of the Moon, 2026-09-30, no position and no cast of the character played.
 t.Section("A recording started before the player is known still records the player");
@@ -3682,8 +3733,21 @@ t.Section("Uptime is a band, not a point");
     t.True("nor anyone whose role is unknown", !UptimeTargeting.Walks(Role.None, soloDuty: false, groupMembers: 0));
     t.True("a melee alone still closes to reach", UptimeTargeting.Walks(Role.Melee, soloDuty: false, groupMembers: 0));
     t.True("and so does a tank", UptimeTargeting.Walks(Role.Tank, soloDuty: false, groupMembers: 0));
-    t.True("in a solo duty nobody walks for uptime", !UptimeTargeting.Walks(Role.Melee, soloDuty: true, groupMembers: 0)
-        && !UptimeTargeting.Walks(Role.Ranged, soloDuty: true, groupMembers: 3));
+    t.True("in a solo duty a melee or tank walks to the boss (A Requiem for Heroes, 2026-09-30)", UptimeTargeting.Walks(Role.Melee, soloDuty: true, groupMembers: 0)
+        && UptimeTargeting.Walks(Role.Tank, soloDuty: true, groupMembers: 0));
+    t.True("a ranged one only dodges there, group or not", !UptimeTargeting.Walks(Role.Ranged, soloDuty: true, groupMembers: 3)
+        && !UptimeTargeting.Walks(Role.Healer, soloDuty: true, groupMembers: 0));
+    t.True("a role-play kit decides the role by its reach: Hien's is melee", UptimeTargeting.KitRole(Role.Ranged, 3f) == Role.Melee);
+    t.True("Y'shtola's ranged", UptimeTargeting.KitRole(Role.Tank, 25f) == Role.Ranged);
+    t.True("and with no kit the job's role stands", UptimeTargeting.KitRole(Role.Healer, 0f) == Role.Healer);
+    // positionals: a mob attacking you turns to face you, so its rear is never reachable (The Will of the Moon,
+    // 2026-09-30: a ninja circled Sadu for 28.7s)
+    var sadu = new Actor(0x4000000A7, 0xA7u, 0, "Sadu", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0));
+    sadu.TargetID = 0x100000A8;
+    t.True("the mob on you: no side is worth walking to", UptimeTargeting.PositionalWorthWalking(Positional.Rear, sadu, 0x100000A8) == Positional.Any);
+    sadu.TargetID = 0x100000A9;
+    t.True("someone else holding it: the rear stands", UptimeTargeting.PositionalWorthWalking(Positional.Rear, sadu, 0x100000A8) == Positional.Rear);
+    t.True("and so does a flank", UptimeTargeting.PositionalWorthWalking(Positional.Flank, sadu, 0x100000A8) == Positional.Flank);
 
     // The range band: move only when outside [min, max], walk to preferred, stop within a yalm of it, and when too
     // close walk straight out. Everything below is measured from the hitbox edge.
@@ -5388,6 +5452,17 @@ sealed class KitRotation : Minerva.QuestBattle.UnmanagedRotation
 }
 
 sealed class KitAI(ModuleBase module) : Minerva.QuestBattle.RotationModule<KitRotation>(module);
+
+// pulls only with the player inside its 20y arena, as many ported CheckPull overrides say
+sealed class ArenaPullModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f))
+{
+    protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InCircle(Center, 20f);
+}
+
+sealed class ThrowingPullModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f))
+{
+    protected override bool CheckPull() => throw new InvalidOperationException("ported pull test bug");
+}
 
 sealed class TestModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(100f, 100f), new ArenaBoundsSquare(20f));

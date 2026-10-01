@@ -76,9 +76,31 @@ public class FlatlandFury(ModuleBase module) : Components.SimpleAOEs(module, (ui
                 hints.ForcedTarget = staff;
                 hints.SetPriority(staff, 2);
             }
+
+            // Nowhere is safe until a staff falls, and then the ground under it is: stand and cast. Walking anywhere
+            // only costs the casts that open the middle (2026-09-30: "the staff phase has no safe spot, so minerva
+            // should just stand and not run to the boarder").
+            hints.UptimeHeld = true;
         }
         else
+        {
             base.AddAIHints(slot, actor, assignment, hints);
+
+            // The centre staff is down: the middle is the safe spot, so go there now. The ring's circles land ten
+            // seconds later and a two-yalm step is not worth leaving early by the solver's own rule, so it waited for
+            // the last six -- by when Stone IV was chained and nobody moved (2026-09-30: "after the break it would
+            // just chain cast and not move"). A positioning instruction is acted on at once.
+            if (casters.Length > 0 && !CentreStaffUp(casters))
+                hints.AddForbiddenZone(new SDInvertedCircle(Module.Center, 2.5f), DateTime.MaxValue);
+        }
+    }
+
+    private bool CentreStaffUp(ReadOnlySpan<AOEInstance> casters)
+    {
+        foreach (ref readonly var c in casters)
+            if ((c.Origin - Module.Center).Length() < 2f)
+                return true;
+        return false;
     }
 }
 
@@ -109,6 +131,15 @@ public class FlatlandFuryEnrage(ModuleBase module) : Components.SimpleAOEs(modul
         foreach (ref readonly var c in casters)
             if (c.ActorID != broken)
                 hints.AddForbiddenZone(c);
+
+        // and stand behind Hien, him between you and Magnai, where the broken staff leaves its gap (2026-09-30: "needs
+        // to move behind hien so hien is between you and the magni"; the run that did it stood 2.1y behind him)
+        if (broken != 0 && Module.GetActor((uint)OID.Hien) is { IsDead: false } hien && Module.GetActor((uint)OID.Magnai) is { } magnai
+            && (hien.Position - magnai.Position).Length() > 1f)
+        {
+            var behind = hien.Position + 2.5f * (hien.Position - magnai.Position).Normalized();
+            hints.AddForbiddenZone(new SDInvertedCircle(behind, 1.5f), DateTime.MaxValue);
+        }
     }
 }
 
@@ -147,7 +178,10 @@ class AutoYshtola(ModuleBase module, WorldState ws) : QuestBattle.UnmanagedRotat
                 Hints.GoalZones.Add(AIHints.GoalSingleTarget(hien.Position, 2f, 5f));
         }
 
-        if (magnai is { IsDead: false } && StatusDetails(magnai, AeroIIStatus, Player.InstanceID).Left < 4.6f)
+        // not while a staff is the target: the centre one takes two Stone IVs, and a GCD on Magnai's DoT is one of the
+        // few there are before the fury lands (2026-09-30: Aero II went out at 268.6s, the first Stone IV at 271.8s)
+        var onStaff = primaryTarget?.OID == (uint)OID.TheScaleOfTheFather;
+        if (!onStaff && magnai is { IsDead: false } && StatusDetails(magnai, AeroIIStatus, Player.InstanceID).Left < 4.6f)
             UseAction(Roleplay.AID.AeroIISeventhDawn, magnai);
 
         UseAction(Roleplay.AID.StoneIVSeventhDawn, primaryTarget);

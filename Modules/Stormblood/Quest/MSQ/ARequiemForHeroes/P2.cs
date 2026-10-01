@@ -84,6 +84,18 @@ class DarkAether(ModuleBase module) : Components.Voidzone(module, 1.5f, GetVoidz
 
 class Adds(ModuleBase module) : Components.AddsMulti(module, [(uint)OID.TheStorm, (uint)OID.TheSwell, (uint)OID.AmeNoHabakiri]);
 
+// Unmoving Troika: an instant frontal cone, then two more from a helper along the same facing, 1.4s and 1.8s after. The
+// first has no tell and Zenos faces whoever he is on, so it lands; the two after are casts, and a step to his flank
+// clears them. 120 degrees and 9+R as in Ala Mhigo's Zenos (BossmodReborn's D063), which casts the same thing. A Requiem
+// for Heroes, 2026-09-30: all three hit, nothing drawn.
+abstract class UnmovingTroika(ModuleBase module, uint aid) : Components.SimpleAOEs(module, aid, new AOEShapeCone(9.92f, 60f.Degrees()));
+class UnmovingTroikaSecond(ModuleBase module) : UnmovingTroika(module, (uint)AID.UnmovingTroikaSecond);
+class UnmovingTroikaLast(ModuleBase module) : UnmovingTroika(module, (uint)AID.UnmovingTroikaLast);
+
+// a 20-yalm circle from the centre of a 20-yalm arena, and a cast bigger than the arena: nowhere to stand clear
+class TheSwordUnbound(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.TheSwordUnbound);
+class Concentrativity(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.Concentrativity);
+
 public class ZenosP2States : StateMachineBuilder
 {
     public ZenosP2States(ModuleBase module) : base(module)
@@ -102,7 +114,11 @@ public class ZenosP2States : StateMachineBuilder
             .ActivateOnEnter<EntropicFlame>()
             .ActivateOnEnter<DarkAether>()
             .ActivateOnEnter<StormUnbound>()
-            .ActivateOnEnter<Adds>();
+            .ActivateOnEnter<Adds>()
+            .ActivateOnEnter<UnmovingTroikaSecond>()
+            .ActivateOnEnter<UnmovingTroikaLast>()
+            .ActivateOnEnter<TheSwordUnbound>()
+            .ActivateOnEnter<Concentrativity>();
     }
 }
 

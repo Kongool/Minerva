@@ -396,12 +396,10 @@ public abstract class ModuleBase : IDisposable
 
     public void Update()
     {
-        // BossmodReborn calls this every frame until its state machine starts. Minerva does not run a
-        // module's own CheckPull (ported overrides dereference things the radar owns), so the stand-in for
-        // "not started" is the primary actor never yet having been in combat.
+        // BossmodReborn calls this every frame until its state machine starts, and starts it when CheckPull says so.
         if (!this.Pulled)
         {
-            if (this.PrimaryActor.InCombat)
+            if (this.PullCheck())
                 this.Pulled = true;
             else
                 this.UpdatePreModuleActivation();
@@ -445,13 +443,46 @@ public abstract class ModuleBase : IDisposable
     public void ReportError(string message) => this.ReportError(null, message);
 
     // module-level virtuals BMR's BossModule exposes, so ported modules that override them compile.
-    // CalculateModuleAIHints is called from BuildAIHints (2026-09-28); Minerva does not yet call
-    // CheckPull/UpdateModule/CheckReset in its loop, nor read ShouldPrioritizeAllEnemies (tracked). They are declared rather than deleted because a ported
-    // module overriding one is recording something real about the fight.
+    // CalculateModuleAIHints is called from BuildAIHints (2026-09-28) and CheckPull from Update (2026-09-30); Minerva
+    // does not yet call UpdateModule/CheckReset in its loop, nor read ShouldPrioritizeAllEnemies (tracked). They are
+    // declared rather than deleted because a ported module overriding one is recording something real about the fight.
     protected virtual bool CheckPull() => this.PrimaryActor.IsTargetable && this.PrimaryActor.InCombat;
 
-    /// <summary>Has the primary actor been in combat yet? Latches; see <see cref="Update"/>.</summary>
+    /// <summary>
+    /// Has this module's fight started? BossmodReborn's rule: the module's own <see cref="CheckPull"/>, by default "the
+    /// boss is targetable and in combat"; 177 ports say more, most often "and the player is inside the arena" or "any of
+    /// these trash is in combat". Latches. A module is loaded as soon as its boss exists, so until this the AI treats
+    /// the room as trash (the user, 2026-09-30: "once the module loads ai wont dodge trash aoes").
+    /// </summary>
     public bool Pulled { get; private set; }
+
+    private bool pullCheckBroken;
+
+    /// <summary>
+    /// Whether this module runs the AI rather than trash handling: its fight has started, or the player stands in its
+    /// arena. A module loads as soon as its boss exists, often a pack or two early (The Ghimlyt Dark, 2026-09-30: two
+    /// packs before the Magitek Colossus, "no safe spot" because not in its arena). The arena half keeps Occult
+    /// Crescent's critical engagements, whose own pull test can wait on the player being inside.
+    /// </summary>
+    public bool InCharge(WPos player) => this.Pulled || this.InBounds(player);
+
+    // A ported override that throws falls back to the old test, the boss in combat, and is reported once.
+    private bool PullCheck()
+    {
+        if (!this.pullCheckBroken)
+        {
+            try
+            {
+                return this.CheckPull();
+            }
+            catch (Exception ex)
+            {
+                this.pullCheckBroken = true;
+                this.ReportError($"CheckPull threw ({ex.GetType().Name}: {ex.Message}); the fight now starts when the boss enters combat.");
+            }
+        }
+        return this.PrimaryActor.InCombat;
+    }
 
     /// <summary>
     /// Notes for the fight, shown before the pull. BossmodReborn (2026-09) renders these in a window of their

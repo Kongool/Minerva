@@ -21,6 +21,9 @@ public abstract class UnmanagedRotation(WorldState ws, float effectiveRange)
     protected WorldState World => ws;
     protected uint MP;
 
+    /// <summary>The step the game's combo continues from (BossmodReborn's <c>ComboAction</c>); 0 when none.</summary>
+    protected Roleplay.AID ComboAction => (Roleplay.AID)this.World.Client.ComboAction;
+
     protected abstract void Exec(Actor? primaryTarget);
 
     public void Execute(Actor player, AIHints hints)
@@ -28,6 +31,7 @@ public abstract class UnmanagedRotation(WorldState ws, float effectiveRange)
         this.Hints = hints;
         this.Player = player;
         this.MP = player.HPMP.CurMP;
+        hints.RoleplayKitRange = effectiveRange;
 
         // the nearest of the highest-priority enemies the module left attackable
         Actor? primary = null;

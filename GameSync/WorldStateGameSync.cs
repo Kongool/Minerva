@@ -150,6 +150,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.UpdateActors();
         this.SyncParty();
         this.SyncDutyActions();
+        this.SyncCombo();
         this.UpdateActiveFate();
         this.UpdateWaymarks();
     }
@@ -419,6 +420,13 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     /// charge arrays, so reading charges for those would walk off the end. They report 0/0, which reads as
     /// "no charge information" rather than "no charges left".</para>
     /// </summary>
+    /// <summary>The game's running combo, for role-play kits that press its next step.</summary>
+    private unsafe void SyncCombo()
+    {
+        var am = FFXIVClientStructs.FFXIV.Client.Game.ActionManager.Instance();
+        this.ws.Client.ComboAction = am != null && am->Combo.Timer > 0f ? am->Combo.Action : 0u;
+    }
+
     private unsafe void SyncDutyActions()
     {
         var dst = this.ws.Client.DutyActions;

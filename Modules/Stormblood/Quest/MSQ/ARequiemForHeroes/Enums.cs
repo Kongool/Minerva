@@ -36,4 +36,11 @@ public enum AID : uint
     TheStormUnboundCast = 14815, // Helper->self, 3.0s cast, range 5 circle
     TheStormUnboundRepeat = 14816, // Helper->self, no cast, range 5 circle
     EntropicFlame = 14833, // Helper->self, 4.0s cast, range 50+R width 8 rect
+
+    // from the recording (2026-09-30, Zenos P2) and the Action sheet; BossmodReborn's module has none of these
+    TheSwordUnbound = 14821, // Helper->self, 5.7s cast, range 20 circle from the arena centre: the whole floor
+    UnmovingTroikaFirst = 14829, // Boss->self, no cast, range 9+R 120-degree cone
+    UnmovingTroikaSecond = 14830, // Helper->self, 1.4s cast, range 9+R 120-degree cone
+    UnmovingTroikaLast = 14831, // Helper->self, 1.8s cast, range 9+R 120-degree cone
+    Concentrativity = 14834, // Boss->self, range larger than the arena: raidwide
 }

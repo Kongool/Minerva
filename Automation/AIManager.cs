@@ -159,7 +159,12 @@ public sealed class AIManager
         this.ObserveFootprint(pc);
         this.roster.Update(DateTime.UtcNow);
 
-        if (module != null)
+        // A module is loaded as soon as its boss exists, often a pack or two before the fight. Until the fight starts
+        // (ModuleBase.Pulled, BossmodReborn's rule) or the character is in its arena, this is trash: guessed zones, the
+        // ground people stand on, whatever is fighting us -- not the boss's arena, which the trash is outside. The
+        // user, 2026-09-30: "once the module loads ai wont dodge trash aoes" (The Ghimlyt Dark: two packs before the
+        // Magitek Colossus, "no safe spot" because not in its arena).
+        if (InCharge(module, pc))
         {
             module.BuildAIHints(0, pc, this.hints, this.roster.AssignmentFor(this.world.Party, pc));
         }
@@ -198,7 +203,11 @@ public sealed class AIManager
         // request below is not a band and still applies.
         var soloDuty = GameData.IsSoloDuty(this.world.CurrentCFCID);
         var otherPlayers = this.OtherPlayers(pc);
-        var walks = UptimeTargeting.Walks(pc.Role, soloDuty, otherPlayers + this.NpcPartyMembers());
+        // A role-play kit playing the fight (Hien, Y'shtola) decides the role by its reach, and a solo duty it plays is
+        // not dodge-only: the kit's buttons need their range (UptimeTargeting.KitRole).
+        var kit = this.hints.RoleplayKitRange > 0f;
+        var role = UptimeTargeting.KitRole(pc.Role, this.hints.RoleplayKitRange);
+        var walks = UptimeTargeting.Walks(role, soloDuty && !kit, otherPlayers + this.NpcPartyMembers());
         var target = walks ? this.UptimeTarget(module, pc) : null;
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
         // Nobody else will start this fight (UptimeTargeting.Pulls): published for the rotation plugin to open on.
@@ -224,7 +233,7 @@ public sealed class AIManager
         }
         else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)
             goal = this.bandWalk.Apply(
-                UptimeGoal.For(target, pc.Role, this.ActivePositional, Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc, target)),
+                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(this.ActivePositional, target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc, role, target)),
                 pc.Position,
                 pc.CastInfo != null);
         else
@@ -330,6 +339,13 @@ public sealed class AIManager
             {
                 steering = false;
                 casting = true;
+
+                // A move the fight asks for -- off ground that will fire, or onto a spot it assigns -- lets this cast
+                // finish but starts no other, so the walk begins when it ends. Left at the ground's price, the budget
+                // offered the next cast, and a caster chained Stone IV after Stone IV while the step into the safe
+                // middle never came (The Will of the Moon, 2026-09-30). An uptime walk still yields to casting.
+                if (this.hints.Misplaced(pc.Position) || this.hints.SecondsUntilDangerAt(pc.Position, now, margin) <= DoomedGroundSeconds)
+                    this.MaxCastTime = 0f;
             }
         }
 
@@ -702,16 +718,20 @@ public sealed class AIManager
     /// </summary>
     private Actor? UptimeTarget(ModuleBase? module, Actor pc)
     {
-        // the choice itself lives in Core (UptimeTargeting) so it can be tested; only the floor raycast stays here
+        // the choice itself lives in Core (UptimeTargeting) so it can be tested; only the floor raycast stays here.
+        // Before its fight starts a loaded module is trash: follow what is fighting us, and only with nothing engaged
+        // the boss, which is how a Duty Support party's pull gets named (UptimeTargeting.Pulls).
+        var pulled = InCharge(module, pc);
         var target = UptimeTargeting.Choose(
             this.hints,
             this.world.Actors.Find(pc.TargetID),
-            module?.PrimaryActor,
-            module != null,
+            pulled ? module!.PrimaryActor : null,
+            pulled,
             this.config.UptimeFollowsOwnTarget,
             () => this.PrioritisedTarget(pc),
             own => this.ReachableOnThisFloor(pc, own),
-            () => this.EngagedTarget(pc));
+            () => this.EngagedTarget(pc)
+                ?? (!pulled && module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.hints.IsForbiddenTarget(boss) ? boss : null));
         return target != null && InTheFight(module, pc, target) ? target : null;
     }
 
@@ -751,9 +771,9 @@ public sealed class AIManager
 
     /// <summary>The configured band for a role: tanks and melee share one, everyone else the backline's -- and the
     /// backline's never asks for more distance from the boss than the rest of the party is keeping.</summary>
-    private RangeBand BandFor(Actor pc, Actor target)
+    private RangeBand BandFor(Actor pc, Role role, Actor target)
     {
-        if (pc.Role is Role.Tank or Role.Melee)
+        if (role is Role.Tank or Role.Melee)
             return new RangeBand(0f, this.config.MeleeBandPreferred, this.config.MeleeBandMax);
         var band = new RangeBand(this.config.RangedBandMin, this.config.RangedBandPreferred, this.config.RangedBandMax);
         return band.FollowGroup(RangeBand.GroupDistance(this.GroupPositions(pc), target.Position, target.HitboxRadius));
@@ -821,9 +841,12 @@ public sealed class AIManager
     /// bound is the FATE ring, which can be a hundred yalms across) it means the target is within the leash.
     /// The danger dodge is untouched either way; this only decides whether to walk <i>towards</i> something.
     /// </summary>
+    private static bool InCharge(ModuleBase? module, Actor pc) => module != null && module.InCharge(pc.Position);
+
     private static bool InTheFight(ModuleBase? module, Actor pc, Actor target)
     {
-        if (module != null && module is not OpenWorldFate)
+        // the arena is the leash for the boss's fight, or for walking to its boss; trash before it keeps the plain one
+        if (module != null && module is not OpenWorldFate && (module.Pulled || target == module.PrimaryActor))
             return module.Bounds.Contains(module.Center, pc.Position);
         return (target.Position - pc.Position).LengthSq() <= UptimeLeash * UptimeLeash;
     }
@@ -1255,6 +1278,10 @@ public sealed class AIManager
     /// <summary>The side set in force right now: a live rotation request, else the configured preference.</summary>
     private Positional ActivePositional
         => this.requestedUntil > this.world.CurrentTime ? this.requestedPositional : this.config.DesiredPositional;
+
+    /// <summary>Ground that fires within this many seconds is ground the dodge is leaving: a cast budget is not offered
+    /// on it while a move off it waits on the current cast. The solver's own look-ahead for stepping off early.</summary>
+    private const float DoomedGroundSeconds = 30f;
 
     /// <summary>How close counts as having arrived, in yards. Below the solver's one-yard cell.</summary>
     private const float ArrivedRange = 0.5f;
