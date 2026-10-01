@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Shadowbringers.SideQuests;
 
 namespace Minerva.Shadowbringers.Quest.SorrowOfWerlyt.SleepNowInSapphire.P1GuidanceSystem;
 
@@ -23,12 +24,15 @@ public enum AID : uint
 
 class AerialBombardment(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AerialBombardment, 12);
 
+class GWarrior(ModuleBase module) : QuestBattle.RotationModule<SapphireWeapon>(module);
+
 class GuidanceSystemStates : StateMachineBuilder
 {
     public GuidanceSystemStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<GWarrior>()
             .ActivateOnEnter<AerialBombardment>();
     }
 }

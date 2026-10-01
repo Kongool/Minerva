@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Endwalker.MSQ;
 
 namespace Minerva.Endwalker.Quest.MSQ.AnUnforeseenBargain.P1Furcas;
 
@@ -68,12 +69,15 @@ class Blackout2(ModuleBase module) : Components.CastHint(module, (uint)AID.Black
     }
 }
 
+class AutoZero(ModuleBase module) : QuestBattle.RotationModule<ZeroAI>(module);
+
 class FurcasStates : StateMachineBuilder
 {
     public FurcasStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<AutoZero>()
             .ActivateOnEnter<Explosion>()
             .ActivateOnEnter<VoidSlash>()
             .ActivateOnEnter<JongleursX>()

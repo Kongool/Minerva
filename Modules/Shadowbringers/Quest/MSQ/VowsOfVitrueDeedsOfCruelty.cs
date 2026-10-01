@@ -81,7 +81,7 @@ class MagitekRayBits(ModuleBase module) : Components.SimpleAOEs(module, (uint)AI
 class AtomicRay(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AtomicRay, 10f);
 class SelfDetonate(ModuleBase module) : Components.CastHint(module, (uint)AID.SelfDetonate, "Enrage if bits are not killed before cast");
 
-class AutoEstinien(ModuleBase module) : ModuleComponent(module)
+class AutoEstinien(ModuleBase module) : QuestBattle.RotationModule<EstinienAI>(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
@@ -96,6 +96,39 @@ class AutoEstinien(ModuleBase module) : ModuleComponent(module)
                 _ => 0
             };
         }
+        base.AddAIHints(slot, actor, assignment, hints);
+    }
+}
+
+class EstinienAI(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 3f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        if (primaryTarget == null)
+            return;
+        var hints = Hints.PotentialTargets;
+        var count = hints.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            if (hints[i].Actor.OID is (uint)OID.SigniferPraetorianus or (uint)OID.MagitekBit)
+            {
+                UseAction(Roleplay.AID.HorridRoar, Player);
+                break;
+            }
+        }
+
+        if (World.Party.LimitBreakCur == 10000)
+            UseAction(Roleplay.AID.DragonshadowDive, primaryTarget, 100f);
+
+        if (primaryTarget.OID == (uint)OID.Boss)
+        {
+            var dotRemaining = StatusDetails(primaryTarget, Roleplay.SID.StabWound, Player.InstanceID).Left;
+            if (dotRemaining < 2.3f)
+                UseAction(Roleplay.AID.Drachenlance, primaryTarget);
+        }
+
+        UseAction(Roleplay.AID.AlaMorn, primaryTarget);
+        UseAction(Roleplay.AID.Stardiver, primaryTarget, -10);
     }
 }
 

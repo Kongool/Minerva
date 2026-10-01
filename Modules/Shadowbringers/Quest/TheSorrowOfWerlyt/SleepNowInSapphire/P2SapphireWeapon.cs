@@ -94,6 +94,7 @@ class TheSapphireWeaponStates : StateMachineBuilder
             .ActivateOnEnter<SapphireRay>()
             .ActivateOnEnter<MagitekRay>()
             .ActivateOnEnter<ServantRoar>()
+            .ActivateOnEnter<GWarrior>()
             .ActivateOnEnter<FloodRay>()
             .ActivateOnEnter<SelfDestruct>()
             .ActivateOnEnter<OptimizedUltima>()

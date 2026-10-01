@@ -271,7 +271,7 @@ sealed class Fireflood(ModuleBase module) : Components.SimpleAOEs(module, (uint)
 sealed class TuraliStoneIII(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.TuraliStoneIII, 4f);
 sealed class TuraliQuake(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.TuraliQuake, 9f, maxCasts: 5);
 
-sealed class WukLamatAI(ModuleBase module) : ModuleComponent(module)
+sealed class WukLamatAI(ModuleBase module) : QuestBattle.RotationModule<AutoWukLamat>(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
@@ -284,6 +284,55 @@ sealed class WukLamatAI(ModuleBase module) : ModuleComponent(module)
                 (uint)OID.BakoolJaJaShade => AIHints.Enemy.PriorityInvincible,
                 _ => 0
             };
+        }
+        base.AddAIHints(slot, actor, assignment, hints);
+    }
+}
+
+sealed class AutoWukLamat(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 3f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        if (primaryTarget == null)
+        {
+            return;
+        }
+
+        if (World.Party.LimitBreakCur == 10000)
+        {
+            UseAction(Roleplay.AID.DawnlitConviction, primaryTarget, 100f);
+        }
+
+        var numAOETargets = 0;
+        var count = Hints.PotentialTargets.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            if (Hints.PotentialTargets[i].Actor.Position.InCircle(primaryTarget.Position, 8f))
+            {
+                ++numAOETargets;
+            }
+        }
+
+        var gcd = ComboAction switch
+        {
+            Roleplay.AID.ClawOfTheBraax => Roleplay.AID.FangsOfTheBraax,
+            Roleplay.AID.FangsOfTheBraax => Roleplay.AID.TailOfTheBraax,
+            Roleplay.AID.TuraliFervor => Roleplay.AID.TuraliJudgment,
+            Roleplay.AID.TrialsOfTural => Roleplay.AID.TuraliFervor,
+            _ => numAOETargets > 1 ? Roleplay.AID.TrialsOfTural : Roleplay.AID.ClawOfTheBraax
+        };
+
+        UseAction(gcd, primaryTarget);
+        UseAction(Roleplay.AID.BeakOfTheLuwatena, primaryTarget, -5f);
+
+        if (Player.DistanceToHitbox(primaryTarget) < 3f)
+        {
+            UseAction(Roleplay.AID.RunOfTheRroneek, primaryTarget, -10f);
+        }
+
+        if (Player.HPMP.CurHP * 2u < Player.HPMP.MaxHP)
+        {
+            UseAction(Roleplay.AID.LuwatenaPulse, Player, -10f);
         }
     }
 }

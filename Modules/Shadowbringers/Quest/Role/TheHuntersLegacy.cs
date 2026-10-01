@@ -54,12 +54,34 @@ class RonkanAura(ModuleBase module) : ModuleComponent(module)
     }
 }
 
+class RendaRae(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 20f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        var dot = StatusDetails(primaryTarget, Roleplay.SID.AcidicBite, Player.InstanceID);
+        if (dot.Left < 2.5f)
+            UseAction(Roleplay.AID.AcidicBite, primaryTarget, 10f);
+
+        UseAction(Roleplay.AID.RadiantArrow, primaryTarget, -5f);
+        UseAction(Roleplay.AID.HeavyShot, primaryTarget);
+
+        if (primaryTarget?.CastInfo?.Interruptible ?? false)
+            UseAction(Roleplay.AID.DullingArrow, primaryTarget, 5f);
+
+        if (Player.HPMP.MaxHP * 0.8f > Player.HPMP.CurHP)
+            UseAction(Roleplay.AID.HuntersPrudence, Player, -15f);
+    }
+}
+
+class RendaRaeAI(ModuleBase module) : QuestBattle.RotationModule<RendaRae>(module);
+
 class BalamQuitzStates : StateMachineBuilder
 {
     public BalamQuitzStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<RendaRaeAI>()
             .ActivateOnEnter<BalamBlaster>()
             .ActivateOnEnter<ElectricWhisker>()
             .ActivateOnEnter<RoaringThunder>()

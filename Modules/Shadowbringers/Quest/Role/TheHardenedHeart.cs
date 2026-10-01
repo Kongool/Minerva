@@ -74,7 +74,7 @@ class TankbusterTether(ModuleBase module) : ModuleComponent(module)
     }
 }
 
-class BrandenAI(ModuleBase module) : ModuleComponent(module)
+class BrandenAI(ModuleBase module) : QuestBattle.RotationModule<AutoBranden>(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
@@ -90,10 +90,47 @@ class BrandenAI(ModuleBase module) : ModuleComponent(module)
                     hints.ForcedTarget = h.Actor;
             }
         }
+        base.AddAIHints(slot, actor, assignment, hints);
     }
 }
 
 class RustingClaw(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.RustingClaw, new AOEShapeCone(10.3f, 45.Degrees()));
+
+class AutoBranden(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 3f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        if (primaryTarget == null)
+            return;
+
+        var numAOETargets = Hints.PotentialTargets.Count(x => x.Actor.Position.InCircle(Player.Position, 5));
+
+        if (numAOETargets > 1)
+        {
+            if (ComboAction == Roleplay.AID.Sunshadow)
+                UseAction(Roleplay.AID.GreatestEclipse, Player);
+
+            UseAction(Roleplay.AID.Sunshadow, Player);
+        }
+
+        if (Player.HPMP.CurHP * 3 < Player.HPMP.MaxHP)
+            UseAction(Roleplay.AID.ChivalrousSpirit, Player);
+
+        var gcd = ComboAction switch
+        {
+            Roleplay.AID.RightfulSword => Roleplay.AID.Swashbuckler,
+            Roleplay.AID.FastBlade => Roleplay.AID.RightfulSword,
+            _ => Roleplay.AID.FastBlade
+        };
+
+        UseAction(gcd, primaryTarget);
+        if (Player.DistanceToHitbox(primaryTarget) <= 3f)
+            UseAction(Roleplay.AID.FightOrFlight, Player, -10f);
+
+        if (primaryTarget.CastInfo?.Interruptible ?? false)
+            UseAction(Roleplay.AID.Interject, primaryTarget, -10f);
+    }
+}
 
 class TadricTheVaingloriousStates : StateMachineBuilder
 {

@@ -102,6 +102,12 @@ public sealed class Plugin : IDalamudPlugin
 
         ModuleBase.ErrorSink = static msg => Service.Log.Warning($"[ModuleError] {msg}");
 
+        // quest battle scripts: the mesh to walk a solo duty with, a log, and the game's condition flags they wait on
+        Minerva.QuestBattle.QuestBattle.Navigation = new QuestNavigation();
+        Minerva.QuestBattle.QuestBattle.LogSink = static msg => Service.Log.Information($"Minerva: {msg}");
+        Service.Condition.ConditionChange += this.OnConditionChange;
+        ClientState.RecastQuery = GameData.RecastRemaining;
+
         Service.Log.Information("Minerva loaded.");
     }
 
@@ -294,8 +300,29 @@ public sealed class Plugin : IDalamudPlugin
         this.RememberWindowSize(false);
     }
 
+    /// <summary>Forward a condition flag a quest battle script waits on (a jump landing, a zone change), by name.</summary>
+    private void OnConditionChange(Dalamud.Game.ClientState.Conditions.ConditionFlag flag, bool value)
+    {
+        if (this.modules.ActiveZoneModule is Minerva.QuestBattle.QuestBattle qb
+            && Enum.TryParse<Minerva.QuestBattle.ConditionFlag>(flag.ToString(), out var named))
+        {
+            try
+            {
+                qb.OnConditionChange(named, value);
+            }
+            catch (Exception ex)
+            {
+                Service.Log.Error(ex, $"Minerva: {qb.GetType().Name} threw on condition {flag}.");
+            }
+        }
+    }
+
     public void Dispose()
     {
+        Service.Condition.ConditionChange -= this.OnConditionChange;
+        Minerva.QuestBattle.QuestBattle.Navigation = null;
+        Minerva.QuestBattle.QuestBattle.LogSink = null;
+        ClientState.RecastQuery = null;
         Service.Framework.Update -= this.OnUpdate;
         Service.PluginInterface.UiBuilder.Draw -= this.windowSystem.Draw;
         Service.PluginInterface.UiBuilder.OpenMainUi -= this.OpenMain;

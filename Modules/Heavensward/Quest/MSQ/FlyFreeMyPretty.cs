@@ -87,7 +87,7 @@ class Bounds(ModuleBase module) : ModuleComponent(module)
 
 // rebased from QuestBattle.RotationModule: the rotation half is out of scope, the target
 // priorities below are not -- they are what Minerva publishes for a rotation plugin to act on.
-class ReaperAI(ModuleBase module) : ModuleComponent(module)
+class ReaperAI(ModuleBase module) : QuestBattle.RotationModule<AutoReaperAI>(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
@@ -98,6 +98,19 @@ class ReaperAI(ModuleBase module) : ModuleComponent(module)
             e.Priority = e.Actor.OID == (uint)OID.ImperialColossus ? 5 : e.Actor.TargetID == actor.InstanceID ? 1 : 0;
         }
         base.AddAIHints(slot, actor, assignment, hints);
+    }
+}
+
+class AutoReaperAI(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 10f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        if (Player.MountId != 103u || primaryTarget == null)
+            return;
+        var pos = primaryTarget.PosRot.XYZ();
+        UseAction(Roleplay.AID.DiffractiveMagitekCannon, primaryTarget, targetPos: pos);
+        UseAction(Roleplay.AID.HighPoweredMagitekCannon, primaryTarget, -5f);
+        UseAction(Roleplay.AID.MagitekCannon, primaryTarget, -10f, pos);
     }
 }
 

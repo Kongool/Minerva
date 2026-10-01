@@ -154,9 +154,21 @@ public sealed class AIHints
     /// </summary>
     public float RoleplayKitRange;
 
+    /// <summary>
+    /// A quest battle script is running this solo duty (<see cref="QuestBattle.QuestBattle"/>): it says where to walk,
+    /// what to click and what to fight, so the character goes to things rather than only dodging them.
+    /// </summary>
+    public bool QuestDriven;
+
+    /// <summary>The walk a quest battle script still has ahead, in order, with heights; null when it wants none. The
+    /// AI hands it to the navmesh follower whenever no danger needs answering (<see cref="QuestBattle.QuestBattle"/>).</summary>
+    public IReadOnlyList<Vector3>? QuestTravel;
+
     public void Clear()
     {
         this.RoleplayKitRange = 0f;
+        this.QuestDriven = false;
+        this.QuestTravel = null;
         this.touchZones = [];
         this.touchValid = false;
         this.ForbiddenZones.Clear();
@@ -294,21 +306,104 @@ public sealed class AIHints
             e.Priority = priority;
     }
 
-    public void PrioritizeTargetsByOID(uint oid, int priority)
+    public void PrioritizeTargetsByOID(uint oid, int priority = 0)
     {
         foreach (var e in this.PotentialTargets)
             if (e.Actor.OID == oid)
                 e.Priority = priority;
     }
 
-    public void PrioritizeTargetsByOID(uint[] oids, int priority)
+    public void PrioritizeTargetsByOID(uint[] oids, int priority = 0)
     {
         foreach (var e in this.PotentialTargets)
             if (Array.IndexOf(oids, e.Actor.OID) >= 0)
                 e.Priority = priority;
     }
 
-    public void PrioritizeTargetsByOIDAndForbidDOTs(uint oid, int priority, bool forbidDots) => this.PrioritizeTargetsByOID(oid, priority);
+    public void PrioritizeTargetsByOIDAndForbidDOTs(uint oid, int priority = 0, bool forbidDots = false) => this.PrioritizeTargetsByOID(oid, priority);
+
+    /// <summary>Everything attackable is fair game: enemies held back as not yet fighting (undesirable) come up to 0, so
+    /// the AI goes and pulls them. Forbidden and invincible ones stay where they are. BossmodReborn's quest scripts use
+    /// it to clear a room.</summary>
+    public void PrioritizeAll()
+    {
+        foreach (var e in this.PotentialTargets)
+            if (e.Priority < 0 && e.Priority > Enemy.PriorityInvincible)
+                e.Priority = 0;
+    }
+
+    /// <summary>Click the first targetable actor of <paramref name="oid"/>, or nothing if there is none: published as
+    /// <c>Minerva.Hints.InteractTarget</c>. BossmodReborn calls this <c>InteractWithOID</c>, which here is a field.</summary>
+    public void InteractWith(WorldState ws, uint oid)
+    {
+        this.InteractWithOID = oid;
+        this.InteractWithTarget = null;
+        foreach (var a in ws.Actors)
+        {
+            if (a.OID == oid && a.IsTargetable && !a.IsDestroyed)
+            {
+                this.InteractWithTarget = a;
+                return;
+            }
+        }
+    }
+
+    public void InteractWith<OID>(WorldState ws, OID oid) where OID : Enum => this.InteractWith(ws, (uint)(object)oid);
+
+    /// <summary>The enemies at the top priority (0 at least), as BossmodReborn's <c>PriorityTargetsSpan</c>.</summary>
+    public List<Enemy> PriorityTargets()
+    {
+        var top = 0;
+        foreach (var e in this.PotentialTargets)
+            if (!e.Actor.IsDeadOrDestroyed)
+                top = Math.Max(top, e.Priority);
+        var result = new List<Enemy>();
+        foreach (var e in this.PotentialTargets)
+            if (e.Priority == top && !e.Actor.IsDeadOrDestroyed)
+                result.Add(e);
+        return result;
+    }
+
+    /// <summary>How many top-priority enemies a circle at <paramref name="origin"/> would hit; 0 if it would hit a
+    /// forbidden one.</summary>
+    public int NumPriorityTargetsInAOECircle(WPos origin, float radius)
+    {
+        foreach (var e in this.PotentialTargets)
+            if (e.Priority == Enemy.PriorityForbidden && e.Actor.Position.InCircle(origin, radius + e.Actor.HitboxRadius))
+                return 0;
+        var count = 0;
+        foreach (var e in this.PriorityTargets())
+            if (e.Actor.Position.InCircle(origin, radius + e.Actor.HitboxRadius))
+                ++count;
+        return count;
+    }
+
+    /// <summary>A goal that scores each point by how many top-priority enemies an AOE circle there would catch.</summary>
+    public Func<WPos, float> GoalAOECircle(float radius)
+    {
+        var targets = this.PriorityTargets().ConvertAll(e => (pos: e.Actor.Position, radius: e.Actor.HitboxRadius));
+        return p =>
+        {
+            var n = 0;
+            foreach (var t in targets)
+                if (t.pos.InCircle(p, radius + t.radius))
+                    ++n;
+            return n;
+        };
+    }
+
+    /// <summary>The AOE goal where it catches at least <paramref name="minAOETargets"/>, scored above any single-target
+    /// spot; else the single-target goal. BossmodReborn's, as written.</summary>
+    public static Func<WPos, float> GoalCombined(Func<WPos, float> singleTarget, Func<WPos, float> aoe, int minAOETargets)
+    {
+        if (minAOETargets >= 50)
+            return singleTarget; // an AOE never pays, so do not bother
+        return p =>
+        {
+            var extra = aoe(p) - minAOETargets;
+            return extra >= 0 ? 3f + extra : singleTarget(p);
+        };
+    }
 
     // --- goal zones / obstacles / directions / predicted damage / special modes ---
     // TemporaryObstacles and GoalZones DO drive the auto-dodge (obstacles are avoided, goal zones bias

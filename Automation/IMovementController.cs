@@ -14,6 +14,10 @@ public interface IMovementController
     void Stop();
     void Face(Angle direction);
 
+    /// <summary>Walk a long route with its heights -- a quest battle's way to the next room -- through the navmesh
+    /// follower. Called every frame while travelling; re-issued only when the route changes.</summary>
+    void Travel(IReadOnlyList<Vector3> path);
+
     /// <summary>Which mover the last <see cref="MoveTo"/> went through; <see cref="Mover.None"/> after <see cref="Stop"/>.</summary>
     Mover Mode { get; }
 
@@ -28,6 +32,7 @@ public sealed class NullMovementController : IMovementController
     public void MoveTo(WPos target, IReadOnlyList<WPos>? route) { }
     public void Stop() { }
     public void Face(Angle direction) { }
+    public void Travel(IReadOnlyList<Vector3> path) { }
     public Mover Mode => Mover.None;
     public bool Busy => false;
 }

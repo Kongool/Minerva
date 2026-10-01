@@ -63,12 +63,56 @@ class NexusOfThunder(ModuleBase module) : Components.SimpleAOEs(module, (uint)AI
 class CoiledLevin(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.CoiledLevin1, 6f);
 class LightningVoidzone(ModuleBase module) : Components.Voidzone(module, 6f, m => m.Enemies((uint)OID.LightningVoidzone).Where(x => x.EventState != 7));
 
+class ThancredAI(ModuleBase module) : QuestBattle.RotationModule<AutoThancred>(module);
+
+class AutoThancred(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 3f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        if (World.Client.DutyActions[0].CurCharges > 0)
+        {
+            UseAction(World.Client.DutyActions[0].Action, primaryTarget);
+            return;
+        }
+
+        if (primaryTarget == null)
+            return;
+
+        var distance = Player.DistanceToHitbox(primaryTarget);
+
+        if (distance <= 3)
+        {
+            UseAction(Roleplay.AID.Smackdown, Player, -100f);
+
+            if (Player.FindStatus(SID.Smackdown) != null)
+                UseAction(Roleplay.AID.RoughDivide, primaryTarget, -100f);
+        }
+
+        if (Player.HPMP.CurHP * 2 < Player.HPMP.MaxHP)
+            UseAction(Roleplay.AID.SoothingPotion, Player, -100f);
+
+        switch (ComboAction)
+        {
+            case Roleplay.AID.BrutalShell:
+                UseAction(Roleplay.AID.SolidBarrel, primaryTarget);
+                break;
+            case Roleplay.AID.KeenEdge:
+                UseAction(Roleplay.AID.BrutalShell, primaryTarget);
+                break;
+            default:
+                UseAction(Roleplay.AID.KeenEdge, primaryTarget);
+                break;
+        }
+    }
+}
+
 class RanjitStates : StateMachineBuilder
 {
     public RanjitStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
             .ActivateOnEnter<HotPursuit>()
+            .ActivateOnEnter<ThancredAI>()
 
             .ActivateOnEnter<NexusOfThunder>()
             .ActivateOnEnter<CoiledLevin>()

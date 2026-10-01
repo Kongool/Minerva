@@ -18,6 +18,7 @@ public static class ClassShared
     {
         None = 0,
         Sprint = 3,
+        SmokeScreen = 7816,
 
         // Tank
         Rampart = 7531,

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using RID = Minerva.Roleplay.AID;
 
 namespace Minerva.Shadowbringers.Quest.MSQ.DeathUntoDawn.P3;
 
@@ -28,7 +29,7 @@ public enum SID : uint
     Invincibility = 325
 }
 
-class AutoGraha(ModuleBase module) : ModuleComponent(module)
+class AutoGraha(ModuleBase module) : QuestBattle.RotationModule<GrahaAI>(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
@@ -39,10 +40,78 @@ class AutoGraha(ModuleBase module) : ModuleComponent(module)
             if (h.Actor.FindStatus((uint)SID.Invincibility) != null)
                 h.Priority = AIHints.Enemy.PriorityInvincible;
         }
+        base.AddAIHints(slot, actor, assignment, hints);
     }
 }
 class DirectionalParry(ModuleBase module) : Components.DirectionalParry(module, [0x3201]);
 class Explosion(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Explosion, new AOEShapeCross(80f, 5f), maxCasts: 2);
+
+class GrahaAI(ModuleBase module, WorldState ws) : QuestBattle.UnmanagedRotation(ws, 25f)
+{
+    private static readonly uint[] _adds = [(uint)OID.MoonGana, (uint)OID.SpiritGana, (uint)OID.RavanasWill];
+
+    // Ravana's Wills just move to boss, whereas butterflies are only a threat once they start casting
+    private bool ShouldBreak(Actor a) => StatusDetails(a, (uint)Roleplay.SID.Break, Player.InstanceID).Left == 0 && (a.OID == (uint)OID.RavanasWill || a.CastInfo != null);
+
+    protected override void Exec(Actor? primaryTarget)
+    {
+        var alladds = module.Enemies(_adds);
+        var count = alladds.Count;
+        var adds = new List<Actor>(count);
+
+        for (var i = 0; i < count; ++i)
+        {
+            var a = adds[i];
+            if (a.IsTargetable && !a.IsDead)
+            {
+                adds.Add(a);
+                continue;
+            }
+            if (ShouldBreak(a) && a.Position.InCircle(Player.Position, 20f))
+                UseAction(RID.Break, Player);
+        }
+
+        Hints.GoalZones.Add(pos =>
+           {
+               var count = 0;
+               for (var i = 0; i < count; ++i)
+               {
+                   if (adds[i].Position.InCircle(pos, 20f))
+                       ++count;
+               }
+               return count;
+           });
+
+        if (MP >= 1000 && Player.HPMP.CurHP * 3 < Player.HPMP.MaxHP)
+            UseAction(RID.CureII, Player);
+
+        if (MP < 800)
+            UseAction(RID.AllaganBlizzardIV, primaryTarget);
+
+        if (primaryTarget?.OID == (uint)OID.Boss)
+        {
+            var thunder = StatusDetails(primaryTarget, Roleplay.SID.ThunderIV, Player.InstanceID);
+            if (thunder.Left < 3f)
+                UseAction(RID.ThunderIV, primaryTarget);
+        }
+
+        switch (ComboAction)
+        {
+            case RID.FireIV:
+                UseAction(RID.FireIV2, primaryTarget);
+                break;
+            case RID.FireIV2:
+                UseAction(RID.FireIV3, primaryTarget);
+                break;
+            case RID.FireIV3:
+                UseAction(RID.Foul, primaryTarget);
+                break;
+            default:
+                UseAction(RID.FireIV, primaryTarget);
+                break;
+        }
+    }
+}
 
 class LunarRavanaStates : StateMachineBuilder
 {

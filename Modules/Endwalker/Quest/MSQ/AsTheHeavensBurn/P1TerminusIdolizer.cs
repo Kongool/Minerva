@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Endwalker.MSQ;
 
 namespace Minerva.Endwalker.Quest.MSQ.AsTheHeavensBurn.P1TerminusIdolizer;
 
@@ -89,6 +90,8 @@ class SelfDestruct(ModuleBase module) : Components.GenericStackSpread(module)
 class Petrifaction(ModuleBase module) : Components.CastGaze(module, (uint)AID.Petrifaction);
 class Whack(ModuleBase module) : Components.SingleTargetCast(module, (uint)AID.Whack);
 
+class AutoAlphinaud(ModuleBase module) : QuestBattle.RotationModule<AlphinaudAI>(module);
+
 class TerminusIdolizerStates : StateMachineBuilder
 {
     public TerminusIdolizerStates(ModuleBase module) : base(module)
@@ -101,6 +104,7 @@ class TerminusIdolizerStates : StateMachineBuilder
             .ActivateOnEnter<SelfDestruct>()
             .ActivateOnEnter<Petrifaction>()
             .ActivateOnEnter<Whack>()
+            .ActivateOnEnter<AutoAlphinaud>()
             ;
     }
 }

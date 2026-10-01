@@ -5376,6 +5376,112 @@ t.Section("Arena clipping");
     t.Near("donut hole survives the clip", Area(donutTris), MathF.PI * ((20f * 20f) - (10f * 10f)), 30f);
 }
 
+// A quest battle script plays a solo duty: walk, click, fight, in order, each step ended by what happens in the world.
+// The 97 BossmodReborn scripts were ported 2026-10-01 so a duty Odysseus hands to Minerva gets finished.
+t.Section("Quest battle scripts walk, click and fight in order");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong me = 0x10000A01, mob = 0x40000A02, lever = 0x40000A03;
+    ws.Execute(new ActorState.OpCreate(me, 0u, 0, "Hero", 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, new ActorHPMP(50000, 50000, 0, 10000, 10000), true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, me)));
+    var pc = ws.Actors.Find(me)!;
+
+    Minerva.QuestBattle.QuestBattle.Navigation = null; // offline: the script's own points, straight lines
+    var qb = new TestQuest(ws);
+    qb.Update();
+    var h = new AIHints();
+    void Frame1(float x = float.NaN, float z = float.NaN)
+    {
+        if (!float.IsNaN(x))
+            ws.Execute(new ActorState.OpMove(me, new Vector4(x, 0, z, 0)));
+        qb.Update();
+        h.Clear();
+        h.PlayerPosition = pc.Position;
+        h.SeedPotentialTargets(ws.Actors);
+        qb.CalculateAIHints(0, pc, h);
+    }
+
+    Frame1();
+    t.True("the script says it is playing the duty", h.QuestDriven);
+    t.True("and walks the first objective's points in order",
+        h.QuestTravel is { Count: 2 } p && p[0] == new Vector3(10, 0, 0) && p[1] == new Vector3(10, 0, 10));
+    Frame1(9.5f, 0.2f);
+    t.True("a point reached drops off the walk", h.QuestTravel is { Count: 1 } p2 && p2[0] == new Vector3(10, 0, 10));
+    Frame1(10f, 9.7f);
+    t.True("arriving ends the walk", h.QuestTravel == null);
+    Frame1();
+    t.Eq("and completes a CompleteAtDestination objective on the next frame", qb.CurrentObjectiveIndex, 1);
+    t.True("whose next walk starts at once", h.QuestTravel is { Count: 1 } p3 && p3[0] == new Vector3(20, 0, 10));
+
+    // a mob in the fight stops a Pause objective's walk; out of combat the walk resumes from where we stand
+    ws.Execute(new ActorState.OpCreate(mob, 0x77u, 1, "Mob", 0, ActorType.Enemy, new Vector4(15, 0, 10, 0), 1f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCombat(mob, true));
+    Frame1();
+    t.True("something to fight within reach pauses the walk", h.QuestTravel == null);
+    t.True("the objective's priority raised the mob", h.PotentialTargets.Any(e => e.Actor.InstanceID == mob && e.Priority == 2));
+    ws.Execute(new ActorState.OpDead(mob, true));
+    Frame1();
+    t.Eq("its death completes CompleteOnKilled", qb.CurrentObjectiveIndex, 2);
+
+    // a click: the walk first, then the interact target is named
+    ws.Execute(new ActorState.OpCreate(lever, 0x1EA000u, 2, "Lever", 0, ActorType.EventObj, new Vector4(30, 0, 10, 0), 0.5f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCombat(mob, false));
+    ws.Execute(new ActorState.OpDestroy(mob));
+    Frame1();
+    t.True("an interact objective names what to click", h.InteractWithTarget?.InstanceID == lever);
+    t.True("and walks toward it meanwhile", h.QuestTravel is { Count: > 0 });
+    ws.Execute(new ActorState.OpEventState(lever, 7));
+    Frame1();
+    t.Eq("the clicked object's state 7 completes it", qb.CurrentObjectiveIndex, 3);
+    t.True("with every objective done the script asks for nothing", h.QuestTravel == null && h.InteractWithTarget == null);
+    qb.Dispose();
+}
+
+t.Section("Quest battle walks follow the navmesh's path");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong me = 0x10000A11;
+    ws.Execute(new ActorState.OpCreate(me, 0u, 0, "Hero", 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, new ActorHPMP(50000, 50000, 0, 10000, 10000), true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, me)));
+    var nav = new FakeQuestNavigation();
+    Minerva.QuestBattle.QuestBattle.Navigation = nav;
+    var qb = new TestQuest(ws);
+    for (var i = 0; i < 50 && qb.RemainingPath.Count == 0; ++i)
+    {
+        qb.Update();
+        Thread.Sleep(10);
+    }
+    t.True("each leg is asked of the mesh", nav.Asked >= 2);
+    t.True("its corners become the walk, ending at the script's point",
+        qb.RemainingPath.Count == 4 && qb.RemainingPath[0] == new Vector3(5, 1, 0) && qb.RemainingPath[^1] == new Vector3(10, 0, 10));
+    Minerva.QuestBattle.QuestBattle.Navigation = null;
+    qb.Dispose();
+}
+
+t.Section("What a quest script asks for reaches the rotation plugin");
+{
+    var q = new ActionQueue();
+    q.Push(ActionID.MakeSpell(SCH.AID.Physick), null, ActionQueue.Priority.High);
+    q.Push(ActionID.MakeSpell(Roleplay.AID.StoneIVSeventhDawn), null, ActionQueue.Priority.High);
+    t.True("outside a script only role-play actions are published", Minerva.QuestBattle.RoleplayRequests.From(q).Select(a => a.ActionId).SequenceEqual(new[] { (uint)Roleplay.AID.StoneIVSeventhDawn }));
+    t.Eq("a script's Physick on the wounded is a request", Minerva.QuestBattle.RoleplayRequests.From(q, questDriven: true).Length, 2);
+    var duty = new ClientState.DutyAction[ClientState.NumDutyActions];
+    duty[0] = new ClientState.DutyAction(ActionID.MakeSpell(SCH.AID.Physick), 1, 1);
+    t.Eq("a kit's duty action is a request", Minerva.QuestBattle.RoleplayRequests.From(q, kitDutyActions: duty).Length, 2);
+}
+
+t.Section("Solo duty scripts: who walks, who pulls");
+{
+    t.True("a ranged role under a script closes in and never backs off",
+        UptimeTargeting.ApproachOnly(new RangeBand(8f, 15f, 20f), Role.Ranged, true) == new RangeBand(0f, 15f, 20f));
+    t.True("melee keeps its band", UptimeTargeting.ApproachOnly(new RangeBand(0f, 2f, 3f), Role.Melee, true) == new RangeBand(0f, 2f, 3f));
+    t.True("without a script nothing changes", UptimeTargeting.ApproachOnly(new RangeBand(8f, 15f, 20f), Role.Ranged, false) == new RangeBand(8f, 15f, 20f));
+    t.True("a script's duty is pulled with no boss module", UptimeTargeting.Pulls(true, false, 0));
+}
+
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
@@ -5684,5 +5790,33 @@ sealed class Harness
     {
         Console.WriteLine($"\n{(failed == 0 ? "ALL PASSED" : "FAILURES")}: {passed} passed, {failed} failed.");
         return failed == 0 ? 0 : 1;
+    }
+}
+
+// A three-step quest battle: walk two points, kill a mob on the way, click a lever.
+sealed class TestQuest(WorldState ws) : Minerva.QuestBattle.QuestBattle(ws)
+{
+    public override List<Minerva.QuestBattle.QuestObjective> DefineObjectives(WorldState ws) => [
+        new Minerva.QuestBattle.QuestObjective(ws)
+            .WithConnection(new Vector3(10, 0, 0))
+            .WithConnection(new Vector3(10, 0, 10))
+            .CompleteAtDestination(),
+        new Minerva.QuestBattle.QuestObjective(ws)
+            .WithConnection(new Vector3(20, 0, 10))
+            .Hints((player, hints) => hints.PrioritizeTargetsByOID(0x77u, 2))
+            .CompleteOnKilled(0x77u),
+        Minerva.QuestBattle.QuestObjective.StandardInteract(ws, 0x1EA000u, new Vector3(29, 0, 10)),
+    ];
+}
+
+// A mesh that bends every leg through one corner at height 1.
+sealed class FakeQuestNavigation : Minerva.QuestBattle.IQuestNavigation
+{
+    public int Asked;
+    public bool IsReady => true;
+    public Task<List<Vector3>>? Pathfind(Vector3 from, Vector3 to)
+    {
+        Interlocked.Increment(ref this.Asked);
+        return Task.FromResult(new List<Vector3> { new((from.X + to.X) / 2, 1, (from.Z + to.Z) / 2), to });
     }
 }

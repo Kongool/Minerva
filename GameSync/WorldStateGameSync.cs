@@ -151,6 +151,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.SyncParty();
         this.SyncDutyActions();
         this.SyncCombo();
+        this.SyncGaugeAndLimitBreak();
         this.UpdateActiveFate();
         this.UpdateWaymarks();
     }
@@ -421,6 +422,18 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     /// "no charge information" rather than "no charges left".</para>
     /// </summary>
     /// <summary>The game's running combo, for role-play kits that press its next step.</summary>
+    private unsafe void SyncGaugeAndLimitBreak()
+    {
+        var gauges = FFXIVClientStructs.FFXIV.Client.Game.JobGaugeManager.Instance();
+        var gauge = gauges != null ? gauges->CurrentGauge : null;
+        this.ws.Client.GaugeLow = gauge != null ? *(ulong*)((byte*)gauge + 8) : 0ul;
+        this.ws.Client.GaugeHigh = gauge != null ? *(ulong*)((byte*)gauge + 16) : 0ul;
+
+        var lb = FFXIVClientStructs.FFXIV.Client.Game.UI.LimitBreakController.Instance();
+        this.ws.Party.LimitBreakCur = lb != null ? lb->CurrentUnits : 0;
+        this.ws.Party.LimitBreakMax = lb != null ? lb->BarUnits : 0;
+    }
+
     private unsafe void SyncCombo()
     {
         var am = FFXIVClientStructs.FFXIV.Client.Game.ActionManager.Instance();

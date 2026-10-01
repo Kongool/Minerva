@@ -123,6 +123,7 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
     /// </summary>
     public void MoveTo(WPos target, IReadOnlyList<WPos>? route)
     {
+        this.travelPath = null;
         this.target = target;
         this.Mode = this.UsingNavmesh ? Mover.NavPath : this.HookInstalled ? Mover.Hook : Mover.None;
 
@@ -207,10 +208,61 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Walk a quest battle's route. Unlike a dodge route it keeps every point's height: it crosses stairs and
+    /// floors, and the follower walks what it is given. Without a navmesh the raw hook steers at the next point.
+    /// </summary>
+    public void Travel(IReadOnlyList<Vector3> path)
+    {
+        if (path.Count == 0)
+        {
+            this.Stop();
+            return;
+        }
+
+        var next = new WPos(path[0].X, path[0].Z);
+        if (path.Count == 1 && this.nav.CanSteer)
+        {
+            // one point is a straight walk, which a steer does without a follower to restart every frame
+            this.MoveTo(next, null);
+            return;
+        }
+
+        if (!this.UsingNavmesh)
+        {
+            this.travelPath = null;
+            this.target = next;
+            this.Mode = this.HookInstalled ? Mover.Hook : Mover.None;
+            return;
+        }
+
+        this.target = null;
+        this.Mode = Mover.NavTravel;
+        // Same route, still being walked (or just handed over -- the follower takes a moment to start): leave it be.
+        // A stall, or a follower that stopped short, gets the route again from where the character stands.
+        var stalls = this.nav.StallCount();
+        var now = DateTime.UtcNow;
+        if (this.travelPath is { } prev && prev.Count == path.Count && prev[0] == path[0] && stalls <= this.navStalls
+            && (this.nav.PathRunning() || now - this.travelIssuedAt < TravelReissueAfter))
+            return;
+
+        this.nav.MoveTo([.. path]);
+        this.travelIssuedAt = now;
+        this.travelPath = [.. path];
+        this.navTarget = new WPos(path[^1].X, path[^1].Z);
+        this.navRoute = null;
+        this.navStalls = this.nav.StallCount();
+    }
+
+    private List<Vector3>? travelPath; // the quest route last handed to the follower
+    private DateTime travelIssuedAt;
+    private static readonly TimeSpan TravelReissueAfter = TimeSpan.FromSeconds(1);
+
     public void Stop()
     {
         this.Mode = Mover.None;
         this.target = null;
+        this.travelPath = null;
         if (this.navTarget != null)
         {
             this.nav.Stop();

@@ -34,6 +34,29 @@ public sealed class ClientState
     /// </summary>
     public uint ComboAction;
 
+    /// <summary>
+    /// The current job gauge's 16 bytes past its vtable, as BossmodReborn keeps them: what a job quest's script reads to
+    /// press the right step (a Dancer's steps, a Sage's Eukrasia). Written by the sync each frame; not recorded.
+    /// </summary>
+    public ulong GaugeLow, GaugeHigh;
+
+    /// <summary>The gauge as a game gauge struct (FFXIVClientStructs' <c>DancerGauge</c>, <c>SageGauge</c>), whose fields
+    /// start 8 bytes in, past the vtable.</summary>
+    public T GetGauge<T>() where T : unmanaged
+    {
+        Span<ulong> raw = stackalloc ulong[4];
+        raw[1] = this.GaugeLow;
+        raw[2] = this.GaugeHigh;
+        return MemoryMarshal.Read<T>(MemoryMarshal.AsBytes(raw));
+    }
+
+    /// <summary>Seconds until an action is off cooldown, answered by the plugin from the game (ActionManager); null
+    /// offline, where everything reads as ready.</summary>
+    public static Func<ActionID, float>? RecastQuery;
+
+    /// <summary>Seconds until <paramref name="action"/> can be used again; 0 when ready or unknown.</summary>
+    public float ReadyIn(ActionID action) => RecastQuery?.Invoke(action) ?? 0f;
+
     /// <summary>Does this duty grant any action at all?</summary>
     public bool HasDutyActions
     {

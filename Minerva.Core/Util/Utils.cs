@@ -30,6 +30,9 @@ public static class Utils
 
     public static void Swap<T>(ref T a, ref T b) => (a, b) = (b, a);
 
+    /// <summary>A point as "[x, y, z]" to three decimals, for logs.</summary>
+    public static string Vec3String(Vector3 pos) => $"[{pos.X:f3}, {pos.Y:f3}, {pos.Z:f3}]";
+
     /// <summary>Whether two values are within <paramref name="epsilon"/> of each other.</summary>
     public static bool AlmostEqual(float a, float b, float epsilon) => MathF.Abs(a - b) <= epsilon;
 

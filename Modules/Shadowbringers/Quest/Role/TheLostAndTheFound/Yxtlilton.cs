@@ -32,12 +32,69 @@ class CodexOfGravity(ModuleBase module) : Components.StackWithCastTargets(module
     }
 }
 
+class LamittAI(WorldState ws) : QuestBattle.UnmanagedRotation(ws, 25f)
+{
+    protected override void Exec(Actor? primaryTarget)
+    {
+        if (primaryTarget == null)
+            return;
+
+        var party = World.Party.WithoutSlot(false, false);
+
+        Hints.GoalZones.Add(p =>
+        {
+            var count = 0;
+            for (var i = 0; i < party.Length; ++i)
+            {
+                var act = party[i];
+                if (act.Position.InCircle(p, 15 + 0.5f + act.HitboxRadius))
+                {
+                    ++count;
+                }
+            }
+            return count;
+        });
+
+        var lowest = party.MinBy(p => p.PendingHPRatio)!;
+        var esunable = party.FirstOrDefault(x => x.FindStatus(482) != null);
+        var doomed = party.FirstOrDefault(x => x.FindStatus(1769) != null);
+        var partyHealth = party.Average(p => p.PendingHPRatio);
+
+        // pre heal during doom cast since it does insane damage for some reason
+        if (primaryTarget.CastInfo is { Action.ID: 17011 } ci && ci.TargetID == Player.InstanceID)
+        {
+            if (Player.PendingHPRatio <= 0.8f)
+                UseAction(Roleplay.AID.RonkanCureII, Player);
+        }
+
+        if (partyHealth < 0.6f)
+            UseAction(Roleplay.AID.RonkanMedica, Player);
+
+        if (lowest.HPMP.CurHP * 3 <= lowest.HPMP.MaxHP)
+            UseAction(Roleplay.AID.RonkanCureII, lowest);
+
+        if (esunable != null)
+            UseAction(Roleplay.AID.RonkanEsuna, esunable);
+
+        if (doomed != null)
+        {
+            UseAction(Roleplay.AID.RonkanRenew, doomed);
+            UseAction(Roleplay.AID.RonkanCureII, doomed);
+        }
+
+        UseAction(Roleplay.AID.RonkanStoneII, primaryTarget);
+    }
+}
+
+class AutoLamitt(ModuleBase module) : QuestBattle.RotationModule<LamittAI>(module);
+
 class YxtliltonStates : StateMachineBuilder
 {
     public YxtliltonStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<AutoLamitt>()
             .ActivateOnEnter<CodexOfDarknessII>()
             .ActivateOnEnter<CodexOfGravity>();
     }

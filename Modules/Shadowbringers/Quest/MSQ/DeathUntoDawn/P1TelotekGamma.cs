@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Shadowbringers.MSQ;
 
 namespace Minerva.Shadowbringers.Quest.MSQ.DeathUntoDawn.P1;
 
@@ -23,12 +24,15 @@ enum OID : uint
 class AntiPersonnelMissile(ModuleBase module) : Components.SpreadFromCastTargets(module, (uint)AID.AntiPersonnelMissile, 6f);
 class MRVMissile(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.MRVMissile, 12f, 6);
 
+class AlisaieAI(ModuleBase module) : QuestBattle.RotationModule<AutoAlisaie>(module);
+
 public class TelotekGammaStates : StateMachineBuilder
 {
     public TelotekGammaStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<AlisaieAI>()
             .ActivateOnEnter<AntiPersonnelMissile>()
             .ActivateOnEnter<MRVMissile>();
     }

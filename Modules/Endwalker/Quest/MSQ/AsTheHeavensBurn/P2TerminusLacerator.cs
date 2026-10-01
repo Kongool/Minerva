@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Endwalker.MSQ;
 
 namespace Minerva.Endwalker.Quest.MSQ.AsTheHeavensBurn.P2TerminusLacerator;
 
@@ -99,6 +100,8 @@ class Meteor(ModuleBase module) : Components.GenericLineOfSightAOE(module, defau
     }
 }
 
+class AutoAlisaie(ModuleBase module) : QuestBattle.RotationModule<AlisaieAI>(module);
+
 class TerminusLaceratorStates : StateMachineBuilder
 {
     public TerminusLaceratorStates(ModuleBase module) : base(module)
@@ -112,6 +115,7 @@ class TerminusLaceratorStates : StateMachineBuilder
             .ActivateOnEnter<DeadlyImpact2>()
             .ActivateOnEnter<Explosion>()
             .ActivateOnEnter<Meteor>()
+            .ActivateOnEnter<AutoAlisaie>()
             ;
     }
 }

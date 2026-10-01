@@ -35,6 +35,10 @@ public sealed class PartyState
     /// </summary>
     public const int PlayerSlot = 0;
 
+    /// <summary>The limit break gauge, in the game's units (10000 per bar), and its size: a role-play kit fires its
+    /// limit break on a full bar. Written by the sync each frame; not recorded.</summary>
+    public int LimitBreakCur, LimitBreakMax;
+
     public readonly struct Member(ulong contentID, ulong instanceID)
     {
         public readonly ulong ContentID = contentID;

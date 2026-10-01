@@ -86,6 +86,13 @@ public sealed class Configuration : IPluginConfiguration
     public bool AutoDodgeEnabled { get; set; }
 
     /// <summary>
+    /// Play a solo duty from its quest battle script (BossmodReborn's, ported): walk between rooms, click what has to
+    /// be clicked, pull what has to be killed. Needs auto-move. On by default: Odysseus hands solo duties to Minerva
+    /// expecting them finished, as BossmodReborn's AI does.
+    /// </summary>
+    public bool PlaySoloDuties { get; set; } = true;
+
+    /// <summary>
     /// Show Minerva's two entries on the server info bar — the state readout and the auto-dodge toggle.
     /// On by default: they are the only place either answer is visible without opening a window.
     /// <para>Hides the entries rather than releasing the slots, so the order the user has sorted them into

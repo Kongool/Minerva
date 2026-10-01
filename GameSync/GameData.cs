@@ -60,6 +60,33 @@ internal static unsafe class GameData
 
     private static readonly Dictionary<ushort, bool> soloDutyByCfc = [];
 
+    /// <summary>Seconds until <paramref name="action"/> is off cooldown (ClientState.RecastQuery).</summary>
+    public static float RecastRemaining(ActionID action)
+    {
+        var am = ActionManager.Instance();
+        if (am == null || action.ID == 0)
+            return 0f;
+        var type = (FFXIVClientStructs.FFXIV.Client.Game.ActionType)action.Type;
+        return MathF.Max(0f, am->GetRecastTime(type, action.ID) - am->GetRecastTimeElapsed(type, action.ID));
+    }
+
+    /// <summary>
+    /// A cutscene, a zone change, or an event the character is busy with -- talking, a "Searching..." interaction.
+    /// A quest battle's walk waits these out: the game ignores movement in most of them, and walking cancels the
+    /// interaction in the rest.
+    /// </summary>
+    public static bool Occupied()
+    {
+        var c = Service.Condition;
+        return c[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInCutSceneEvent]
+            || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.WatchingCutscene]
+            || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.WatchingCutscene78]
+            || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas]
+            || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas51]
+            || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInEvent]
+            || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInQuestEvent];
+    }
+
     public static ushort CurrentContentFinderConditionId()
     {
         var gm = GameMain.Instance();

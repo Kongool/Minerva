@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Stormblood.MSQ;
 
 namespace Minerva.Stormblood.Quest.MSQ.EmissaryOfTheDawn;
 
@@ -24,12 +25,15 @@ class LB(ModuleBase module) : ModuleComponent(module)
     }
 }
 
+class AlphinaudAI(ModuleBase module) : QuestBattle.RotationModule<AutoAlphi>(module);
+
 class HostileSkyArmorStates : StateMachineBuilder
 {
     public HostileSkyArmorStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<AlphinaudAI>()
             .ActivateOnEnter<LB>()
             .Raw.Update = () => module.World.CurrentCFCID != 582;
     }

@@ -59,6 +59,15 @@ public static class UptimeTargeting
         => role is Role.Tank or Role.Melee || !soloDuty && groupMembers > 0;
 
     /// <summary>
+    /// A ranged band with no floor, for a solo duty a quest battle script is playing: the character walks in until the
+    /// target is in reach and never backs away from it. Alone, a mob follows whoever it is fighting, and backing off it
+    /// is the walk in and out that cost a caster 17 of 74 casts (The Resonant, 2026-09-26) -- but a script has to reach
+    /// its mobs, and one standing 40 yalms off is never pulled. Melee and tanks keep their band.
+    /// </summary>
+    public static RangeBand ApproachOnly(RangeBand band, Role role, bool questSolo)
+        => questSolo && role is not (Role.Tank or Role.Melee) ? band with { Min = 0f } : band;
+
+    /// <summary>
     /// The role uptime is judged by while a role-play kit plays the fight: its reach, not the job underneath. Hien's
     /// kit is melee (3 yalms) whatever job you queued as; Y'shtola's is ranged (25). <paramref name="kitRange"/> 0 is no
     /// kit, and the job's role stands.

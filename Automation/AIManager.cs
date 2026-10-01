@@ -179,6 +179,25 @@ public sealed class AIManager
             return;
         }
 
+        // A zone hazard adds to an encounter rather than replacing it, so this runs after the boss module has filled
+        // its zones -- and runs even when there is no boss, which is the whole point: a field effect with no encounter
+        // attached has nowhere else to be expressed. Before anything reads the hints, so a zone's kit, target and
+        // stand-still count like a module's. A quest battle script is the exception: as in BossmodReborn it stands
+        // aside while a boss module runs the fight. Contained, because a zone module lives for the entire visit and
+        // one that throws would otherwise do so every frame.
+        if (this.modules.ActiveZoneModule is { } zone
+            && (zone is not QuestBattle.QuestBattle || this.config.PlaySoloDuties && !InCharge(module, pc)))
+        {
+            try
+            {
+                zone.CalculateAIHints(0, pc, this.hints);
+            }
+            catch (Exception ex)
+            {
+                Service.Log.Error(ex, $"Minerva: zone module {zone.GetType().Name} threw building AI hints.");
+            }
+        }
+
         // Modules flag invulnerable phases one fight at a time; this covers the ones that do not.
         this.hints.MarkInvincibleByStatus();
 
@@ -207,11 +226,26 @@ public sealed class AIManager
         // not dodge-only: the kit's buttons need their range (UptimeTargeting.KitRole).
         var kit = this.hints.RoleplayKitRange > 0f;
         var role = UptimeTargeting.KitRole(pc.Role, this.hints.RoleplayKitRange);
-        var walks = UptimeTargeting.Walks(role, soloDuty && !kit, otherPlayers + this.NpcPartyMembers());
+        // A quest battle script playing the duty (AIHints.QuestDriven) goes to what it has to fight, ranged roles too:
+        // nobody else is coming, and a mob out of cast range is never pulled. The ranged ones only close in
+        // (UptimeTargeting.ApproachOnly): backing off a mob that follows is what cost casts in a solo duty.
+        var questDriven = this.hints.QuestDriven;
+        var walks = UptimeTargeting.Walks(role, soloDuty && !kit && !questDriven, otherPlayers + this.NpcPartyMembers());
         var target = walks ? this.UptimeTarget(module, pc) : null;
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
         // Nobody else will start this fight (UptimeTargeting.Pulls): published for the rotation plugin to open on.
-        this.PullTargetId = target != null && UptimeTargeting.Pulls(module != null, target.InCombat, otherPlayers) ? target.InstanceID : 0ul;
+        this.PullTargetId = target != null && UptimeTargeting.Pulls(module != null || questDriven, target.InCombat, otherPlayers) ? target.InstanceID : 0ul;
+        // The script's walk to the next room (AIHints.QuestTravel): taken whenever nothing dangerous needs answering,
+        // so uptime is not walked meanwhile -- the solve below looks after safety alone.
+        var travel = this.config.PlaySoloDuties && this.hints.QuestTravel is { Count: > 0 } ? this.hints.QuestTravel : null;
+        // A push a way rather than to a place (BossmodReborn's ForcedMovement): walk out from the side of a stealth run,
+        // go to Hien when he is out of reach. Taken as a short walk that way, on the same terms as the script's route.
+        if (travel == null && this.hints.ForcedMovement != default)
+        {
+            var push = this.hints.ForcedMovement.Normalized() * 3f;
+            var here = pc.PosRot.XYZ();
+            travel = [new Vector3(here.X + push.X, here.Y, here.Z + push.Z)];
+        }
         // The band says when to move (outside it) and where to stop (at its preferred distance); BandWalk is what
         // remembers a walk is under way, so crossing back into the band does not end it short of preferred.
         UptimeGoal? goal = null;
@@ -223,7 +257,11 @@ public sealed class AIManager
             goal = new UptimeGoal(this.standNearPoint, default, this.standNearRange);
             this.bandWalk.Reset();
         }
-        else if (UptimeTargeting.InteractGoal(this.hints.InteractWithTarget, soloDuty) is { } interact)
+        else if (travel != null)
+        {
+            this.bandWalk.Reset();
+        }
+        else if (UptimeTargeting.InteractGoal(this.hints.InteractWithTarget, soloDuty && !questDriven) is { } interact)
         {
             // Something to click (an Empty Vessel, a fruit, the converter): walk to it, and the rotation plugin clicks
             // once in range (Minerva.Hints.InteractTarget). Recorded as the walk's target so a replay shows where it went.
@@ -233,27 +271,11 @@ public sealed class AIManager
         }
         else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)
             goal = this.bandWalk.Apply(
-                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(this.ActivePositional, target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), this.BandFor(pc, role, target)),
+                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(this.ActivePositional, target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target), role, questDriven && soloDuty)),
                 pc.Position,
                 pc.CastInfo != null);
         else
             this.bandWalk.Reset();
-        // A zone hazard adds to an encounter rather than replacing it, so this runs after the boss
-        // module has filled its zones -- and runs even when there is no boss, which is the whole point:
-        // a field effect with no encounter attached has nowhere else to be expressed. Contained, because
-        // a zone module lives for the entire visit and one that throws would otherwise do so every frame.
-        if (this.modules.ActiveZoneModule is { } zone)
-        {
-            try
-            {
-                zone.CalculateAIHints(0, pc, this.hints);
-            }
-            catch (Exception ex)
-            {
-                Service.Log.Error(ex, $"Minerva: zone module {zone.GetType().Name} threw building AI hints.");
-            }
-        }
-
         var lead = Math.Clamp(this.config.AutoDodgeClearanceLead, 0f, 5f);
 
         // Publish a cast budget the steering branch below will honour. That branch cancels a hardcast the moment
@@ -261,7 +283,7 @@ public sealed class AIManager
         // offered casts that were cancelled a frame after they began -- a Pictomancer starting and losing cast
         // after cast through a dense dodge phase (2026-09-14). See CastBudget. Only where that cancel can happen:
         // auto-dodge on and a real controller installed, the same conditions the cancel itself runs under.
-        // Placed after the zone module's hints on purpose, so a field hazard shortens the budget too.
+        // After the zone module's hints, so a field hazard shortens the budget too.
         if (this.config.AutoDodgeEnabled && this.movement is not NullMovementController)
             this.MaxCastTime = CastBudget.Reconcile(
                 this.MaxCastTime,
@@ -360,12 +382,33 @@ public sealed class AIManager
         if (steering && this.movement is not NullMovementController)
             this.MaxCastTime = 0f;
 
+        // The quest battle's walk, when no danger or assigned spot needs a move: it waits for a cast to finish (and
+        // starts no new one meanwhile), for a rotation's hold, a gaze and a cutscene or event, and never runs for a
+        // stunned character. Recorded as steering with reason Travel.
+        var travelling = false;
+        if (!steering && travel != null && this.config.AutoDodgeEnabled && this.movement is not NullMovementController
+            && !this.Current.NeedToMove && !this.HoldActive && this.SecondsUntilGaze > GazeHoldSeconds
+            && Incapacitation.Blocking(pc) == null && !GameData.Occupied())
+        {
+            this.MaxCastTime = 0f;
+            travelling = pc.CastInfo == null;
+        }
+
         if (steering)
             // Steer is where to head this frame (used when we drive directly); Route is the whole path,
             // for a navmesh follower that walks what it is given rather than being steered.
             this.movement.MoveTo(this.Current.Steer, this.Current.Route);
+        else if (travelling)
+            this.movement.Travel(travel!);
         else
             this.movement.Stop();
+
+        if (travelling)
+        {
+            var next = travel![0];
+            this.Publish(this.Decide(true, true, new WPos(next.X, next.Z), DodgeReason.Travel, DodgeBlocker.None, true));
+            return;
+        }
 
         var blocker = steering ? DodgeBlocker.None
             : !this.config.AutoDodgeEnabled ? DodgeBlocker.AutoDodgeOff
@@ -534,7 +577,7 @@ public sealed class AIManager
     /// the rotation plugin presses them. Empty outside a role-play fight.
     /// </summary>
     public (uint ActionId, ulong TargetId, float Priority, Vector3 TargetPos, float FacingRad)[] RoleplayActions
-        => this.HasSolution ? QuestBattle.RoleplayRequests.From(this.hints.ActionsToExecute) : [];
+        => this.HasSolution ? QuestBattle.RoleplayRequests.From(this.hints.ActionsToExecute, this.hints.QuestDriven, this.hints.RoleplayKitRange > 0f ? this.world.Client.DutyActions : null) : [];
 
     /// <summary>Instance ID of the one thing the fight wants attacked, or 0. Outranks priorities.</summary>
     public ulong ForcedTargetId => this.HasSolution && this.hints.ForcedTarget is { IsDeadOrDestroyed: false } f ? f.InstanceID : 0uL;
@@ -1367,7 +1410,11 @@ public sealed class AIManager
         // list and no uptime goal, so the character simply stopped where it was. BossmodReborn and veyn's BossMod both
         // keep a goal on the current target every frame, which is what makes them follow a mob around; this is the
         // same thing, inside the leash that <see cref="InTheFight"/> already applies.
-        if (!this.config.AutoHintsForTrash || this.autoHints is not { } guess)
+        // A quest battle script needs the arena, the enemy list and the walk even with guessing off: it is the script,
+        // not the guess, that plays the duty.
+        var quest = this.config.PlaySoloDuties && this.modules.ActiveZoneModule is QuestBattle.QuestBattle;
+        var guess = this.config.AutoHintsForTrash ? this.autoHints : null;
+        if (guess == null && !quest)
             return false;
 
         this.hints.Clear();
@@ -1399,10 +1446,10 @@ public sealed class AIManager
         // combat come in as undesirable, so this can never read as "go and pull that".
         this.hints.SeedPotentialTargets(this.world.Actors);
 
-        if (guess.Count != 0 || guess.GazeCount != 0)
+        if (guess != null && (guess.Count != 0 || guess.GazeCount != 0))
         {
-            this.autoHints.AddForbiddenZones(this.hints);
-            this.autoHints.AddForbiddenDirections(this.hints, pc.Position);
+            guess.AddForbiddenZones(this.hints);
+            guess.AddForbiddenDirections(this.hints, pc.Position);
         }
 
         this.ApplyKnownVoids();

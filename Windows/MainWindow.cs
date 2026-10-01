@@ -217,6 +217,7 @@ public sealed class MainWindow : Window, IDisposable
                 ("Auto-move", cfg.AutoDodgeEnabled, v => cfg.AutoDodgeEnabled = v, "Steer your character to the safe spot. Experimental."),
                 ("Face gazes", cfg.AutoFaceGazes, v => cfg.AutoFaceGazes = v, "Turn your character away from gazes. Experimental."),
                 ("Navmesh", cfg.UseNavmesh, v => cfg.UseNavmesh = v, "Path around walls with Ariadne or vnavmesh when available; falls back to direct steering."),
+                ("Solo duties", cfg.PlaySoloDuties, v => cfg.PlaySoloDuties = v, "Play a solo duty from its script: walk to the next room, click what needs clicking, pull what needs killing. Needs Auto-move."),
                 ("Follow my target", cfg.UptimeFollowsOwnTarget, v => cfg.UptimeFollowsOwnTarget = v, "Keep uptime on your own target before the boss, so a rotation that switches to adds gets walked to them."));
             if (ImGui.BeginTable("##dodge", 2, ImGuiTableFlags.SizingStretchProp))
             {

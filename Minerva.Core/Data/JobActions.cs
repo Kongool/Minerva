@@ -64,6 +64,8 @@ public static class DNC
     public enum AID : uint
     {
         None = 0,
+        DoubleStandardFinish = 16192,
+        StandardStep = 15997,
         ClosedPosition = 16006,
     }
 
@@ -82,5 +84,86 @@ public static class BRD
     {
         None = 0,
         WardensPaean = 3561,
+    }
+}
+
+// The jobs below are here for quest battle scripts (Minerva.QuestBattle): a job quest that needs a particular button on
+// a particular target -- Physick on the wounded, Hide to sneak. Only what the scripts name.
+
+/// <summary>Scholar.</summary>
+public static class SCH
+{
+    public enum AID : uint
+    {
+        None = 0,
+        Physick = 190,
+    }
+}
+
+/// <summary>Reaper.</summary>
+public static class RPR
+{
+    public enum AID : uint
+    {
+        None = 0,
+        Guillotine = 24384,
+    }
+
+    public enum SID : uint
+    {
+        None = 0,
+        SoulReaver = 2587,
+    }
+}
+
+/// <summary>Sage.</summary>
+public static class SGE
+{
+    public enum AID : uint
+    {
+        None = 0,
+        Diagnosis = 24284,
+        Eukrasia = 24290,
+        EukrasianDiagnosis = 24291,
+    }
+
+    public enum SID : uint
+    {
+        None = 0,
+        Eukrasia = 2606,
+        EukrasianDiagnosis = 2607,
+    }
+}
+
+/// <summary>Astrologian.</summary>
+public static class AST
+{
+    public enum AID : uint
+    {
+        None = 0,
+        AspectedBenefic = 3595,
+        BeneficII = 3610,
+    }
+
+    public enum SID : uint
+    {
+        None = 0,
+        AspectedBenefic = 835,
+    }
+}
+
+/// <summary>Ninja.</summary>
+public static class NIN
+{
+    public enum AID : uint
+    {
+        None = 0,
+        Hide = 2245,
+    }
+
+    public enum SID : uint
+    {
+        None = 0,
+        Hidden = 614,
     }
 }

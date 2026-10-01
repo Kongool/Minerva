@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Minerva;
+using Minerva.QuestBattle.Shadowbringers.RoleQuests;
 
 namespace Minerva.Shadowbringers.Quest.Role.NyelbertsLament;
 
@@ -104,12 +105,15 @@ class PassageOfArms(ModuleBase module) : ModuleComponent(module)
     }
 }
 
+class NyelbertAI(ModuleBase module) : QuestBattle.RotationModule<AutoNyelbert>(module);
+
 class BovianStates : StateMachineBuilder
 {
     public BovianStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
 
+            .ActivateOnEnter<NyelbertAI>()
             .ActivateOnEnter<FallingRock>()
             .ActivateOnEnter<ZoomIn>()
             .ActivateOnEnter<TwoThousandMinaSlash>()
