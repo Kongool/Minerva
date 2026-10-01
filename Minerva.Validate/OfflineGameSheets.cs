@@ -23,13 +23,19 @@ public sealed class OfflineGameSheets : IShapeResolver, INameResolver
     private readonly ExcelSheet<LuminaAction>? actions;
     private readonly ExcelSheet<LuminaOmen>? omens;
     private readonly ExcelSheet<LuminaBNpcName>? bnpcNames;
+    private readonly ExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>? duties;
 
     private OfflineGameSheets(GameData data)
     {
         this.actions = data.GetExcelSheet<LuminaAction>();
         this.omens = data.GetExcelSheet<LuminaOmen>();
         this.bnpcNames = data.GetExcelSheet<LuminaBNpcName>();
+        this.duties = data.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
     }
+
+    /// <summary>A duty's name from its content-finder condition, or null.</summary>
+    public string? DutyName(uint cfc)
+        => this.duties != null && this.duties.TryGetRow(cfc, out var d) && d.Name.ExtractText() is { Length: > 0 } n ? n : null;
 
     /// <summary>Open the sheets at a game path, or return null with a reason.</summary>
     public static OfflineGameSheets? TryOpen(string sqpackPath, out string error)

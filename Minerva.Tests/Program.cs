@@ -5482,6 +5482,54 @@ t.Section("Solo duty scripts: who walks, who pulls");
 }
 
 
+// A solo duty played once by hand becomes a script draft: the user, 2026-10-01, wants "something that would write it
+// out into a script file", with the targets they picked and the allies they healed.
+t.Section("A hand-played solo duty becomes a quest script draft");
+{
+    var ws = new WorldState(10_000_000, "test");
+    var cap = Minerva.Generation.QuestScriptCapture.Attach(ws);
+    var i = 0u;
+    void Tick(float x, float z)
+    {
+        ws.Execute(new WorldState.OpFrameStart(Frame(ws, ++i, dtSeconds: 1f), TimeSpan.FromSeconds(1)));
+        ws.Execute(new ActorState.OpMove(0x10000B01, new Vector4(x, 0, z, 0)));
+    }
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new WorldState.OpZoneChange(zone: 100, cfcID: 777));
+    ws.Execute(new ActorState.OpCreate(0x10000B01, 0u, 0, "Hero", 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, new ActorHPMP(50000, 50000, 0, 10000, 10000), true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, 0x10000B01)));
+    ws.Execute(new ActorState.OpCreate(0x40000B02, 0x1EA111u, 1, "Crate", 0, ActorType.EventObj, new Vector4(20, 0, 0, 0), 0.5f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x40000B03, 0x5F8u, 2, "Wounded", 0, ActorType.Enemy, new Vector4(25, 0, 5, 0), 0.5f, new ActorHPMP(4000, 10000, 0, 0, 0), true, true, 0));
+    ws.Execute(new ActorState.OpCreate(0x40000B04, 0x88u, 3, "Wolf", 0, ActorType.Enemy, new Vector4(40, 0, 20, 0), 1f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    for (var x = 0f; x <= 18f; x += 2f)
+        Tick(x, 0f);
+    ws.Execute(new ActorState.OpTarget(0x10000B01, 0x40000B02));
+    Tick(19f, 0f);
+    ws.Execute(new ActorState.OpEventState(0x40000B02, 7));
+    Tick(19f, 0f);
+    ws.Execute(new ActorState.OpCastEvent(0x10000B01, new ActorCastEvent(ActionID.MakeSpell(SCH.AID.Physick), 0x40000B03, default, default, 1)));
+    for (var z = 0f; z <= 18f; z += 2f)
+        Tick(20f + z, z);
+    ws.Execute(new ActorState.OpCombat(0x10000B01, true));
+    ws.Execute(new ActorState.OpCombat(0x40000B04, true));
+    Tick(38f, 18f);
+    ws.Execute(new ActorState.OpDead(0x40000B04, true));
+    ws.Execute(new ActorState.OpCombat(0x10000B01, false));
+    Tick(38f, 18f);
+    cap.Finish();
+
+    t.Eq("the duty is the one entered", cap.CFC, 777u);
+    t.True("the click is read from target, stand-by and the object's change",
+        cap.Interactions.Count == 1 && cap.Interactions[0].Target.OID == 0x1EA111u && cap.Interactions[0].End == Minerva.Generation.QuestScriptCapture.InteractEnd.State7);
+    t.True("the fight keeps what died", cap.Fights.Count == 1 && cap.Fights[0].Kills.Count == 1 && cap.Fights[0].Kills[0].Enemy.OID == 0x88u);
+    t.True("the heal on the wounded ally is kept with its HP", cap.Heals.Count == 1 && cap.Heals[0].Target.OID == 0x5F8u && Math.Abs(cap.Heals[0].HPRatio - 0.4f) < 0.01f);
+    var src = Minerva.Generation.QuestScriptGenerator.Generate(cap, "TestDuty", "Test Duty", new Minerva.Generation.NullNameResolver(), "test.log");
+    t.True("the draft clicks the crate and waits for its state 7", src.Contains(".WithInteract(0x1EA111u)") && src.Contains(".CompleteOnState7(0x1EA111u)"));
+    t.True("then fights the wolf", src.Contains("hints.PrioritizeTargetsByOID(0x88u, 1)") && src.Contains("act.OID == 0 && !act.InCombat"));
+    t.True("and keeps the wounded healed below where the player healed them", src.Contains("ActionID.MakeSpell(190u), ally5F8") && src.Contains("HPRatio < 0.45f"));
+    t.True("the walk is simplified to its corners", Minerva.Generation.QuestScriptGenerator.Simplify([new(0, 0, 0), new(5, 0, 0.1f), new(10, 0, 0), new(10, 0, 10)], 2f).Count == 3);
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.

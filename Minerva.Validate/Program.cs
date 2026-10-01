@@ -44,6 +44,11 @@ if (args_.Length == 0 || args_.Contains("--help") || args_.Contains("-h"))
           write a module draft per recording, reading shapes and names from the game's own sheets.
           --game defaults to the usual install locations; --out defaults beside each recording
 
+        minerva-validate --generate-quest <recording.log | folder> [--game <sqpack>] [--out <dir>]
+          write a quest battle script draft from a solo duty played by hand: the walk, each click and
+          what ended it, each fight in kill order, and a heal rule per ally healed. --out defaults
+          beside each recording
+
         minerva-validate --bmr-probe [--bmr <BossModReborn.dll>] [--dalamud <dir>] [--oid 0x4612]
           load BossmodReborn out of game and construct a module from it (dual-viewer phase 0)
         """);
@@ -59,6 +64,11 @@ if (args_[0] == "--bmr-probe")
 if (args_[0] == "--action")
 {
     return DescribeActions(args_.Skip(1).Where(a => !a.StartsWith("--")).ToArray(), ArgValue("--game"));
+}
+
+if (args_[0] == "--generate-quest")
+{
+    return GenerateQuest(args_.Length > 1 ? args_[1] : null, ArgValue("--game"), ArgValue("--out"));
 }
 
 if (args_[0] == "--generate")
@@ -438,6 +448,77 @@ static string? FindPluginAssembly()
 /// carried back by hand, so the extract → generate → validate → compare-against-BMR loop could never run
 /// unattended. Lumina reads the same sheets off the install, so it can.</para>
 /// </summary>
+static int GenerateQuest(string? target, string? gamePath, string? outDir)
+{
+    if (target == null)
+    {
+        Console.Error.WriteLine("error: --generate-quest needs a recording or a folder.");
+        return 2;
+    }
+
+    var logs = Directory.Exists(target)
+        ? Directory.GetFiles(target, "*.log").OrderBy(f => f).ToArray()
+        : File.Exists(target) ? [target] : [];
+    if (logs.Length == 0)
+    {
+        Console.Error.WriteLine($"error: no recordings at {target}.");
+        return 2;
+    }
+
+    // names are a nicety here: without the game's sheets the draft still writes, with ids
+    OfflineGameSheets? sheets = null;
+    foreach (var c in gamePath != null ? [gamePath] : OfflineGameSheets.LikelyPaths().ToArray())
+        if ((sheets = OfflineGameSheets.TryOpen(c, out _)) != null)
+            break;
+    INameResolver names = sheets != null ? sheets : new NullNameResolver();
+
+    var written = 0;
+    foreach (var log in logs)
+    {
+        QuestScriptCapture? capture = null;
+        try
+        {
+            using var reader = new StreamReader(log);
+            ReplayParser.Replay(reader, ws => capture = QuestScriptCapture.Attach(ws));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"{Path.GetFileName(log)}: could not parse — {ex.Message}");
+            continue;
+        }
+
+        capture!.Finish();
+        if (capture.CFC == 0 || capture.Path.Count == 0)
+        {
+            Console.WriteLine($"{Path.GetFileName(log)}: not in a duty, or no player path; skipped");
+            continue;
+        }
+
+        var duty = sheets?.DutyName(capture.CFC) ?? $"CFC {capture.CFC}";
+        var className = QuestClassName(duty, capture.CFC);
+        var source = QuestScriptGenerator.Generate(capture, className, duty, names, Path.GetFileName(log));
+        var dir = outDir ?? Path.GetDirectoryName(Path.GetFullPath(log))!;
+        Directory.CreateDirectory(dir);
+        var outPath = Path.Combine(dir, className + ".cs");
+        File.WriteAllText(outPath, source);
+        ++written;
+        Console.WriteLine($"{Path.GetFileName(log)}: {duty} (CFC {capture.CFC}) -> {outPath}  " +
+            $"[{capture.Interactions.Count} click(s), {capture.Fights.Count} fight(s), {capture.Heals.Count} heal(s){(capture.RolePlaying ? ", role-playing" : "")}]");
+    }
+
+    return written > 0 ? 0 : 1;
+}
+
+/// <summary>"The Will of the Moon" -> TheWillOfTheMoon; a name with no letters falls back to the CFC.</summary>
+static string QuestClassName(string duty, uint cfc)
+{
+    var sb = new System.Text.StringBuilder();
+    foreach (var word in System.Text.RegularExpressions.Regex.Split(duty, "[^A-Za-z0-9]+"))
+        if (word.Length > 0)
+            sb.Append(char.ToUpperInvariant(word[0])).Append(word.AsSpan(1));
+    return sb.Length > 0 && char.IsLetter(sb[0]) ? sb.ToString() : $"SoloDuty{cfc}";
+}
+
 static int Generate(string? target, string? gamePath, string? outDir)
 {
     if (target == null)
