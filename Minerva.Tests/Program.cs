@@ -2577,6 +2577,33 @@ t.Section("A stage does not hold you inside what fires right after it");
     t.True("and it is a step, not a run across the arena", (spot.Target - pov).Length() < 8f);
 }
 
+// A recording started before the player is known (a solo duty, recorded from zone-in) dropped the player as "another
+// player" for the whole of it: The Will of the Moon, 2026-09-30, no position and no cast of the character played.
+t.Section("A recording started before the player is known still records the player");
+{
+    var w = new WorldState(10_000_000, "test");
+    var sw = new System.IO.StringWriter();
+    const ulong me = 0x10055C3A, stranger = 0x10000FFFF;
+    using (new ReplayRecorder(w, sw, excludeOtherPlayers: true, localPlayerId: 0))
+    {
+        w.Execute(new WorldState.OpFrameStart(Frame(w, 0), TimeSpan.Zero));
+        w.Execute(new ActorState.OpCreate(me, 0, 0, "Grakur", 0, ActorType.Player, new Vector4(1, 0, 1, 0), 0.5f, new ActorHPMP(100, 100, 0, 0, 0), true, true, 0));
+        w.Execute(new ActorState.OpCreate(stranger, 0, 1, "Stranger", 0, ActorType.Player, new Vector4(9, 0, 9, 0), 0.5f, default, true, true, 0));
+        w.Execute(new PartyState.OpModify(0, new PartyState.Member(0, me)));
+        w.Execute(new ActorState.OpMove(me, new Vector4(5, 0, 6, 0)));
+        w.Execute(new ActorState.OpMove(stranger, new Vector4(8, 0, 8, 0)));
+    }
+    var log = sw.ToString();
+    t.True("the player is written once seated", log.Contains("ACT+ 10055C3A"));
+    t.True("and followed from there", log.Contains("MOVE 10055C3A"));
+    t.True("a stranger is still left out", !log.Contains("10000FFFF"));
+    var replay = ReplayParser.ParseTimeline(new System.IO.StringReader(log));
+    var rw = new WorldState(replay.QPF, replay.GameVersion);
+    foreach (var (_, op) in replay.Ops)
+        rw.Execute(op);
+    t.True("and replays where it went", rw.Actors.Find(me) is { } back && MathF.Abs(back.Position.X - 5f) < 0.01f && MathF.Abs(back.Position.Z - 6f) < 0.01f);
+}
+
 t.Section("Gaze facing hints");
 {
     // A gaze is the one mechanic where position does not matter and facing is everything, so the arc has to

@@ -121,31 +121,35 @@ public sealed class ActorState : IEnumerable<Actor>
     {
         List<WorldState.Operation> ops = [];
         foreach (var a in this.Actors.Values)
-        {
-            ops.Add(new OpCreate(a.InstanceID, a.OID, a.SpawnIndex, a.Name, a.NameID, a.Type, a.PosRot, a.HitboxRadius, a.HPMP, a.IsTargetable, a.IsAlly, a.OwnerID));
-            if (a.HPMP != default)
-                ops.Add(new OpHPMP(a.InstanceID, a.HPMP));
-            if (a.IsDead)
-                ops.Add(new OpDead(a.InstanceID, true));
-            if (a.InCombat)
-                ops.Add(new OpCombat(a.InstanceID, true));
-            if (a.Class != Class.None)
-                ops.Add(new OpClassChange(a.InstanceID, a.Class));
-            if (a.EventState != 0)
-                ops.Add(new OpEventState(a.InstanceID, a.EventState));
-            if (a.Renderflags != 0)
-                ops.Add(new OpRenderflags(a.InstanceID, a.Renderflags));
-            if (a.TargetID != default)
-                ops.Add(new OpTarget(a.InstanceID, a.TargetID));
-            if (a.Tether.ID != default)
-                ops.Add(new OpTether(a.InstanceID, a.Tether));
-            if (a.CastInfo != null)
-                ops.Add(new OpCastInfo(a.InstanceID, a.CastInfo));
-            for (var i = 0; i < Actor.NumStatuses; ++i)
-                if (a.Statuses[i].ID != default)
-                    ops.Add(new OpStatus(a.InstanceID, i, a.Statuses[i]));
-        }
+            Snapshot(a, ops);
         return ops;
+    }
+
+    /// <summary>The ops that recreate <paramref name="a"/> as it stands now, appended to <paramref name="ops"/>.</summary>
+    public static void Snapshot(Actor a, List<WorldState.Operation> ops)
+    {
+        ops.Add(new OpCreate(a.InstanceID, a.OID, a.SpawnIndex, a.Name, a.NameID, a.Type, a.PosRot, a.HitboxRadius, a.HPMP, a.IsTargetable, a.IsAlly, a.OwnerID));
+        if (a.HPMP != default)
+            ops.Add(new OpHPMP(a.InstanceID, a.HPMP));
+        if (a.IsDead)
+            ops.Add(new OpDead(a.InstanceID, true));
+        if (a.InCombat)
+            ops.Add(new OpCombat(a.InstanceID, true));
+        if (a.Class != Class.None)
+            ops.Add(new OpClassChange(a.InstanceID, a.Class));
+        if (a.EventState != 0)
+            ops.Add(new OpEventState(a.InstanceID, a.EventState));
+        if (a.Renderflags != 0)
+            ops.Add(new OpRenderflags(a.InstanceID, a.Renderflags));
+        if (a.TargetID != default)
+            ops.Add(new OpTarget(a.InstanceID, a.TargetID));
+        if (a.Tether.ID != default)
+            ops.Add(new OpTether(a.InstanceID, a.Tether));
+        if (a.CastInfo != null)
+            ops.Add(new OpCastInfo(a.InstanceID, a.CastInfo));
+        for (var i = 0; i < Actor.NumStatuses; ++i)
+            if (a.Statuses[i].ID != default)
+                ops.Add(new OpStatus(a.InstanceID, i, a.Statuses[i]));
     }
 
     /// <summary>Base for actor-scoped operations: resolves the target actor before applying.</summary>

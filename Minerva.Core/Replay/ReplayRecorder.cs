@@ -91,6 +91,31 @@ public sealed class ReplayRecorder : IDisposable
             }
         }
         this.Write(op);
+
+        // An actor dropped as "another player" that turns out to be ours -- seated in the party, or found to be the
+        // player -- is written as it stands now and followed from here. A recording started at zone-in, before the
+        // player was known, dropped the player itself for the whole of it: The Will of the Moon, 2026-09-30, no position
+        // and no cast of the character the fight was about.
+        if (this.dropped.Count != 0)
+        {
+            if (op is PartyState.OpModify seated && seated.Member.InstanceID != 0)
+                this.Readmit(seated.Member.InstanceID, op.Timestamp);
+            if (this.ws.Party.PlayerInstanceID != 0)
+                this.Readmit(this.ws.Party.PlayerInstanceID, op.Timestamp);
+        }
+    }
+
+    private void Readmit(ulong instanceID, DateTime now)
+    {
+        if (!this.dropped.Remove(instanceID) || this.ws.Actors.Find(instanceID) is not { } actor)
+            return;
+        var ops = new List<WorldState.Operation>();
+        ActorState.Snapshot(actor, ops);
+        foreach (var o in ops)
+        {
+            o.Timestamp = now;
+            this.Write(o);
+        }
     }
 
     // keep enemies/helpers/objects always; for players & pets keep only the POV player and party members
@@ -98,7 +123,7 @@ public sealed class ReplayRecorder : IDisposable
     {
         if (type is not (ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Companion))
             return true;
-        if (instanceID == this.localPlayerId)
+        if (instanceID == this.localPlayerId || instanceID == this.ws.Party.PlayerInstanceID)
             return true;
         foreach (var slot in this.ws.Party.Slots)
             if (slot.InstanceID == instanceID)
