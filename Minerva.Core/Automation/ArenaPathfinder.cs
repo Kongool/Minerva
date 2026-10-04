@@ -543,7 +543,7 @@ public static class ArenaPathfinder
     /// </summary>
     private static SafeSpot? Doorway(AIHints hints, DateTime soon, DateTime deadline, DateTime now, WPos player, float cellSize, float margin, float moveSpeed)
     {
-        var next = NextWave(hints, soon, deadline);
+        var next = FirstWaveOn(hints, player, soon, deadline, 0f);
         if (next == DateTime.MaxValue)
             return null;
 
@@ -694,10 +694,13 @@ public static class ArenaPathfinder
     /// </summary>
     private static bool LeavesTimeToEscape(AIHints hints, WPos at, DateTime soon, DateTime deadline, DateTime now, float margin, float moveSpeed, float lead, float cellSize)
     {
-        var next = NextWave(hints, soon, deadline);
-        if (next == DateTime.MaxValue || ClearOfNextWave(hints, at, soon, next, now, margin))
+        // The wave to get out of is the first that lands where the stage puts the character, not merely the next to land
+        // anywhere: Elm Gigas, 2026-10-04, the next was a rolling puddle's step 0.8s on, elsewhere, and the hold passed with
+        // Saar inside two Inspirited Cyclones landing 0.1s after that.
+        var next = FirstWaveOn(hints, at, soon, deadline, margin);
+        if (next == DateTime.MaxValue)
             return true;
-        // the way out is to ground clear of the next wave, not out of each of its zones in turn: Page 16, 2026-10-03, the
+        // the way out is to ground clear of that wave, not out of each of its zones in turn: Page 16, 2026-10-03, the
         // nearest edge of one of Blot's circles was inside the next circle of the column, or off the floor
         var reach = ((float)(next - soon).TotalSeconds - lead) * moveSpeed;
         if (reach < 0f)
@@ -715,14 +718,15 @@ public static class ArenaPathfinder
         return false;
     }
 
-    /// <summary>The first activation after <paramref name="soon"/> inside the horizon, or <see cref="DateTime.MaxValue"/>.</summary>
-    private static DateTime NextWave(AIHints hints, DateTime soon, DateTime deadline)
+    /// <summary>The first activation after <paramref name="soon"/>, inside the horizon, of a zone that touches
+    /// <paramref name="at"/>; <see cref="DateTime.MaxValue"/> when none does.</summary>
+    private static DateTime FirstWaveOn(AIHints hints, WPos at, DateTime soon, DateTime deadline, float margin)
     {
-        var next = DateTime.MaxValue;
+        var first = DateTime.MaxValue;
         foreach (var z in hints.ForbiddenZones)
-            if (z.Activation > soon && z.Activation <= deadline && z.Activation < next)
-                next = z.Activation;
-        return next;
+            if (z.Activation > soon && z.Activation <= deadline && z.Activation < first && AIHints.Touches(z, at, margin))
+                first = z.Activation;
+        return first;
     }
 
     /// <summary>Cells of the floor clear of the next wave once <paramref name="soon"/> has fired (<see cref="ClearOfNextWave"/>).</summary>

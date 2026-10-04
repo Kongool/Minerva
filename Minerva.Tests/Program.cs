@@ -5691,6 +5691,25 @@ t.Section("Waiting out a wave inside the next, wait at the door you will run thr
     t.True($"and the run after it is shorter: {Escape(spot.Target):0.0}y against {Escape(xia):0.0}y", Escape(spot.Target) + 4f < Escape(xia));
 }
 
+// Elm Gigas, 2026-10-04: rolling puddles publish a step of ground every second or so. A hold before the next step passed
+// the escape check because that step was elsewhere, and Saar stood in two Inspirited Cyclones landing 0.1s after it.
+t.Section("A hold is judged by the first wave that lands on it, not the next to land anywhere");
+{
+    var now = new DateTime(2026, 10, 4, 13, 13, 42, DateTimeKind.Utc);
+    var center = new WPos(-390f, 700f);
+    var saar = new WPos(-388.6f, 697.1f);
+    var h = new AIHints { Center = center, Bounds = new ArenaBoundsCircle(27.5f), PlayerPosition = saar };
+    h.AddForbiddenZone(new AOEShapeCircle(4.2f), new WPos(-370f, 690f), default, now.AddSeconds(1.5));
+    h.AddForbiddenZone(new AOEShapeCircle(4.2f), new WPos(-372f, 694f), default, now.AddSeconds(2.3));
+    h.AddForbiddenZone(new AOEShapeCircle(12f), new WPos(-394.6f, 691f), default, now.AddSeconds(2.42));
+    h.AddForbiddenZone(new AOEShapeCircle(12f), new WPos(-381.2f, 695.2f), default, now.AddSeconds(2.42));
+    // and the sweeps after: nothing in reach is clear of everything, so the stages decide
+    h.AddForbiddenZone(new AOEShapeDonut(7f, 60f), saar, default, now.AddSeconds(3.5));
+    var spot = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True($"it leaves the two circles ({spot.Target.X:0.0},{spot.Target.Z:0.0})", spot.NeedToMove && spot.Found
+        && !h.ForbiddenZones.Any(z => z.Activation == now.AddSeconds(2.42) && z.Contains(spot.Target)));
+}
+
 // Page 16 (Forbidden Folios), 2026-10-03: towers for three to five. Each client went to the first tower in its own cast
 // order with room; one tower ended with five, another with two, and Big Burst gave all fourteen players a stack.
 t.Section("Open-world towers: fill the short one, and stay in the one you are in");
