@@ -121,6 +121,14 @@ public class SimpleAOEs(ModuleBase module, uint aid, AOEShape shape, int maxCast
     protected virtual bool Watches(uint id) => id == this.WatchedAction;
 
     /// <summary>
+    /// Zones outlive their cast: the component overrides <c>OnCastFinished</c> to keep them and takes them off itself
+    /// (a puddle left where the cast landed, until the add that holds it dies). Exempt from the sweep in
+    /// <see cref="Update"/>, which otherwise drops them three seconds after the cast: Cursed Resurgence, 2026-10-04, its
+    /// centre puddle went that way, and Korha stood in it for six ticks of Gradual Zombification.
+    /// </summary>
+    protected virtual bool KeepAfterCast => false;
+
+    /// <summary>
     /// How long past its own resolution an unfinished cast is kept before it is treated as never coming.
     /// Generous on purpose: a cast event arriving three quarters of a second late has been measured.
     /// </summary>
@@ -144,7 +152,7 @@ public class SimpleAOEs(ModuleBase module, uint aid, AOEShape shape, int maxCast
     public override void Update()
     {
         var count = this.Casters.Count;
-        if (count == 0)
+        if (count == 0 || this.KeepAfterCast)
             return;
 
         var cutoff = this.World.CurrentTime.AddSeconds(-UnresolvedGrace);

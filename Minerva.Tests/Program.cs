@@ -273,6 +273,27 @@ t.Section("Module framework");
     module.Dispose();
 }
 
+// A zone a component keeps after its cast on purpose (an empty OnCastFinished, as BossmodReborn writes it) is not stale.
+// Cursed Resurgence, 2026-10-04: the centre puddle was swept three seconds after its cast, and Korha stood in it for six
+// ticks of Necrohaze.
+t.Section("A zone kept after its cast on purpose is not swept as stale");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x40000000A;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<KeptCircleAOE>();
+    var kept = module.FindComponent<KeptCircleAOE>()!;
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(101u), TotalTime = 4f, Location = new Vector3(100, 0, 100) }));
+    ws.Execute(new ActorState.OpCastInfo(boss, null));
+    for (var i = 0; i < 20; i++)
+        ws.Execute(new WorldState.OpFrameStart(Frame(ws, (uint)(200 + i), dtSeconds: 1f), TimeSpan.FromSeconds(1)));
+    module.Update();
+    t.Eq("twenty seconds after its cast, the kept zone is still there", kept.ActiveAOEs(0, ws.Actors.Find(boss)!).Length, 1);
+    module.Dispose();
+}
+
 // ---------------------------------------------------------------------------
 // 4. Reflection registry: discovers [ModuleInfo] modules and instantiates them
 // ---------------------------------------------------------------------------
@@ -5898,6 +5919,14 @@ sealed class NullArena : Arena
 }
 
 sealed class TestCircleAOE(ModuleBase module) : Minerva.Components.SimpleAOEs(module, 100u, new AOEShapeCircle(5f));
+
+// keeps its zone after the cast, until something else takes it off (CE205's centre puddle)
+sealed class KeptCircleAOE(ModuleBase module) : Minerva.Components.SimpleAOEs(module, 101u, new AOEShapeCircle(5f))
+{
+    protected override bool KeepAfterCast => true;
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast) { }
+}
 
 
 sealed class TimelineModule(WorldState ws, Actor primary)

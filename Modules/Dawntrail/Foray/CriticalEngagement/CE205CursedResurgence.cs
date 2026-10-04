@@ -200,6 +200,8 @@ sealed class Necrohaze(ModuleBase module) : Components.GenericAOEs(module)
 
 sealed class NecrohazeMiddle(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Necrohaze2, 5f)
 {
+    protected override bool KeepAfterCast => true; // the empty OnCastFinished below keeps zones on purpose
+
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         // remove on ward death so no blip between this and voidzone

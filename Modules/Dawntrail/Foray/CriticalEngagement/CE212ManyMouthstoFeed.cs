@@ -52,6 +52,8 @@ sealed class CentralGardening(ModuleBase module) : Components.SimpleAOEs(module,
 sealed class SideGardening(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.SideGardening2, (uint)AID.SideGardening3], new AOEShapeCone(26f, 90f.Degrees()));
 sealed class Venom(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Venom, 2f)
 {
+    protected override bool KeepAfterCast => true; // the empty OnCastFinished below keeps zones on purpose
+
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
         // remove on eanim so no blip between this and growing puddle

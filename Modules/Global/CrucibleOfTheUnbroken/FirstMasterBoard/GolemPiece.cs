@@ -53,6 +53,8 @@ sealed class Outcrop(ModuleBase module) : Components.SimpleAOEs(module, (uint)AI
 sealed class SelfDestruct(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.SelfDestruct, "Enrage");
 
 sealed class Shockwave(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Shockwave, new AOEShapeRect(5.0f, 2.5f)) {
+    protected override bool KeepAfterCast => true; // the empty OnCastFinished below keeps zones on purpose
+
     // Used to track if the mechanic started - needed as the boss can die while casting it, if the cast goes through and the boss dies, the mechanic
     // will still play out
     private bool active = false;
