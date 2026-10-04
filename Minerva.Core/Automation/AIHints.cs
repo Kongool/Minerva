@@ -79,6 +79,13 @@ public sealed class AIHints
     /// </summary>
     public ArenaBounds? PathfindMapBounds;
 
+    /// <summary>
+    /// A wider floor for when nothing on <see cref="Bounds"/> is clear: the module's floor less only half the margin it
+    /// keeps off a barrier that kills (<see cref="ModuleBase.BarrierMargin"/>). The margin is room to stop in, not
+    /// safety, and a band of it is better than a certain hit. Null for a floor with no margin.
+    /// </summary>
+    public ArenaBounds? SpareBounds;
+
     public readonly List<ForbiddenZone> ForbiddenZones = [];
     public readonly List<Enemy> PotentialTargets = [];
     public List<ShapeDistance> TemporaryObstacles = [];
@@ -175,6 +182,7 @@ public sealed class AIHints
         this.PotentialTargets.Clear();
         this.TemporaryObstacles = [];
         this.WalkableGround = null;
+        this.SpareBounds = null;
         this.PositioningZones.Clear();
         this.PositioningSuspended = false;
         this.UptimeHeld = false;

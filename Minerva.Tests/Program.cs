@@ -5664,6 +5664,31 @@ t.Section("Just past the edge of the floor, the way back in is always open");
     t.Eq($"no point just past the edge is stranded ({tried} tried)", stranded, 0);
 }
 
+// Metamorph, 2026-10-03: four 17.5y Wind Spheres and Cyclone Crossing left clear ground only past 23.2y of a 25y floor,
+// and the dodge keeps 2y off the barrier. All four toons stood at 22.5y and took the cross, twice.
+t.Section("When nothing inside the barrier margin is clear, half of it is used");
+{
+    var now = new DateTime(2026, 10, 3, 22, 34, 0, DateTimeKind.Utc);
+    var center = new WPos(500f, -310f);
+    var saar = new WPos(516f, -326f);
+    AIHints Hints(bool spare)
+    {
+        var h = new AIHints { Center = center, Bounds = new ArenaBoundsCircle(23f), PlayerPosition = saar, SpareBounds = spare ? new ArenaBoundsCircle(24f) : null };
+        foreach (var d in new[] { new WDir(0f, 7.8f), new WDir(7.8f, 0f), new WDir(0f, -7.8f), new WDir(-7.8f, 0f) })
+            h.AddForbiddenZone(new AOEShapeCircle(17.5f), center + d, default, now);
+        h.AddForbiddenZone(new AOEShapeCross(60f, 8f), center, new Angle(122f * Angle.DegToRad), now.AddSeconds(5));
+        return h;
+    }
+    var kept = ArenaPathfinder.Solve(Hints(false), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True("inside the margin there is nowhere to go", kept.NeedToMove && !kept.Found);
+    var h = Hints(true);
+    var spot = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    var r = (spot.Target - center).Length();
+    t.True($"with half of it, a spot past 23y and within 24y ({r:0.0}y, {(spot.Target - saar).Length():0.0}y away)", spot.Found && r > 23f && r <= 24f);
+    t.True("clear of the cross and every sphere", !h.ForbiddenZones.Any(z => z.Contains(spot.Target)));
+    t.True("and the floor the dodge keeps to is put back", h.Bounds is ArenaBoundsCircle { Radius: 23f });
+}
+
 // Quarried Away, 2026-10-03: Korha and Saar were outside the 27y join circle when the screen faded and were put outside
 // the wall. A critical engagement is the fight of those who stood on its floor, not of those who can pass its pull test.
 t.Section("A critical engagement is only the fight of someone who stood on its floor");

@@ -636,9 +636,11 @@ public abstract class ModuleBase : IDisposable
 
     private ArenaBounds? insetFrom;
     private ArenaBounds? inset;
+    private ArenaBounds? spare;
 
-    /// <summary><see cref="Bounds"/> less <see cref="BarrierMargin"/>. Kept until the module swaps its floor: the
-    /// pathfinder caches its rasterised floor on the bounds object, and a fresh one each frame would throw that away.</summary>
+    /// <summary><see cref="Bounds"/> less <see cref="BarrierMargin"/>, and less half of it for <see cref="AIHints.SpareBounds"/>.
+    /// Kept until the module swaps its floor: the pathfinder caches its rasterised floor on the bounds object, and a
+    /// fresh one each frame would throw that away.</summary>
     private ArenaBounds DodgeBounds()
     {
         var margin = this.BarrierMargin;
@@ -648,6 +650,7 @@ public abstract class ModuleBase : IDisposable
         {
             this.insetFrom = this.Bounds;
             this.inset = this.Bounds.Inset(margin);
+            this.spare = this.Bounds.Inset(margin / 2f);
         }
         return this.inset!;
     }
@@ -661,6 +664,7 @@ public abstract class ModuleBase : IDisposable
         hints.PlayerPosition = actor.Position;
         hints.Center = this.Center;
         hints.Bounds = this.DodgeBounds();
+        hints.SpareBounds = this.BarrierMargin > 0f ? this.spare : null;
         this.SeedPotentialTargets(hints);
         for (var i = 0; i < this.components.Count; ++i)
         {

@@ -467,6 +467,25 @@ public static class ArenaPathfinder
             }
         }
 
+        // Nothing on the floor the dodge keeps to is clear. If it keeps a margin off a barrier, try again on half of it: the
+        // margin is room to stop in, and a certain hit is worse than standing a yalm from the wall. Metamorph's Cyclone
+        // Crossing, 2026-10-03, twice: four 17.5y Wind Spheres and a 16-wide cross left clear ground only past 23.2y of a
+        // 25y floor, outside the 23 the dodge keeps to, and all four toons stood 22.5y out and took it. In the three
+        // crosses of 09-25 and 09-26, before the margin, they stood at 24.3-24.8y and nothing touched them.
+        if (hints.SpareBounds is { } spare && !ReferenceEquals(hints.Bounds, spare))
+        {
+            var kept = hints.Bounds;
+            hints.Bounds = spare;
+            try
+            {
+                return Solve(hints, now, horizonSeconds, cellSize, safetyMargin, goal, moveSpeed, clearanceLead);
+            }
+            finally
+            {
+                hints.Bounds = kept;
+            }
+        }
+
         // Nothing can be reached clean in time, by this clock. Standing still is the one answer certain to be hit, so head
         // for the nearest ground that is clear when it all lands, across whatever lies between, and let the rotation
         // plugin sprint for it (DodgeSprint). Pallmagia's Occult Missile, 2026-10-03: Xia stood at the arena's edge with
