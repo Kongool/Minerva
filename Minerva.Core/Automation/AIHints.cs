@@ -882,7 +882,7 @@ public sealed class AIHints
     /// less-than the solver was free to stop dead on the rim of a circle whose radius happened to land on
     /// the grid.</para>
     /// </summary>
-    private static bool Touches(in ForbiddenZone z, WPos at, float margin)
+    internal static bool Touches(in ForbiddenZone z, WPos at, float margin)
     {
         if (z.ShapeDistance is not SDShapeCheck)
             return z.ShapeDistance.Distance(at) <= margin;

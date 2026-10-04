@@ -5664,6 +5664,33 @@ t.Section("Just past the edge of the floor, the way back in is always open");
     t.Eq($"no point just past the edge is stranded ({tried} tried)", stranded, 0);
 }
 
+// Page 16 (Forbidden Folios), 2026-10-03: Blot in columns of 15y circles two seconds apart. Xia waited out the first
+// column 2.7y past its edge, inside the second, and after it fired was hit 0.3y short of getting out.
+t.Section("Waiting out a wave inside the next, wait at the door you will run through");
+{
+    var now = new DateTime(2026, 10, 3, 22, 48, 13, DateTimeKind.Utc);
+    var center = new WPos(659f, 659f);
+    var xia = new WPos(680f, 651.5f);
+    var h = new AIHints { Center = center, Bounds = new ArenaBoundsCircle(22.5f), PlayerPosition = xia };
+    foreach (var z in new[] { 644f, 659f, 674f })
+    {
+        h.AddForbiddenZone(new AOEShapeCircle(15f), new WPos(659f, z), default, now.AddSeconds(2.0));
+        h.AddForbiddenZone(new AOEShapeCircle(15f), new WPos(674f, z), default, now.AddSeconds(4.1));
+    }
+    var spot = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    // the way out after the first column: west across it, to where the second column's circles end
+    float Escape(WPos from)
+    {
+        for (var x = from.X; x > 630f; x -= 0.1f)
+            if (!h.ForbiddenZones.Any(z => z.Activation > now.AddSeconds(2.0) && z.Contains(new WPos(x, from.Z))))
+                return from.X - x;
+        return float.MaxValue;
+    }
+    t.True($"it walks to the first column's edge ({spot.Target.X:0.0},{spot.Target.Z:0.0})", spot.NeedToMove && spot.Found && spot.Target.X < 675f);
+    t.True("clear of the first column when it fires", !h.ForbiddenZones.Any(z => z.Activation <= now.AddSeconds(2.0) && z.Contains(spot.Target)));
+    t.True($"and the run after it is shorter: {Escape(spot.Target):0.0}y against {Escape(xia):0.0}y", Escape(spot.Target) + 4f < Escape(xia));
+}
+
 // Page 16 (Forbidden Folios), 2026-10-03: towers for three to five. Each client went to the first tower in its own cast
 // order with room; one tower ended with five, another with two, and Big Burst gave all fourteen players a stack.
 t.Section("Open-world towers: fill the short one, and stay in the one you are in");

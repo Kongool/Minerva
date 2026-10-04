@@ -410,7 +410,7 @@ public static class ArenaPathfinder
             if (!TryNearestSafe(hints, soon, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, budget, out spot))
                 continue;
             var staged = Settle(hints, soon, player, spot, cellSize, safetyMargin);
-            if (LeavesTimeToEscape(hints, staged.NeedToMove ? staged.Target : player, soon, deadline, safetyMargin, moveSpeed, clearanceLead)
+            if (LeavesTimeToEscape(hints, staged.NeedToMove ? staged.Target : player, soon, deadline, now, safetyMargin, moveSpeed, clearanceLead, cellSize)
                 && (staged.NeedToMove ? hints.InImminentDanger(player, soon, safetyMargin) : !(leavingIsClear ??= LeavingIsClear())))
                 return staged;
         }
@@ -437,6 +437,7 @@ public static class ArenaPathfinder
         // yalms inside it; without, three yalms east cleared the line and the tanks. The first answer found is kept
         // for when nothing better turns up, so this never ends worse than it used to.
         SafeSpot? firstStage = null;
+        DateTime firstStageAt = default;
         foreach (var margin in safetyMargin > 0f ? [safetyMargin, 0f] : new[] { safetyMargin })
         {
             foreach (var earlier in ActivationsBefore(hints, deadline, now))
@@ -444,13 +445,17 @@ public static class ArenaPathfinder
                 if (!TryNearestSafe(hints, earlier, solveNow, now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out spot))
                     continue;
                 var settled = Settle(hints, earlier, player, spot, cellSize, margin);
-                firstStage ??= settled;
-                if (LeavesTimeToEscape(hints, settled.NeedToMove ? settled.Target : player, earlier, deadline, margin, moveSpeed, clearanceLead))
+                if (firstStage == null)
+                {
+                    firstStage = settled;
+                    firstStageAt = earlier;
+                }
+                if (LeavesTimeToEscape(hints, settled.NeedToMove ? settled.Target : player, earlier, deadline, now, margin, moveSpeed, clearanceLead, cellSize))
                     return settled;
             }
         }
         if (firstStage is { } stage)
-            return stage;
+            return Doorway(hints, firstStageAt, deadline, now, player, cellSize, safetyMargin, moveSpeed) ?? stage;
 
         // A positioning instruction is advice, danger is not. If nothing honours both, answer the danger
         // alone, as though the module had never asked: a spot to stand on is never worth a hit.
@@ -524,6 +529,76 @@ public static class ArenaPathfinder
             }
         }
         return bestDistance < float.MaxValue;
+    }
+
+    /// <summary>
+    /// Where to wait for <paramref name="soon"/> when no wait leaves time to get out of what fires after it: of the
+    /// ground clear of everything firing by then and reachable before it, the spot nearest ground clear of the next
+    /// wave. A person waits at the door they will run through. Null when nothing fires after <paramref name="soon"/>
+    /// inside the horizon, or no such spot exists.
+    /// <para>Page 16, 2026-10-03: Blot in three columns of 15y circles, two seconds apart. Xia waited for the first
+    /// wave 2.7y past its edge, where it happened to leave her, inside the second; after the first fired she had 13y to
+    /// cross in 2.1s, walked it at full speed and was hit 0.3y short, as was Rosa. The plain wait is the nearest
+    /// clear ground, wherever that leaves the way out.</para>
+    /// </summary>
+    private static SafeSpot? Doorway(AIHints hints, DateTime soon, DateTime deadline, DateTime now, WPos player, float cellSize, float margin, float moveSpeed)
+    {
+        var next = NextWave(hints, soon, deadline);
+        if (next == DateTime.MaxValue)
+            return null;
+
+        foreach (var m in margin > 0f ? [margin, 0f] : new[] { margin })
+        {
+            var exits = ExitsAfter(hints, soon, next, now, m, cellSize);
+            if (exits.Count == 0)
+                continue;
+
+            // the walk to the door is short and along clear ground, so it is timed by the clock, not the solve's lead:
+            // with the lead, the last second before the wave left no time to take even a step towards it
+            var reach = moveSpeed * MathF.Max((float)(soon - now).TotalSeconds - DoorwaySlackSeconds, 0f);
+            var best = player;
+            var bestScore = hints.InImminentDanger(player, soon, m) ? float.MaxValue : NearestOf(exits, player);
+            var r = hints.Bounds.Radius;
+            for (var x = -r; x <= r; x += cellSize)
+            {
+                for (var z = -r; z <= r; z += cellSize)
+                {
+                    var door = hints.Center + new WDir(x, z);
+                    var walk = (door - player).Length();
+                    if (walk > reach || !hints.Bounds.Contains(hints.Center, door) || hints.InObstacle(door) || hints.InImminentDanger(door, soon, m))
+                        continue;
+                    var score = NearestOf(exits, door) + DoorwayWalkWeight * walk;
+                    if (score < bestScore)
+                    {
+                        bestScore = score;
+                        best = door;
+                    }
+                }
+            }
+            if (bestScore == float.MaxValue)
+                continue;
+            return (best - player).LengthSq() <= cellSize * cellSize * 0.25f
+                ? SafeSpot.Stay
+                : new SafeSpot(true, true, best, (best - player).Normalized());
+        }
+        return null;
+    }
+
+    /// <summary>How long before the wave the walk to the door has to be done.</summary>
+    private const float DoorwaySlackSeconds = 0.5f;
+
+    /// <summary>What a yalm walked to the door costs against a yalm saved on the way out after it: there is time
+    /// before the wave to walk, and none after it, so the walk is cheap, but not free.</summary>
+    private const float DoorwayWalkWeight = 0.1f;
+
+    /// <summary>Clear of the next wave (what fires after <paramref name="soon"/>, up to <paramref name="next"/>) and of
+    /// whatever already stands on the ground. The wave at <paramref name="soon"/> will have fired: its ground is open.</summary>
+    private static bool ClearOfNextWave(AIHints hints, WPos p, DateTime soon, DateTime next, DateTime now, float margin)
+    {
+        foreach (var z in hints.ForbiddenZones)
+            if ((z.Activation <= now || z.Activation > soon && z.Activation <= next) && AIHints.Touches(z, p, margin))
+                return false;
+        return true;
     }
 
     /// <summary>How far ahead ground counts as "going to fire". Past this it is scenery -- a persistent
@@ -617,21 +692,62 @@ public static class ArenaPathfinder
     /// seconds (earlier, it walked one yalm along the line); it was hit, and the late walk out ran into the next pair
     /// of tanks.</para>
     /// </summary>
-    private static bool LeavesTimeToEscape(AIHints hints, WPos at, DateTime soon, DateTime deadline, float margin, float moveSpeed, float lead)
+    private static bool LeavesTimeToEscape(AIHints hints, WPos at, DateTime soon, DateTime deadline, DateTime now, float margin, float moveSpeed, float lead, float cellSize)
     {
-        foreach (var z in hints.ForbiddenZones)
+        var next = NextWave(hints, soon, deadline);
+        if (next == DateTime.MaxValue || ClearOfNextWave(hints, at, soon, next, now, margin))
+            return true;
+        // the way out is to ground clear of the next wave, not out of each of its zones in turn: Page 16, 2026-10-03, the
+        // nearest edge of one of Blot's circles was inside the next circle of the column, or off the floor
+        var reach = ((float)(next - soon).TotalSeconds - lead) * moveSpeed;
+        if (reach < 0f)
+            return false;
+        for (var x = -reach; x <= reach; x += cellSize)
         {
-            if (z.Activation <= soon || z.Activation > deadline)
-                continue;
-            var depth = margin - z.ShapeDistance.Distance(at);
-            if (depth < 0f)
-                continue; // not standing in it
-            var walk = depth / MathF.Max(moveSpeed, 0.01f);
-            if ((z.Activation - soon).TotalSeconds < walk + lead)
-                return false;
+            for (var z = -reach; z <= reach; z += cellSize)
+            {
+                var p = at + new WDir(x, z);
+                if (x * x + z * z <= reach * reach && hints.Bounds.Contains(hints.Center, p) && !hints.InObstacle(p)
+                    && ClearOfNextWave(hints, p, soon, next, now, margin))
+                    return true;
+            }
         }
+        return false;
+    }
 
-        return true;
+    /// <summary>The first activation after <paramref name="soon"/> inside the horizon, or <see cref="DateTime.MaxValue"/>.</summary>
+    private static DateTime NextWave(AIHints hints, DateTime soon, DateTime deadline)
+    {
+        var next = DateTime.MaxValue;
+        foreach (var z in hints.ForbiddenZones)
+            if (z.Activation > soon && z.Activation <= deadline && z.Activation < next)
+                next = z.Activation;
+        return next;
+    }
+
+    /// <summary>Cells of the floor clear of the next wave once <paramref name="soon"/> has fired (<see cref="ClearOfNextWave"/>).</summary>
+    private static List<WPos> ExitsAfter(AIHints hints, DateTime soon, DateTime next, DateTime now, float margin, float cellSize)
+    {
+        var exits = new List<WPos>();
+        var r = hints.Bounds.Radius;
+        for (var x = -r; x <= r; x += cellSize)
+        {
+            for (var z = -r; z <= r; z += cellSize)
+            {
+                var p = hints.Center + new WDir(x, z);
+                if (hints.Bounds.Contains(hints.Center, p) && !hints.InObstacle(p) && ClearOfNextWave(hints, p, soon, next, now, margin))
+                    exits.Add(p);
+            }
+        }
+        return exits;
+    }
+
+    private static float NearestOf(List<WPos> points, WPos from)
+    {
+        var bestSq = float.MaxValue;
+        foreach (var p in points)
+            bestSq = MathF.Min(bestSq, (p - from).LengthSq());
+        return bestSq == float.MaxValue ? float.MaxValue : MathF.Sqrt(bestSq);
     }
 
     /// <summary>
