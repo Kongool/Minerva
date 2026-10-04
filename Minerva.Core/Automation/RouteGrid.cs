@@ -420,10 +420,16 @@ public sealed class RouteGrid
                     if (this.blocked[j] && !escaping)
                         continue;
 
-                    // no cutting a diagonal between two solid cells -- that is a corner, not a gap
+                    // no cutting a diagonal between two solid cells -- that is a corner, not a gap. Off the floor, only a
+                    // real wall is a corner: a step from outside ground back onto the floor between two outside cells is
+                    // the way in. Tiny Terror, 2026-10-03: Xia stood 0.6y past the 18y floor on a cell touching it only
+                    // diagonally; both straight neighbours were outside and no nearer, the diagonal was refused as a
+                    // corner, nothing was reachable, and the dodge said "no safe spot" for 30 seconds while two AOEs
+                    // landed on her.
                     var cornerA = (cz * this.w) + nx;
                     var cornerB = (nz * this.w) + cx;
-                    if (dx != 0 && dz != 0 && (escaping ? this.solid[cornerA] || this.solid[cornerB] : this.blocked[cornerA] || this.blocked[cornerB]))
+                    var offFloor = escaping || ((i == start || this.outside[i]) && !this.outside[j]);
+                    if (dx != 0 && dz != 0 && (offFloor ? this.solid[cornerA] || this.solid[cornerB] : this.blocked[cornerA] || this.blocked[cornerB]))
                         continue;
 
                     var step = (dx != 0 && dz != 0 ? Diagonal : 1f) * this.cell;

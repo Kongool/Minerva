@@ -5587,6 +5587,47 @@ t.Section("The validator counts a step of a sequence already on screen as drawn"
     t.True("a spell aimed at a player does not borrow it", !seqResult.Drawn.Contains(5002u));
 }
 
+// Tiny Terror, 2026-10-03: Xia stood 0.6y past the 18y floor (the Occult Crescent barrier margin) on a cell touching the
+// floor only diagonally, and nothing was reachable: "no safe spot" for 30 seconds while two AOEs landed on her.
+t.Section("Just past the edge of the floor, the way back in is always open");
+{
+    var now = new DateTime(2026, 10, 3, 21, 11, 0, DateTimeKind.Utc);
+    var center = new WPos(152f, 716f);
+    var xia = new WPos(141.2f, 700.8f);
+    var h = new AIHints { Center = center, Bounds = new ArenaBoundsCircle(18f), PlayerPosition = xia };
+    var spot = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True("Xia's spot steps back onto the floor", spot.NeedToMove && spot.Found && h.Bounds.Contains(center, spot.Target) && (spot.Target - xia).Length() < 3f);
+
+    // every point in the 2y band past the edge, round and square, at a quarter-yalm spacing
+    var stranded = 0;
+    var tried = 0;
+    foreach (ArenaBounds bounds in new ArenaBounds[] { new ArenaBoundsCircle(18f), new ArenaBoundsSquare(18f) })
+    {
+        for (var a = 0; a < 360; a += 3)
+        {
+            for (var extra = 0.1f; extra < 2f; extra += 0.25f)
+            {
+                var dir = new Angle(a * Angle.DegToRad).ToDirection();
+                var edge = 0f;
+                while (bounds.Contains(center, center + (dir * (edge + 0.05f))))
+                    edge += 0.05f;
+                var p = center + (dir * (edge + extra));
+                if (bounds.Contains(center, p))
+                    continue;
+                ++tried;
+                var g = new RouteGrid(new AIHints { Center = center, Bounds = bounds, PlayerPosition = p }, now.AddSeconds(5), p, 1f, 1f, now, 6f);
+                var any = false;
+                for (var z = 0; z < g.Height && !any; ++z)
+                    for (var x = 0; x < g.Width && !any; ++x)
+                        any = !g.Outside(x, z) && !float.IsInfinity(g.CostAt(x, z));
+                if (!any)
+                    ++stranded;
+            }
+        }
+    }
+    t.Eq($"no point just past the edge is stranded ({tried} tried)", stranded, 0);
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
