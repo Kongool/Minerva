@@ -5550,6 +5550,43 @@ t.Section("A duty runner's route owns the feet; only danger takes them back");
     t.False("nothing running, nothing to yield to", FollowerOwnership.Foreign(false, false));
 }
 
+
+// A rotating sequence shows every step from its opening cast, so the step casts add nothing new on screen; the
+// validator called them uncovered (Philia's Cat o' Nine Tails, 2026-10-02, though Minerva drew and dodged every one).
+t.Section("The validator counts a step of a sequence already on screen as drawn");
+{
+    var t0 = new DateTime(2026, 10, 2, 21, 40, 0, DateTimeKind.Utc);
+    const ulong boss = 0x40000D01, helper = 0x40000D02, pov = 0x10000D03, adds = 0x40000D04;
+    var ops = new List<(long, WorldState.Operation)>();
+    var frame = 0u;
+    void At(double sec, WorldState.Operation op) => ops.Add((t0.AddSeconds(sec).Ticks, op));
+    void Tick(double sec) => At(sec, new WorldState.OpFrameStart(new FrameState(t0.AddSeconds(sec), (ulong)(sec * 1e7), ++frame, 0.1f, 0.1f, 1f), TimeSpan.FromSeconds(0.1)));
+    Tick(0);
+    At(0, new WorldState.OpZoneChange(1234, 9003));
+    At(0, new ActorState.OpCreate(boss, 0xBEF2u, 0, "Boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 5f, default, true, false, 0));
+    At(0, new ActorState.OpCreate(helper, 0x233Cu, 1, "", 0, ActorType.Helper, new Vector4(0, 0, 0, 0), 0.5f, default, false, false, 0));
+    At(0, new ActorState.OpCreate(adds, 0x77u, 2, "Add", 0, ActorType.Enemy, new Vector4(10, 0, 0, 0), 1f, default, true, false, 0));
+    At(0, new ActorState.OpCreate(pov, 0x2000u, 3, "Me", 0, ActorType.Player, new Vector4(0, 0, 15, 0), 0.5f, new ActorHPMP(9000, 9000, 0, 0, 0), true, true, 0));
+    At(0, new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, pov)));
+    // the opener puts three steps on screen, due at 3, 5 and 7s
+    At(0, new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(5000u), TargetID = boss, TotalTime = 1f }));
+    Tick(0.5);
+    // the first step's own cast lands at 3s, from the helper standing on the boss
+    Tick(1);
+    At(1, new ActorState.OpCastInfo(helper, new ActorCastInfo { Action = ActionID.MakeSpell(5001u), TargetID = helper, TotalTime = 2f }));
+    // an add's single-target spell at the player, landing at 3s too: it must not borrow the step's shape
+    At(1, new ActorState.OpCastInfo(adds, new ActorCastInfo { Action = ActionID.MakeSpell(5002u), TargetID = pov, TotalTime = 2f }));
+    Tick(2);
+    Tick(3);
+
+    var seqResult = ReplayValidator.Validate(new ReplayTimeline { QPF = 10_000_000, GameVersion = "test", Ops = ops, PlayerInstanceID = pov },
+        ModuleRegistry.Build(typeof(SequenceProbeModule).Assembly));
+    t.Eq("the sequence's module ran", seqResult.ModuleName, "SequenceProbeModule");
+    t.True("the opener drew it", seqResult.Drawn.Contains(5000u));
+    t.True("a step's own cast counts as drawn", seqResult.Drawn.Contains(5001u) && !seqResult.UncoveredMechanics.Contains(5001u));
+    t.True("a spell aimed at a player does not borrow it", !seqResult.Drawn.Contains(5002u));
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
@@ -5887,5 +5924,30 @@ sealed class FakeQuestNavigation : Minerva.QuestBattle.IQuestNavigation
     {
         Interlocked.Increment(ref this.Asked);
         return Task.FromResult(new List<Vector3> { new((from.X + to.X) / 2, 1, (from.Z + to.Z) / 2), to });
+    }
+}
+
+// three steps of a rotating cone, all on screen from the opening cast (CFC 9003, boss OID 0xBEF2)
+[ModuleInfo(CFCID = 9003u, PrimaryActorOID = 0xBEF2u, NameID = 1u)]
+public sealed class SequenceProbeModule(WorldState ws, Actor primary)
+    : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(25f));
+
+sealed class SequenceProbeModuleStates : StateMachineBuilder
+{
+    public SequenceProbeModuleStates(ModuleBase module) : base(module) => this.TrivialPhase().ActivateOnEnter<SequenceProbe>();
+}
+
+sealed class SequenceProbe(ModuleBase module) : Minerva.Components.GenericAOEs(module)
+{
+    private readonly List<AOEInstance> steps = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.steps);
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID != 5000u)
+            return;
+        for (var i = 0; i < 3; ++i)
+            this.steps.Add(new(new AOEShapeCone(25f, 60f.Degrees()), caster.Position, (i * 45f).Degrees(), this.World.FutureTime(3d + 2d * i)));
     }
 }

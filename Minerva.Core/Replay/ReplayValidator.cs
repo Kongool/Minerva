@@ -172,6 +172,10 @@ public sealed class ReplayValidator
         /// <summary>The spread or stack was on the POV: the cast's main target.</summary>
         public bool Mine { get; init; }
 
+        /// <summary>A bait the module drew on the POV (a limit-cut line, a cleave aimed at whoever is marked): it lands on
+        /// whoever carries it.</summary>
+        public bool Bait { get; init; }
+
         /// <summary>Whose spread or stack it was, when not the POV's.</summary>
         public string Owner { get; init; } = "";
 
@@ -231,6 +235,13 @@ public sealed class ReplayValidator
                             : $"{your} own spread, and it also caught {others} other player{(others == 1 ? "" : "s")}: the spot chosen was inside their reach, or they walked into it.") + gave;
                     return $"{this.Owner}'s spread caught {them} ({this.TargetsHit} players in it); the circle moves with them, so a late step by either side does this. "
                         + (this.Foreign ? "" : this.Decision.Explain(true, this.Distance)) + gave;
+                }
+                if (this.Bait && this.Mine)
+                {
+                    var others = this.TargetsHit - 1;
+                    return (others <= 0
+                        ? $"{your} own bait, drawn on {them} by the module: it lands on whoever carries it, expected damage."
+                        : $"{your} own bait, and it also caught {others} other player{(others == 1 ? "" : "s")}: it was aimed through them.") + gave;
                 }
                 if (this.Knockback)
                     return $"a knockback the module plans for: the shove itself is expected damage, and {you} {(this.Foreign ? "were" : "were")} still on the arena afterwards or this would be a death, not a hit." + gave;
@@ -353,6 +364,7 @@ public sealed class ReplayValidator
         var lastGazeSample = 0L; // 0, not MinValue: subtracting from MinValue wraps (the same trap as lastInsideDrawnTicks)
         var castEndDecision = new Dictionary<ulong, DodgeDecision>(); // the decision in force when each caster's cast ended: the hit event arrives after the guess is gone
         long lastSpreadOnMeTicks = 0, lastStackOnMeTicks = 0; // when the POV last carried a spread / stack marker
+        long lastBaitOnMeTicks = 0; // when a module last had a bait on the POV
         var lastInsideDrawnTicks = 0L; // when the POV was last inside something the module drew (0, not MinValue: a subtraction from MinValue wraps and called every early hit "drawn")
         var autos = new HashSet<uint> { 7u, 8u, 870u, 871u, 872u, 873u }; // the generic auto-attacks; the module adds its own
         // A mechanic usually has two ids: the boss casts the telegraph and a helper casts the damage, and a
@@ -455,6 +467,8 @@ public sealed class ReplayValidator
                 if (ticks - lastStackOnMeTicks <= 3 * TimeSpan.TicksPerSecond / 4)
                     isStack = true;
                 var owner = onMe ? "" : world.Actors.Find(ev.MainTargetID)?.Name ?? $"0x{ev.MainTargetID:X}";
+                // a bait the module put on the POV: it is cleared as it resolves, so "a moment ago" is the test
+                var isBait = onMe && ticks - lastBaitOnMeTicks <= 3 * TimeSpan.TicksPerSecond / 4;
                 var facingDeg = 180f;
                 if (me != null && (src.Position - me.Position).LengthSq() > 0.01f)
                 {
@@ -490,7 +504,7 @@ public sealed class ReplayValidator
                 {
                     RootedBy = rooted, Foreign = foreign, CasterID = cev.InstanceID,
                     Inside = inside, TargetsHit = playersHit, Proximity = playersHit >= Math.Max(4, (playersSeen.Count + 1) / 2),
-                    Spread = isSpread, Stack = isStack, Mine = onMe, Owner = owner,
+                    Spread = isSpread, Stack = isStack, Mine = onMe, Owner = owner, Bait = isBait,
                     Knockback = knockbacks.Contains(ev.Action.ID),
                     Incapacitated = Incapacitation.Blocking(me) ?? "",
                     NoModule = noModule, Guessed = guessed, Sheet = sheetText, SheetSingleTarget = singleTarget, SheetRaidwide = sheetRaidwide,
@@ -499,6 +513,8 @@ public sealed class ReplayValidator
             // detect the start of an enemy/helper cast (players are ignored — their skills aren't mechanics)
             uint enemyCastAid = 0;
             var byHelper = false;
+            Actor? enemyCaster = null;
+            ActorCastInfo? enemyCast = null;
             if (pov != 0 && op is ActorState.OpCastInfo pc && pc.InstanceID == pov)
             {
                 if (pc.Value is { } myCast)
@@ -529,6 +545,8 @@ public sealed class ReplayValidator
                 {
                     enemyCastAid = cast.Action.ID;
                     byHelper = caster.Type == ActorType.Helper;
+                    enemyCaster = caster;
+                    enemyCast = cast;
                 }
             }
 
@@ -592,6 +610,8 @@ public sealed class ReplayValidator
                     lastSpreadOnMeTicks = ticks;
                 if (onStack)
                     lastStackOnMeTicks = ticks;
+                if (BaitedOn(module, pcNow))
+                    lastBaitOnMeTicks = ticks;
             }
             else if (pov != 0 && module == null && guess is { Count: > 0 } && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcTrash)
             {
@@ -639,6 +659,8 @@ public sealed class ReplayValidator
                     helperCast.Add(enemyCastAid);
                 if (AnyRose(countsBefore, countsAfter))
                     drawn.Add(enemyCastAid); // some component started showing something for this cast
+                else if (module != null && enemyCaster != null && enemyCast != null && AlreadyDrawn(module, enemyCaster, enemyCast, world))
+                    drawn.Add(enemyCastAid); // a step of something already on screen: a rotating sequence, a bait
             }
         }
 
@@ -925,6 +947,49 @@ public sealed class ReplayValidator
                 stack |= ss.IsStackTarget(me);
             }
         return (spread, stack);
+    }
+
+    /// <summary>Does a module have a bait on <paramref name="me"/>?</summary>
+    private static bool BaitedOn(ModuleBase module, Actor me)
+    {
+        foreach (var c in module.Components)
+            if (c is Components.GenericBaitAway b && b.ActiveBaitsOn(me).Count > 0)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Is this cast a step of something a component already shows? A rotating sequence (Philia's Cat o' Nine Tails)
+    /// puts every step on screen from the opening cast, so the step casts themselves add nothing and read as uncovered;
+    /// so does a bait drawn from an icon before its cast. Covered when a drawn shape is due within a second of the cast
+    /// ending, at the cast's aim (within two yalms): where it is aimed for a cast at someone -- and a bait must be on
+    /// that someone -- else the caster or the cast's location. Aimed casts are held to their target because an add's
+    /// Fire on a player otherwise borrowed any shape drawn near the add (Construct 10, 2026-09-25).
+    /// </summary>
+    private static bool AlreadyDrawn(ModuleBase module, Actor caster, ActorCastInfo cast, WorldState world)
+    {
+        var lands = world.CurrentTime.AddSeconds(cast.RemainingTime);
+        var aimedAt = cast.TargetID != 0 && cast.TargetID != caster.InstanceID ? world.Actors.Find(cast.TargetID) : null;
+        bool Near(WPos origin) => aimedAt != null
+            ? (origin - aimedAt.Position).LengthSq() <= 4f
+            : (origin - caster.Position).LengthSq() <= 4f || (origin - cast.LocXZ).LengthSq() <= 4f;
+        bool Due(DateTime at) => at != default && Math.Abs((at - lands).TotalSeconds) <= 1d;
+        foreach (var c in module.Components)
+        {
+            if (c is Components.GenericAOEs g)
+            {
+                foreach (var aoe in g.ActiveAOEs(0, module.PrimaryActor))
+                    if (Due(aoe.Activation) && Near(aoe.Origin))
+                        return true;
+            }
+            else if (c is Components.GenericBaitAway b)
+            {
+                foreach (var bait in b.CurrentBaits)
+                    if (Due(bait.Activation) && (bait.Source.Position - caster.Position).LengthSq() <= 4f && (aimedAt == null || bait.Target == aimedAt))
+                        return true;
+            }
+        }
+        return false;
     }
 
     private static void DrawCounts(ModuleBase? module, List<int> into)
