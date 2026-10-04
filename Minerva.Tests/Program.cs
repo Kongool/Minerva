@@ -5712,6 +5712,25 @@ t.Section("Waiting out a wave inside the next, wait at the door you will run thr
     t.True($"and the run after it is shorter: {Escape(spot.Target):0.0}y against {Escape(xia):0.0}y", Escape(spot.Target) + 4f < Escape(xia));
 }
 
+// Holminster, Philia, newtoon2, 2026-10-04: a new line of Fierce Beating started 3.6y from the character, its first circle
+// 0.6s out. Clear ground lay 7.8y north-east through that circle; 0.4y west was out of it.
+t.Section("When the clear ground lies through what is about to fire, step out of that first");
+{
+    var now = new DateTime(2026, 10, 4, 16, 25, 28, DateTimeKind.Utc);
+    var pov = new WPos(124.6f, -453.6f);
+    var h = new AIHints { Center = new WPos(134f, -465f), Bounds = new ArenaBoundsCircle(19.5f), PlayerPosition = pov };
+    // the new line, marching north-west over the character, a pulse every 0.95s
+    var first = new WPos(128.1f, -453.7f);
+    for (var i = 0; i < 4; ++i)
+        h.AddForbiddenZone(new AOEShapeCircle(4f), first + new WDir(-1.8f * i, 1.8f * i), default, now.AddSeconds(0.6 + 0.95 * i));
+    // the line beside it, to the south-west
+    for (var i = 0; i < 3; ++i)
+        h.AddForbiddenZone(new AOEShapeCircle(4f), new WPos(122.7f - 1.8f * i, -459.1f + 1.8f * i), default, now.AddSeconds(0.9 * i));
+    var spot = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True($"it steps out of the circle about to fire ({spot.Target.X:0.0},{spot.Target.Z:0.0}, {(spot.Target - pov).Length():0.0}y)",
+        spot.NeedToMove && (spot.Target - first).Length() > 4f && (spot.Target - pov).Length() <= 6f * 0.6f);
+}
+
 // Elm Gigas, 2026-10-04: rolling puddles publish a step of ground every second or so. A hold before the next step passed
 // the escape check because that step was elsewhere, and Saar stood in two Inspirited Cyclones landing 0.1s after it.
 t.Section("A hold is judged by the first wave that lands on it, not the next to land anywhere");

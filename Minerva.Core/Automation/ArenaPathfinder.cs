@@ -420,9 +420,9 @@ public static class ArenaPathfinder
                 && RouteIsClear(hints, player, clear, solveNow, safetyMargin, moveSpeed);
 
         if (TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed, float.MaxValue, out spot))
-            return Settle(hints, deadline, player, spot, cellSize, safetyMargin);
+            return StepOutFirst(hints, spot, player, now, cellSize, safetyMargin, goal, moveSpeed) ?? Settle(hints, deadline, player, spot, cellSize, safetyMargin);
         if (safetyMargin > 0f && TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
-            return Settle(hints, deadline, player, spot, cellSize, 0f);
+            return StepOutFirst(hints, spot, player, now, cellSize, 0f, goal, moveSpeed) ?? Settle(hints, deadline, player, spot, cellSize, 0f);
 
         // Nothing is safe from everything inside the horizon. Before giving up, ask the same question with
         // a nearer deadline: the latest activation for which some reachable cell is clear of all that lands
@@ -529,6 +529,47 @@ public static class ArenaPathfinder
             }
         }
         return bestDistance < float.MaxValue;
+    }
+
+    /// <summary>
+    /// Ground clear of everything is no use if the walk to it is still inside something the character stands in when
+    /// that fires. Then step out of the soonest such zone first, timed by the clock rather than the solve's lead, and let
+    /// the next solve take it from there. Null when the walk gets out of everything it starts in, in time.
+    /// <para>Holminster, Philia, newtoon2, 2026-10-04: a new line of Fierce Beating started 3.6y from the character, its
+    /// first circle 0.6s out. Clear ground lay 7.8y north-east and the walk there stayed in that circle until 0.4s after
+    /// it fired, where 0.4y west was out of it. The walk check lets a walk start in danger (that is why it walks) and the
+    /// lead had already counted the circle as fired, so nothing objected.</para>
+    /// </summary>
+    private static SafeSpot? StepOutFirst(AIHints hints, SafeSpot spot, WPos player, DateTime now, float cellSize, float margin, UptimeGoal? goal, float moveSpeed)
+    {
+        if (moveSpeed <= 0f || !spot.NeedToMove)
+            return null;
+        var first = spot.Route is { Count: > 0 } route ? route[0] : spot.Target;
+        var delta = first - player;
+        var distance = delta.Length();
+        if (distance < 0.01f)
+            return null;
+        var dir = delta / distance;
+
+        var trapped = DateTime.MaxValue;
+        foreach (var z in hints.ForbiddenZones)
+        {
+            if (z.Activation <= now || z.Activation >= trapped || !z.Contains(player))
+                continue;
+            var along = 0f;
+            while (along < distance && z.Contains(player + (dir * along)))
+                along += 0.25f;
+            if (along / moveSpeed >= (float)(z.Activation - now).TotalSeconds)
+                trapped = z.Activation; // still inside it when it fires
+        }
+        if (trapped == DateTime.MaxValue)
+            return null;
+
+        var budget = (float)(trapped - now).TotalSeconds;
+        foreach (var m in margin > 0f ? [margin, 0f] : new[] { margin })
+            if (TryNearestSafe(hints, trapped, now, now, player, cellSize, m, goal, moveSpeed, budget, out var step) && step.NeedToMove)
+                return step;
+        return null;
     }
 
     /// <summary>
@@ -705,6 +746,7 @@ public static class ArenaPathfinder
         var reach = ((float)(next - soon).TotalSeconds - lead) * moveSpeed;
         if (reach < 0f)
             return false;
+        var exits = new List<WPos>();
         for (var x = -reach; x <= reach; x += cellSize)
         {
             for (var z = -reach; z <= reach; z += cellSize)
@@ -712,10 +754,49 @@ public static class ArenaPathfinder
                 var p = at + new WDir(x, z);
                 if (x * x + z * z <= reach * reach && hints.Bounds.Contains(hints.Center, p) && !hints.InObstacle(p)
                     && ClearOfNextWave(hints, p, soon, next, now, margin))
-                    return true;
+                    exits.Add(p);
             }
         }
+        // The way there has to be clear too, of what fires between the two: Heretic's Fork, 2026-10-04, the hold at the
+        // west wall passed with the only clear ground 24y east, through Thumbscrew's lane, which fired on the way.
+        exits.Sort((a, b) => (a - at).LengthSq().CompareTo((b - at).LengthSq()));
+        for (var i = 0; i < exits.Count && i < EscapeWalksTried; ++i)
+            if (EscapeWalkIsClear(hints, at, exits[i], soon, next, now, margin, moveSpeed))
+                return true;
         return false;
+    }
+
+    /// <summary>How many of the nearest exits <see cref="LeavesTimeToEscape"/> tries a walk to before giving up.</summary>
+    private const int EscapeWalksTried = 24;
+
+    /// <summary>
+    /// After <paramref name="soon"/> has fired, is the straight walk from <paramref name="from"/> to <paramref name="to"/>
+    /// out of everything that fires on the way before it does? What fired by <paramref name="soon"/> is open ground; what
+    /// already stands (activation by <paramref name="now"/>) is not; what covers the start is what the walk is leaving.
+    /// </summary>
+    private static bool EscapeWalkIsClear(AIHints hints, WPos from, WPos to, DateTime soon, DateTime next, DateTime now, float margin, float moveSpeed)
+    {
+        var delta = to - from;
+        var distance = delta.Length();
+        if (distance < 0.01f || moveSpeed <= 0f)
+            return true;
+        var step = delta / distance;
+        var samples = Math.Clamp((int)MathF.Ceiling(distance / 2f), 1, 16);
+        for (var i = 1; i <= samples; ++i)
+        {
+            var along = distance * i / samples;
+            var p = from + (step * along);
+            var reached = soon.AddSeconds(along / moveSpeed + 0.3d);
+            foreach (var z in hints.ForbiddenZones)
+            {
+                var standing = z.Activation <= now;
+                if (!standing && (z.Activation <= soon || z.Activation >= next || z.Activation > reached))
+                    continue;
+                if (AIHints.Touches(z, p, margin) && !AIHints.Touches(z, from, margin))
+                    return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>The first activation after <paramref name="soon"/>, inside the horizon, of a zone that touches
