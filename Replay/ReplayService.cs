@@ -261,7 +261,17 @@ public sealed class ReplayService : IDisposable
                     if (module.PrimaryActor.IsDead || module.PrimaryActor.HPMP.CurHP == 0)
                         return null;
 
+                    // A module loads as soon as its boss exists, often a pack or two early; recording from then filed the
+                    // trash before Tesleen as a one-minute "Tesleen" recording and split her pull into a second file
+                    // (newtoon2, 2026-10-04). Start when the fight does, or when the player is in its arena.
+                    if (!module.Pulled && !module.PrimaryActor.InCombat && !(this.modules.LocalPlayer() is { } pc && module.InCharge(pc.Position)))
+                        return null;
+
                     this.Start();
+                    // Named after the module's boss, not the analysis's guess at one: that guess is the biggest enemy that
+                    // casts, which filed Forbidden Folios under 'Page 16' and Cursed Resurgence under 'Aetherial Ward'.
+                    if (!string.IsNullOrWhiteSpace(module.PrimaryActor.Name))
+                        this.recordingEncounterName = module.PrimaryActor.Name;
                     return $"Auto-recording {module.GetType().Name} to {Path.GetFileName(this.currentPath)}.";
                 }
 
