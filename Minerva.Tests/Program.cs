@@ -5530,6 +5530,23 @@ t.Section("A hand-played solo duty becomes a quest script draft");
     t.True("the walk is simplified to its corners", Minerva.Generation.QuestScriptGenerator.Simplify([new(0, 0, 0), new(5, 0, 0.1f), new(10, 0, 0), new(10, 0, 10)], 2f).Count == 3);
 }
 
+
+// Ariadne has one follower and no owner. Holminster Switch, 2026-10-02: Theseus sent a walk to the next pack, Minerva's
+// uptime steer replaced it every tick, and the tank stood on the first pack for 22 seconds.
+t.Section("A duty runner's route owns the feet; only danger takes them back");
+{
+    t.True("our steer is ours while the follower steers", FollowerOwnership.Owns(Mover.NavSteer, true, true, 0, 0));
+    t.False("a runner's path that replaced our steer is not", FollowerOwnership.Owns(Mover.NavSteer, true, false, 2, 0));
+    t.True("our path is ours while it only shrinks", FollowerOwnership.Owns(Mover.NavPath, true, false, 3, 5));
+    t.False("a path with more waypoints than we handed over is someone else's", FollowerOwnership.Owns(Mover.NavTravel, true, false, 9, 5));
+    t.False("nothing issued, nothing owned", FollowerOwnership.Owns(Mover.None, false, false, 2, 0));
+    t.True("vnavmesh cannot say, so what we issued stays ours", FollowerOwnership.Owns(Mover.NavPath, true, null, null, 4));
+    t.True("Theseus walking with Minerva idle is a runner's route", FollowerOwnership.Foreign(true, FollowerOwnership.Owns(Mover.None, false, false, 2, 0)));
+    t.True("and so is one that replaced Minerva's steer", FollowerOwnership.Foreign(true, FollowerOwnership.Owns(Mover.NavSteer, true, false, 2, 0)));
+    t.False("Minerva's own steer is not", FollowerOwnership.Foreign(true, FollowerOwnership.Owns(Mover.NavSteer, true, true, 0, 0)));
+    t.False("nothing running, nothing to yield to", FollowerOwnership.Foreign(false, false));
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
@@ -5824,6 +5841,7 @@ sealed class Harness
     public void Section(string name) => Console.WriteLine($"\n== {name} ==");
 
     public void True(string label, bool cond) => Record(label, cond);
+    public void False(string label, bool cond) => Record(label, !cond);
     public void Eq<T>(string label, T actual, T expected) => Record($"{label} (= {expected})", EqualityComparer<T>.Default.Equals(actual, expected), $"got {actual}");
     public void NotNull(string label, object? v) => Record(label, v != null, "was null");
     public void Near(string label, float actual, float expected, float eps = 0.01f) => Record($"{label} (~ {expected})", MathF.Abs(actual - expected) <= eps, $"got {actual}");

@@ -44,6 +44,8 @@ public enum DodgeBlocker : byte
     Casting = 7,
     /// <summary>Stunned, asleep, bound or petrified: the game ignores movement, whoever asks for it.</summary>
     Incapacitated = 8,
+    /// <summary>A duty runner (Theseus, Odysseus) was walking a route of its own, and only danger takes the feet from it.</summary>
+    RunnerPath = 9,
 }
 
 /// <summary>Which mover a steer went through. Mirrors the plugin's movement controller so a log can say
@@ -59,6 +61,36 @@ public enum Mover : byte
     NavPath = 3,
     /// <summary>The navmesh plugin walking a quest battle's route, heights and all.</summary>
     NavTravel = 4,
+}
+
+/// <summary>
+/// Whose route the navmesh follower is walking. Ariadne has one follower and no notion of an owner: a steer or a path
+/// from anyone replaces whatever it held, and <c>ariadne.PathIsRunning</c> stays up either way. Holminster Switch,
+/// 2026-10-02: Theseus sent a wall-to-wall walk to the next pack, Minerva's uptime steer replaced it every tick, and the
+/// tank stood on the first pack for 22 seconds while Theseus believed its walk was under way.
+/// </summary>
+public static class FollowerOwnership
+{
+    /// <summary>
+    /// Does the follower still hold what Minerva last gave it? <paramref name="followerSteering"/> and
+    /// <paramref name="followerWaypoints"/> are what the backend reports, null where it cannot say (vnavmesh has no
+    /// steer); then the answer is the old one, "ours if we issued something".
+    /// <list type="bullet">
+    /// <item>A steer is ours while the follower is steering: nobody else uses Ariadne's SteerTo.</item>
+    /// <item>A path is ours while the follower is not steering and holds no more waypoints than we handed it: a follower
+    /// only ever consumes them, so more means someone else's path replaced ours.</item>
+    /// </list>
+    /// </summary>
+    public static bool Owns(Mover mode, bool issued, bool? followerSteering, int? followerWaypoints, int issuedWaypoints)
+        => issued && mode switch
+        {
+            Mover.NavSteer => followerSteering ?? true,
+            Mover.NavPath or Mover.NavTravel => followerSteering != true && (followerWaypoints is not { } n || n <= issuedWaypoints),
+            _ => false,
+        };
+
+    /// <summary>A route is running that Minerva did not issue: a runner owns positioning, and only danger takes over.</summary>
+    public static bool Foreign(bool pathRunning, bool ours) => pathRunning && !ours;
 }
 
 /// <summary>
@@ -123,6 +155,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeBlocker.Gaze => $"safe spot {dist}y away ({why}) -- holding still: a gaze resolves in under a second",
             DodgeBlocker.Casting => $"safe spot {dist}y away ({why}) -- hardcasting; the ground is not lethal yet, so the cast is left to finish",
             DodgeBlocker.Incapacitated => $"safe spot {dist}y away ({why}) -- stunned, asleep or bound: the game will not move you",
+            DodgeBlocker.RunnerPath => $"safe spot {dist}y away ({why}) -- yielding to a duty runner's own route",
             _ => $"safe spot {dist}y away ({why}) -- not steering",
         } + this.GazeSuffix;
     }
@@ -155,6 +188,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeBlocker.Gaze => $"a safe spot {dist}y away was found, but Minerva held still for a gaze about to resolve; the ground cost what the gaze would have.",
             DodgeBlocker.Casting => $"a safe spot {dist}y away was found while you were hardcasting, and Minerva judged the ground not yet lethal, so it let the cast finish instead of moving.",
             DodgeBlocker.Incapacitated => $"a safe spot {dist}y away was found, but you were stunned, asleep or bound: no dodge could move you, and nothing here was a dodge failure. The mechanic to answer is whatever applied it.",
+            DodgeBlocker.RunnerPath => $"a spot {dist}y away was wanted, but a duty runner was walking its own route and the ground was not yet judged lethal, so Minerva left the feet to it.",
             // walking for uptime or a positional means the destination was judged clear, so a hit there is a zone
             // the module never drew (Web of Terror, 2026-09-05: back toward the boss into an undrawn funnel lane)
             DodgeBlocker.None when this.Steering && this.Reason == DodgeReason.Clearing

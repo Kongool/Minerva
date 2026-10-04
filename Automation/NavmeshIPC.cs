@@ -32,7 +32,9 @@ internal sealed class NavmeshIPC
         ICallGateSubscriber<List<Vector3>, bool, object> moveTo, ICallGateSubscriber<object> stop,
         ICallGateSubscriber<List<Vector3>, bool, float, object>? moveToWithTolerance = null,
         ICallGateSubscriber<int>? stallCount = null,
-        ICallGateSubscriber<Vector3, object>? steerTo = null)
+        ICallGateSubscriber<Vector3, object>? steerTo = null,
+        ICallGateSubscriber<bool>? isSteering = null,
+        ICallGateSubscriber<int>? numWaypoints = null)
     {
         public string Name => name;
         public Func<bool> Ready => ready;
@@ -48,6 +50,12 @@ internal sealed class NavmeshIPC
         /// <summary>Steer straight at a point through the backend's own input hook, re-issued per
         /// tick. Null when unsupported.</summary>
         public ICallGateSubscriber<Vector3, object>? SteerTo => steerTo;
+
+        /// <summary>Is the follower steering (SteerTo) rather than walking waypoints? Null when unsupported.</summary>
+        public ICallGateSubscriber<bool>? IsSteering => isSteering;
+
+        /// <summary>Waypoints the follower still holds. Null when unsupported.</summary>
+        public ICallGateSubscriber<int>? NumWaypoints => numWaypoints;
     }
 
     private readonly Backend[] backends;
@@ -79,11 +87,14 @@ internal sealed class NavmeshIPC
                 pi.GetIpcSubscriber<object>("Ariadne.Path.Stop"),
                 pi.GetIpcSubscriber<List<Vector3>, bool, float, object>("Ariadne.Path.MoveToWithTolerance"),
                 pi.GetIpcSubscriber<int>("Ariadne.Path.StallCount"),
-                pi.GetIpcSubscriber<Vector3, object>("Ariadne.Path.SteerTo")),
+                pi.GetIpcSubscriber<Vector3, object>("Ariadne.Path.SteerTo"),
+                pi.GetIpcSubscriber<bool>("Ariadne.Path.IsSteering"),
+                pi.GetIpcSubscriber<int>("Ariadne.Path.NumWaypoints")),
             new Backend("vnavmesh",
                 () => vnavReady.InvokeFunc(),
                 pi.GetIpcSubscriber<List<Vector3>, bool, object>("vnavmesh.Path.MoveTo"),
-                pi.GetIpcSubscriber<object>("vnavmesh.Path.Stop")),
+                pi.GetIpcSubscriber<object>("vnavmesh.Path.Stop"),
+                numWaypoints: pi.GetIpcSubscriber<int>("vnavmesh.Path.NumWaypoints")),
         ];
     }
 
@@ -208,6 +219,26 @@ internal sealed class NavmeshIPC
             return 0;
         try { return b.StallCount.InvokeFunc(); }
         catch { return 0; }
+    }
+
+    /// <summary>Is the follower steering at a point rather than walking waypoints? Null when the backend cannot say.</summary>
+    public bool? IsSteering()
+    {
+        var b = this.driving ?? this.Resolve();
+        if (b?.IsSteering == null)
+            return null;
+        try { return b.IsSteering.InvokeFunc(); }
+        catch { return null; }
+    }
+
+    /// <summary>Waypoints the follower still holds, or null when the backend cannot say.</summary>
+    public int? NumWaypoints()
+    {
+        var b = this.driving ?? this.Resolve();
+        if (b?.NumWaypoints == null)
+            return null;
+        try { return b.NumWaypoints.InvokeFunc(); }
+        catch { return null; }
     }
 
     /// <summary>Drop the path on whichever backend we last drove. No-op if none.</summary>

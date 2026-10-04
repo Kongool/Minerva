@@ -70,7 +70,19 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
     public string? NavmeshBackend => this.UsingNavmesh ? this.nav.ActiveName : null;
 
     /// <summary>True while we're actively moving the character — either overriding walk input, or the navmesh is following our path.</summary>
-    public bool Steering => this.rawSteering || (this.navTarget != null && this.nav.PathRunning());
+    public bool Steering => this.rawSteering || (this.navTarget != null && this.nav.PathRunning() && this.OwnsFollower());
+
+    /// <summary>
+    /// A route is running in the navmesh follower that Minerva did not issue: a duty runner (Theseus walking a
+    /// wall-to-wall pull) owns positioning, and the AI yields everything but danger to it (FollowerOwnership).
+    /// </summary>
+    public bool ForeignPathRunning => FollowerOwnership.Foreign(this.nav.PathRunning(), this.OwnsFollower());
+
+    /// <summary>Does the follower still hold the steer or path we last handed it, or has someone replaced it?</summary>
+    private bool OwnsFollower()
+        => FollowerOwnership.Owns(this.Mode, this.navTarget != null, this.nav.IsSteering(), this.nav.NumWaypoints(), this.issuedWaypoints);
+
+    private int issuedWaypoints; // how many waypoints our last path handed the follower
 
     /// <summary>Which mover the last MoveTo went through; None after Stop.</summary>
     public Mover Mode { get; private set; }
@@ -161,6 +173,8 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
                 }
 
                 this.nav.MoveTo(path, DodgeWaypointTolerance);
+                this.Mode = Mover.NavPath;
+                this.issuedWaypoints = path.Count;
                 this.navTarget = target;
                 this.navRoute = route;
                 this.navStalls = 0; // the follower resets its own count on every Move
@@ -183,6 +197,9 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
     private bool RouteChanged(WPos target, IReadOnlyList<WPos>? route)
     {
         if (this.navTarget is not { } t || !t.AlmostEqual(target, ArrivalRadius))
+            return true;
+        // a runner's route replaced ours: this move is one the AI did not yield (danger), so it takes the follower back
+        if (!this.OwnsFollower())
             return true;
         var prev = this.navRoute;
         if (route is null || prev is null)
@@ -242,11 +259,12 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
         // A stall, or a follower that stopped short, gets the route again from where the character stands.
         var stalls = this.nav.StallCount();
         var now = DateTime.UtcNow;
-        if (this.travelPath is { } prev && prev.Count == path.Count && prev[0] == path[0] && stalls <= this.navStalls
+        if (this.travelPath is { } prev && prev.Count == path.Count && prev[0] == path[0] && stalls <= this.navStalls && this.OwnsFollower()
             && (this.nav.PathRunning() || now - this.travelIssuedAt < TravelReissueAfter))
             return;
 
         this.nav.MoveTo([.. path]);
+        this.issuedWaypoints = path.Count;
         this.travelIssuedAt = now;
         this.travelPath = [.. path];
         this.navTarget = new WPos(path[^1].X, path[^1].Z);
@@ -260,12 +278,16 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
 
     public void Stop()
     {
+        // only what we handed the follower: a runner's route that replaced ours is not ours to stop (asked before the
+        // mode is cleared, since the mode says what we handed it)
+        var ours = this.navTarget != null && this.OwnsFollower();
         this.Mode = Mover.None;
         this.target = null;
         this.travelPath = null;
         if (this.navTarget != null)
         {
-            this.nav.Stop();
+            if (ours)
+                this.nav.Stop();
             this.navTarget = null;
             this.navRoute = null;
         }

@@ -18,6 +18,9 @@ public interface IMovementController
     /// follower. Called every frame while travelling; re-issued only when the route changes.</summary>
     void Travel(IReadOnlyList<Vector3> path);
 
+    /// <summary>A route is running in the navmesh follower that Minerva did not issue: a duty runner owns the feet.</summary>
+    bool ForeignPathRunning { get; }
+
     /// <summary>Which mover the last <see cref="MoveTo"/> went through; <see cref="Mover.None"/> after <see cref="Stop"/>.</summary>
     Mover Mode { get; }
 
@@ -35,4 +38,5 @@ public sealed class NullMovementController : IMovementController
     public void Travel(IReadOnlyList<Vector3> path) { }
     public Mover Mode => Mover.None;
     public bool Busy => false;
+    public bool ForeignPathRunning => false;
 }

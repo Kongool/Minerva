@@ -335,6 +335,18 @@ public sealed class AIManager
             held = true;
         }
 
+        // A duty runner walking a route of its own owns the feet; only danger takes them back. Theseus's wall-to-wall
+        // walk to the next pack, Holminster Switch 2026-10-02: Minerva's uptime steer replaced it every tick and the tank
+        // stood on the first pack for 22 seconds. A runner that wants the character on the mobs stops its route (Odysseus
+        // when attacked mid-quest, Theseus holding a step for combat), and uptime is back. The same terms as a hold.
+        var runnerPath = this.movement.ForeignPathRunning;
+        var yieldedToRunner = false;
+        if (steering && runnerPath && !this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin))
+        {
+            steering = false;
+            yieldedToRunner = true;
+        }
+
         // BossmodReborn stops all movement for the last half second of a gaze: a step turns the character
         // along its walk, and no facing survives that. Ahead of the Competition, 2026-09-05: a half-second
         // dodge walked the character from 169 to 25 degrees off a Holy Sphere, and the gaze landed.
@@ -387,7 +399,7 @@ public sealed class AIManager
         // stunned character. Recorded as steering with reason Travel.
         var travelling = false;
         if (!steering && travel != null && this.config.AutoDodgeEnabled && this.movement is not NullMovementController
-            && !this.Current.NeedToMove && !this.HoldActive && this.SecondsUntilGaze > GazeHoldSeconds
+            && !this.Current.NeedToMove && !this.HoldActive && !runnerPath && this.SecondsUntilGaze > GazeHoldSeconds
             && Incapacitation.Blocking(pc) == null && !GameData.Occupied())
         {
             this.MaxCastTime = 0f;
@@ -413,6 +425,7 @@ public sealed class AIManager
         var blocker = steering ? DodgeBlocker.None
             : !this.config.AutoDodgeEnabled ? DodgeBlocker.AutoDodgeOff
             : held ? DodgeBlocker.Hold
+            : yieldedToRunner ? DodgeBlocker.RunnerPath
             : gazeHold ? DodgeBlocker.Gaze
             : casting ? DodgeBlocker.Casting
             : incapacitated ? DodgeBlocker.Incapacitated
