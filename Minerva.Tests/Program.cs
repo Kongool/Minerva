@@ -5664,6 +5664,48 @@ t.Section("Just past the edge of the floor, the way back in is always open");
     t.Eq($"no point just past the edge is stranded ({tried} tried)", stranded, 0);
 }
 
+// Page 16 (Forbidden Folios), 2026-10-03: towers for three to five. Each client went to the first tower in its own cast
+// order with room; one tower ended with five, another with two, and Big Burst gave all fourteen players a stack.
+t.Section("Open-world towers: fill the short one, and stay in the one you are in");
+{
+    (int Goal, bool Held) Pick(WPos[] towerAt, WPos[] players, int pov, double secondsLeft = 7.8)
+    {
+        var ws = new WorldState(10_000_000, "test");
+        ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+        ws.Execute(new ActorState.OpCreate(0x4000000D1, 0xD1u, 0, "Arbatel", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 3f, default, true, false, 0));
+        for (var i = 0; i < players.Length; ++i)
+            ws.Execute(new ActorState.OpCreate(0x10000D00ul + (ulong)i, 0u, 0, $"P{i}", 0, ActorType.Player, new Vector4(players[i].X, 0, players[i].Z, 0), 0.5f, default, true, false, 0));
+        var module = new TestModule(ws, ws.Actors.Find(0x4000000D1)!);
+        var towers = new CastTowersOpenWorld(module, 0u, 3f, 3, 5);
+        foreach (var at in towerAt)
+            towers.Towers.Add(new GenericTowersOpenWorld.Tower(at, 3f, 3, 5, activation: ws.CurrentTime.AddSeconds(secondsLeft)));
+        var hints = new AIHints();
+        towers.AddAIHints(0, ws.Actors.Find(0x10000D00ul + (ulong)pov)!, PartyRolesConfig.Assignment.Unassigned, hints);
+        var goal = -1;
+        for (var i = 0; i < towerAt.Length; ++i)
+            if (hints.ForbiddenZones.Count > 0 && !hints.ForbiddenZones[0].Contains(towerAt[i]))
+                goal = i;
+        module.Dispose();
+        return (goal, hints.UptimeHeld);
+    }
+
+    // listed first with three, the short one second, a near one with three third
+    WPos[] at = [new(100f, 115f), new(115f, 85f), new(95f, 100f)];
+    WPos[] three0 = [new(100f, 115f), new(101f, 115f), new(100f, 116f)];
+    WPos[] three2 = [new(93f, 101f), new(94f, 102f), new(95f, 102f)];
+    t.Eq("from outside, the tower short of its three, not the first listed or the nearest",
+        Pick(at, [new(108f, 95f), .. three0, new(115f, 85f), .. three2], 0).Goal, 1);
+    t.Eq("of two short towers, the nearer", Pick(at, [new(103f, 108f), new(100f, 115f), new(115f, 85f)], 0).Goal, 0);
+    var stays = Pick(at, [new(97f, 99f), new(115f, 85f), .. three0, new(93f, 101f), new(94f, 102f)], 0);
+    t.True("standing in a tower that needs it, it stays, and walks for nothing else", stays.Goal == 2 && stays.Held);
+    t.Eq("in a tower with a body to spare, the soaker nearest the short one goes",
+        Pick(at, [new(97f, 99f), new(115f, 85f), .. three0, .. three2], 0).Goal, 1);
+    t.Eq("but not when another in it is nearer the short one",
+        Pick(at, [new(97f, 99f), new(115f, 85f), .. three0, .. three2, new(97.5f, 98.5f)], 0).Goal, 2);
+    t.Eq("and not when it cannot get there before it lands",
+        Pick(at, [new(97f, 99f), new(115f, 85f), .. three0, .. three2], 0, secondsLeft: 2).Goal, 2);
+}
+
 // Metamorph, 2026-10-03: four 17.5y Wind Spheres and Cyclone Crossing left clear ground only past 23.2y of a 25y floor,
 // and the dodge keeps 2y off the barrier. All four toons stood at 22.5y and took the cross, twice.
 t.Section("When nothing inside the barrier margin is clear, half of it is used");
