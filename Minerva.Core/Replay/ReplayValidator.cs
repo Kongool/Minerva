@@ -39,6 +39,14 @@ public sealed class ReplayValidator
         /// fight has none.</summary>
         public string GazeNote { get; init; } = "";
 
+        /// <summary>When the dodge asked for Sprint and whether it came (the recorded decision's Sprint flag against the
+        /// player's Sprint status). Empty when it never asked.</summary>
+        public string SprintNote { get; init; } = "";
+
+        /// <summary>For a backline player: how long they stood in the boss's front while it fought someone else, where
+        /// every frontal cone lands. Empty for tanks and melee, or with no boss to face.</summary>
+        public string FrontNote { get; init; } = "";
+
         public int Uncovered => this.UncoveredMechanics.Count + this.UncoveredVisuals.Count;
 
         public string Render(INameResolver? names = null)
@@ -73,6 +81,10 @@ public sealed class ReplayValidator
             }
             if (this.GazeNote.Length > 0)
                 b.AppendLine("  " + this.GazeNote);
+            if (this.SprintNote.Length > 0)
+                b.AppendLine("  " + this.SprintNote);
+            if (this.FrontNote.Length > 0)
+                b.AppendLine("  " + this.FrontNote);
             foreach (var d in this.Dumps)
                 b.Append(d);
             return b.ToString();
@@ -261,6 +273,12 @@ public sealed class ReplayValidator
                 {
                     if (this.Gaze)
                         return $"a gaze; they were facing it {this.FacingDeg.ToString("0", CultureInfo.InvariantCulture)} degrees off. Their own decisions are on their box's recording.{gave}";
+                    // the sheet's verdicts hold for anyone's hits, before "drew nothing" can call them a gap: Rosa's and
+                    // Xia's auto-attacks from the adds read as module gaps when judged from Saar's recording (2026-10-03)
+                    if (!this.Drawn && !this.Watched && this.SheetSingleTarget)
+                        return $"the game's sheet says this is single-target (a tankbuster or an auto-attack), expected on whoever holds it.{gave}";
+                    if (!this.Drawn && !this.Watched && this.SheetRaidwide)
+                        return $"the game's sheet gives this a circle bigger than the arena, so there is no edge to walk out of: expected damage, unless the fight has a shelter to stand in and the module never pointed at it.{gave}";
                     if (!this.Drawn)
                         return "Minerva drew nothing for this: the module has no component for it, so no dodge was possible on any box (module gap)." + gave;
                     if (outside != null)
@@ -359,6 +377,12 @@ public sealed class ReplayValidator
         // would it have turned".
         var lastInsideForbiddenTicks = 0L; // the POV stood in ground the module forbade, however it was published
         long gazeFrames = 0, refaceFrames = 0, holdFrames = 0, gazeSamples = 0;
+        // Sprint asked for (a run of decisions with the flag) and whether the player then had Sprint up
+        var sprintAsks = new List<(double At, bool Came)>();
+        var sprintAsking = false;
+        long sprintAskTicks = 0;
+        // a backline player in the front of the boss fighting someone else, sampled with the gazes
+        long frontSamples = 0, frontFightSamples = 0;
         var maxArcs = 0;
         var impossibleFrames = 0L;
         var lastGazeSample = 0L; // 0, not MinValue: subtracting from MinValue wraps (the same trap as lastInsideDrawnTicks)
@@ -570,9 +594,35 @@ public sealed class ReplayValidator
             }
             module?.Update();
             DrawCounts(module, countsAfter);
+            // a Sprint request opens on the first decision that carries it; it came if Sprint (status 50) went up within
+            // a second and a half of it
+            if (op is OpDodgeDecision dd && !foreign)
+            {
+                if (dd.Value.Sprint && !sprintAsking)
+                {
+                    sprintAsking = true;
+                    sprintAskTicks = ticks;
+                    sprintAsks.Add(((ticks - start) / (double)TimeSpan.TicksPerSecond, false));
+                }
+                else if (!dd.Value.Sprint)
+                {
+                    sprintAsking = false;
+                }
+            }
+            if (sprintAsks.Count > 0 && !sprintAsks[^1].Came && ticks - sprintAskTicks <= 3 * TimeSpan.TicksPerSecond / 2
+                && op is ActorState.OpStatus sprinted && sprinted.InstanceID == pov && sprinted.Value.ID == SprintStatus)
+                sprintAsks[^1] = sprintAsks[^1] with { Came = true };
             if (pov != 0 && module != null && op is WorldState.OpFrameStart && world.Actors.Find(pov) is { } pcFacing
                 && ticks - lastGazeSample >= TimeSpan.TicksPerSecond / 10)
             {
+                if (pcFacing.Role is not (Role.Tank or Role.Melee) && module.PrimaryActor is { IsDead: false, IsTargetable: true } faced
+                    && faced.InCombat && faced.TargetID != pov && faced.TargetID != 0)
+                {
+                    ++frontFightSamples;
+                    var off = pcFacing.Position - faced.Position;
+                    if (off.LengthSq() > 0.01f && MathF.Abs((Angle.FromDirection(off) - faced.Rotation).Normalized().Deg) <= 45f)
+                        ++frontSamples;
+                }
                 lastGazeSample = ticks;
                 ++gazeSamples;
                 var gh = new AIHints();
@@ -732,7 +782,7 @@ public sealed class ReplayValidator
                 hits[i] = h with { PartyWide = true };
         }
 
-        return new Result(module?.GetType().Name ?? (guess != null ? "(no module: cast-bar guesser)" : "(no module activated)"), castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps, GazeNote = GazeSummary(gazeFrames, refaceFrames, holdFrames, impossibleFrames, maxArcs, gazeSamples) };
+        return new Result(module?.GetType().Name ?? (guess != null ? "(no module: cast-bar guesser)" : "(no module activated)"), castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps, GazeNote = GazeSummary(gazeFrames, refaceFrames, holdFrames, impossibleFrames, maxArcs, gazeSamples), SprintNote = SprintSummary(sprintAsks), FrontNote = FrontSummary(frontSamples, frontFightSamples) };
     }
 
     private static ModuleBase? TryActivate(WorldState world, ModuleRegistry registry, HashSet<uint> watched)
@@ -947,6 +997,25 @@ public sealed class ReplayValidator
                 stack |= ss.IsStackTarget(me);
             }
         return (spread, stack);
+    }
+
+    /// <summary>The game's Sprint status.</summary>
+    private const uint SprintStatus = 50;
+
+    private static string SprintSummary(List<(double At, bool Came)> asks)
+    {
+        if (asks.Count == 0)
+            return "";
+        var came = asks.Count(a => a.Came);
+        var when = string.Join(", ", asks.Take(8).Select(a => a.At.ToString("0.0", CultureInfo.InvariantCulture) + "s" + (a.Came ? "" : " (none)")));
+        return $"sprint: Minerva asked {asks.Count} time(s) -- {when}; Sprint came within 1.5s for {came} of them";
+    }
+
+    private static string FrontSummary(long front, long samples)
+    {
+        if (samples < 10)
+            return "";
+        return $"boss's front: {front / 10.0:0.0}s of {samples / 10.0:0.0}s ({100.0 * front / samples:0}%) inside the front 90 degrees of a boss fighting someone else; a backline role keeps out of it";
     }
 
     /// <summary>Does a module have a bait on <paramref name="me"/>?</summary>
