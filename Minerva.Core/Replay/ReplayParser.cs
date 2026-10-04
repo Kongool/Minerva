@@ -260,7 +260,10 @@ public sealed class ReplayParser
         // Format 3 added the caster's position at the moment it fired. Older logs go straight to the
         // target count, so the token can only be read when the header says it is there.
         var source = format >= 3 && r.HasMore ? r.NextVec4() : default;
-        var ev = new ActorCastEvent(action, target, rotation, default, seq, new Vector3(source.X, source.Y, source.Z));
+        // Format 4 added where it was aimed. Before it a replay had no aim at all: every component that follows a
+        // resolved hit's location (an exaflare matching each pulse to its line) saw (0, 0) and never advanced.
+        var aim = format >= 4 && r.HasMore ? r.NextVec4() : default;
+        var ev = new ActorCastEvent(action, target, rotation, new Vector3(aim.X, aim.Y, aim.Z), seq, new Vector3(source.X, source.Y, source.Z));
         // targets are optional: recordings made before they were captured simply end here
         if (r.HasMore)
         {

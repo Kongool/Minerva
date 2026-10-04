@@ -651,27 +651,24 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     /// </summary>
     private void ActionEffectDetour(uint casterID, Character* casterObj, Vector3* targetPos, ActionEffectHandler.Header* header, ActionEffectHandler.TargetEffects* effects, GameObjectId* targets)
     {
-        this.actionEffectHook!.Original(casterID, casterObj, targetPos, header, effects, targets);
+        // Read the packet BEFORE handing it on, as BossmodReborn does, so nothing the game's handler does to its buffers
+        // can reach what we record. Whether reading afterwards ever mattered is not known: until recording format 4 the
+        // aim was not written down, so no recording could say (Philia's Fierce Beating, 2026-10-02, where two hits came
+        // from puddles that advance by where each pulse lands -- 41 modules follow a resolved hit's location).
+        Vector3 aim;
+        uint actionId;
+        ushort rotationInt;
+        ulong animationTarget;
+        uint globalSequence;
+        List<ActorCastEvent.Target> resolved;
         try
         {
-            var ev = new ActorCastEvent(
-                ActionID.MakeSpell(header->ActionId),
-                header->AnimationTargetId,
-                // RotationInt is a ushort over the full turn with its ZERO AT -PI, so the -MathF.PI is not
-                // cosmetic: without it every cast event reports a heading 180 degrees from the cast that
-                // produced it. Measured against a capture of Accept No Imitators -- all 18 Supercell cones,
-                // three casters, both actions, delta exactly +180.00. GenericRotatingAOE matches a resolving
-                // cast back to its sequence on rotation within 0.05 rad, so nothing ever matched, no sequence
-                // ever advanced, and the cones accumulated until the arena had no safe spot left.
-                // BossmodReborn: PacketDecoder.IntToFloatAngle(ushort) => (rot * Inv65kDoublePI - PI).Radians()
-                new Angle(header->RotationInt * (180f / 32768f) * Angle.DegToRad - MathF.PI),
-                *targetPos,
-                header->GlobalSequence,
-                // Where the caster is standing right now, which for an ability that moves its caster is
-                // the only moment the answer is right: a replay that reconstructs it from movement reads
-                // wherever the last packet left the actor. See ActorCastEvent.SourcePos.
-                CasterPosition(casterID));
-
+            aim = *targetPos;
+            actionId = header->ActionId;
+            animationTarget = header->AnimationTargetId;
+            rotationInt = header->RotationInt;
+            globalSequence = header->GlobalSequence;
+            resolved = [];
             var raw = (ulong*)effects;
             var numTargets = Math.Min((int)header->NumTargets, 16); // defensive: the packet is fixed-size
             for (var i = 0; i < numTargets; ++i)
@@ -679,8 +676,37 @@ public sealed unsafe class WorldStateGameSync : IDisposable
                 var slots = new ulong[ActorCastEvent.Target.MaxEffects];
                 for (var j = 0; j < slots.Length; ++j)
                     slots[j] = raw[i * 8 + j];
-                ev.Targets.Add(new ActorCastEvent.Target(targets[i], slots));
+                resolved.Add(new ActorCastEvent.Target(targets[i], slots));
             }
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Error(ex, "Minerva: ActionEffect decode failed.");
+            this.actionEffectHook!.Original(casterID, casterObj, targetPos, header, effects, targets);
+            return;
+        }
+
+        this.actionEffectHook!.Original(casterID, casterObj, targetPos, header, effects, targets);
+        try
+        {
+            var ev = new ActorCastEvent(
+                ActionID.MakeSpell(actionId),
+                animationTarget,
+                // RotationInt is a ushort over the full turn with its ZERO AT -PI, so the -MathF.PI is not
+                // cosmetic: without it every cast event reports a heading 180 degrees from the cast that
+                // produced it. Measured against a capture of Accept No Imitators -- all 18 Supercell cones,
+                // three casters, both actions, delta exactly +180.00. GenericRotatingAOE matches a resolving
+                // cast back to its sequence on rotation within 0.05 rad, so nothing ever matched, no sequence
+                // ever advanced, and the cones accumulated until the arena had no safe spot left.
+                // BossmodReborn: PacketDecoder.IntToFloatAngle(ushort) => (rot * Inv65kDoublePI - PI).Radians()
+                new Angle(rotationInt * (180f / 32768f) * Angle.DegToRad - MathF.PI),
+                aim,
+                globalSequence,
+                // Where the caster is standing right now, which for an ability that moves its caster is
+                // the only moment the answer is right: a replay that reconstructs it from movement reads
+                // wherever the last packet left the actor. See ActorCastEvent.SourcePos.
+                CasterPosition(casterID));
+            ev.Targets.AddRange(resolved);
 
             this.QueueActorOp(casterID, new ActorState.OpCastEvent(casterID, ev));
         }

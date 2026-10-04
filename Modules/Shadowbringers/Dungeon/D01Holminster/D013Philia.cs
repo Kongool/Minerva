@@ -246,6 +246,11 @@ sealed class CatONineTails(ModuleBase module) : Components.GenericRotatingAOE(mo
 
 sealed class FierceBeating(ModuleBase module) : Components.Exaflare(module, 4f)
 {
+    // Pulse timing measured on newtoon1's run, 2026-10-02: the first pulse after a line starts comes 0.66-0.85s
+    // later, every one after that 0.96-1.45s (median 1.06). BossmodReborn uses a flat second, so a line that had just
+    // started looked crossable for 0.15-0.35s it did not have: twice the dodge out of a Cat o' Nine Tails cone walked
+    // through the second pulse's spot and was hit as it fired (149.78s, 154.14s). Both times err early.
+    private const double FirstStep = 0.65d, LaterStep = 0.95d;
     private readonly AOEShapeCircle circle = new(4f);
     private readonly List<AOEInstance> _predictions = [];
 
@@ -307,7 +312,8 @@ sealed class FierceBeating(ModuleBase module) : Components.Exaflare(module, 4f)
         {
             if (id is (uint)AID.FierceBeatingExaFirst or (uint)AID.FierceBeatingExaRestFirst)
             {
-                Advance(caster.Position);
+                if (Advance(caster.Position) is { } started)
+                    started.NextExplosion = World.FutureTime(FirstStep);
             }
             else if (id == (uint)AID.FierceBeatingExaRestRest)
             {
@@ -315,7 +321,7 @@ sealed class FierceBeating(ModuleBase module) : Components.Exaflare(module, 4f)
             }
         }
 
-        void Advance(WPos pos)
+        Line? Advance(WPos pos)
         {
             var count = Lines.Count;
             for (var i = 0; i < count; ++i)
@@ -326,16 +332,17 @@ sealed class FierceBeating(ModuleBase module) : Components.Exaflare(module, 4f)
                     AdvanceLine(line, pos);
                     if (line.ExplosionsLeft == 0)
                         Lines.RemoveAt(i);
-                    return;
+                    return line;
                 }
             }
+            return null;
         }
     }
 
     public void AddLine(ref Actor caster, DateTime activation)
     {
         var adv = 2.5f * caster.Rotation.ToDirection();
-        Lines.Add(new(caster.Position, adv, activation, 1d, 7, 3));
+        Lines.Add(new(caster.Position, adv, activation, LaterStep, 7, 3));
         ++NumCasts;
         if (_predictions.Count != 0 && NumCasts > 2)
         {

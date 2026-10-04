@@ -4521,7 +4521,7 @@ t.Section("Offline validation round trip");
         {
             evWs.Execute(new WorldState.OpFrameStart(new FrameState { Timestamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) }, TimeSpan.FromSeconds(1)));
             evWs.Execute(new ActorState.OpCreate(0x1, 0xABCu, 0, "C", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1f, default, true, false, 0));
-            var ev = new ActorCastEvent(ActionID.MakeSpell(1234u), 0x2, default, default, 7u);
+            var ev = new ActorCastEvent(ActionID.MakeSpell(1234u), 0x2, default, new Vector3(128f, 0f, -476.3f), 7u, new Vector3(129.8f, 0f, -474.5f));
             ev.Targets.Add(new ActorCastEvent.Target(0x2, [1ul, 0, 0, 0, 0, 0, 0, 0]));
             ev.Targets.Add(new ActorCastEvent.Target(0x3, [0xDEADul, 0xBEEFul, 0, 0, 0, 0, 0, 0]));
             evWs.Execute(new ActorState.OpCastEvent(0x1, ev));
@@ -4533,6 +4533,9 @@ t.Section("Offline validation round trip");
         t.Eq("both targets round-tripped", parsed!.Value.Targets.Count, 2);
         t.Eq("target id preserved", parsed.Value.Targets[1].ID, 0x3ul);
         t.Eq("effect slot preserved", parsed.Value.Targets[1].Effects[1], 0xBEEFul);
+        // format 4: where it was aimed, apart from where the caster stood (a Fierce Beating pulse lands 2.5y on)
+        t.True("the aim point round-trips", parsed.Value.TargetXZ.AlmostEqual(new WPos(128f, -476.3f), 0.01f));
+        t.True("and stays apart from the caster's position", parsed.Value.SourcePos.X == 129.8f);
 
         // a pre-targets recording (no count/target tokens) still parses, with an empty target list
         var legacy = evOut.ToString().Split('\n')

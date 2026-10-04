@@ -20,7 +20,9 @@ public sealed class ReplayRecorder : IDisposable
     /// </summary>
     /// <para>3: a cast event carries the position its caster fired from, written between the global
     /// sequence and the target count.</para>
-    public const int Version = 3;
+    /// <para>4: and then the position it was aimed at (2026-10-02). Philia's Fierce Beating puddles advance with each
+    /// pulse, matched by where each pulse lands; replays had no aim, so offline they froze where they began.</para>
+    public const int Version = 4;
 
     /// <summary>
     /// How much this recorder captures, as a number that only goes up. **Bump it whenever the recorder starts
@@ -36,7 +38,8 @@ public sealed class ReplayRecorder : IDisposable
     /// swept from.</para>
     /// <para>3: the dodge decision carries the enemy the uptime walk was aimed at (2026-09-24), so a replay can
     /// show the character being walked to the add or back to the boss without inferring it from coordinates.</para>
-    public const int Revision = 3;
+    /// <para>4: cast events carry where they were aimed (2026-10-02), so location-following components replay.</para>
+    public const int Revision = 4;
 
     private readonly WorldState ws;
     private readonly TextWriter writer;
