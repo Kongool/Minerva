@@ -5633,12 +5633,13 @@ t.Section("Boxed in with no clean route, the dodge still heads for clear ground;
 // Eale's Arresting Gaze, 2026-10-03: Rosa stood on the cone's axis 24y in front of Eale, in line with the tank.
 t.Section("Backline toons keep out of the boss's front");
 {
-    t.Eq("a caster stands flank or rear", UptimeTargeting.SideFor(Role.Ranged, Positional.Any), Positional.Flank | Positional.Rear);
-    t.Eq("so does a healer", UptimeTargeting.SideFor(Role.Healer, Positional.Any), Positional.Flank | Positional.Rear);
-    t.Eq("melee keep the box's side", UptimeTargeting.SideFor(Role.Melee, Positional.Rear), Positional.Rear);
-    t.Eq("tanks keep theirs", UptimeTargeting.SideFor(Role.Tank, Positional.Any), Positional.Any);
+    t.Eq("a caster stands flank or rear", UptimeTargeting.SideFor(Role.Ranged, Positional.Any, boss: true), Positional.Flank | Positional.Rear);
+    t.Eq("so does a healer", UptimeTargeting.SideFor(Role.Healer, Positional.Any, boss: true), Positional.Flank | Positional.Rear);
+    t.Eq("but not on trash, where the flank is often a wall", UptimeTargeting.SideFor(Role.Ranged, Positional.Any, boss: false), Positional.Any);
+    t.Eq("melee keep the box's side", UptimeTargeting.SideFor(Role.Melee, Positional.Rear, boss: false), Positional.Rear);
+    t.Eq("tanks keep theirs", UptimeTargeting.SideFor(Role.Tank, Positional.Any, boss: true), Positional.Any);
     var boss = new Actor(0x4000F001, 0x1u, 1, "Eale", 0, ActorType.Enemy, new Vector4(0f, 0f, 0f, 0f), 3f);
-    var goal = UptimeGoal.For(boss, Role.Ranged, UptimeTargeting.SideFor(Role.Ranged, Positional.Any));
+    var goal = UptimeGoal.For(boss, Role.Ranged, UptimeTargeting.SideFor(Role.Ranged, Positional.Any, boss: true));
     t.False("in front of the boss is not good enough", goal.Satisfied(new WPos(0f, 24f)));
     t.True("on its flank is", goal.Satisfied(new WPos(20f, 10f)));
 }

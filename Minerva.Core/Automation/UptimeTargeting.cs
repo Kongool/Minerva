@@ -96,9 +96,12 @@ public static class UptimeTargeting
     /// axis 24y out; the nearest safe ground was 18.4y away with 2.9s left, and she was paralysed a yalm and a half short.
     /// Proposed 2026-09-25 and deferred; the user asked for it 2026-10-03. Positionals stay off while the boss targets you
     /// (<see cref="PositionalWorthWalking"/>), so a caster fighting alone is not walked round a boss that turns with it.
+    /// <para>Only for a <paramref name="boss"/>: trash faces the tank down a corridor, and a caster sent to its flank walks
+    /// into the wall and stops casting. The user, 2026-10-04: Think Twice (Summoner) "spends all her time trying to path
+    /// somewhere she can't" on trash in Holminster.</para>
     /// </summary>
-    public static Positional SideFor(Role role, Positional wanted)
-        => role is Role.Tank or Role.Melee ? wanted : Positional.Flank | Positional.Rear;
+    public static Positional SideFor(Role role, Positional wanted, bool boss)
+        => role is Role.Tank or Role.Melee ? wanted : boss ? Positional.Flank | Positional.Rear : Positional.Any;
 
     /// <summary>
     /// Whether this character has to start the fight itself: a boss module's target that nothing is fighting yet, with

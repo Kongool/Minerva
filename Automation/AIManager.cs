@@ -279,7 +279,7 @@ public sealed class AIManager
         }
         else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)
             goal = this.bandWalk.Apply(
-                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(UptimeTargeting.SideFor(role, this.ActivePositional), target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target), role, questDriven && soloDuty)),
+                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(UptimeTargeting.SideFor(role, this.ActivePositional, InCharge(module, pc) && target == module!.PrimaryActor), target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target), role, questDriven && soloDuty)),
                 pc.Position,
                 pc.CastInfo != null);
         else
