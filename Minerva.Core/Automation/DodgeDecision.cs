@@ -64,6 +64,39 @@ public enum Mover : byte
 }
 
 /// <summary>
+/// When a dodge needs Sprint: the way out is longer than walking covers before the ground under the character fires.
+/// Eale's Arresting Gaze, 2026-10-03: Rosa's way out of the cone was 18.4y with 2.9s left, walking covers 17.4y, and she
+/// was paralysed a yalm and a half short. Sprint (+30%) covers about 22y. She did sprint -- half a second before the hit.
+/// </summary>
+public static class DodgeSprint
+{
+    /// <summary>Ask once the walk needs more than this share of the time left: a walk that just fits has no room for a
+    /// late start, a bend in the route or a cast it waits on.</summary>
+    public const float Slack = 0.85f;
+
+    /// <summary>Only for ground firing within this many seconds; further off, walking still has time to work.</summary>
+    public const float Horizon = 6f;
+
+    public static bool Wanted(float escapeDistance, float secondsLeft, float moveSpeed)
+        => secondsLeft > 0f && secondsLeft <= Horizon && escapeDistance > secondsLeft * moveSpeed * Slack;
+
+    /// <summary>The walk to <paramref name="spot"/>: along its route when it has one, else straight.</summary>
+    public static float EscapeDistance(WPos from, SafeSpot spot)
+    {
+        if (spot.Route is not { Count: > 0 } route)
+            return (spot.Target - from).Length();
+        var total = 0f;
+        var at = from;
+        foreach (var p in route)
+        {
+            total += (p - at).Length();
+            at = p;
+        }
+        return total;
+    }
+}
+
+/// <summary>
 /// Whose route the navmesh follower is walking. Ariadne has one follower and no notion of an owner: a steer or a path
 /// from anyone replaces whatever it held, and <c>ariadne.PathIsRunning</c> stays up either way. Holminster Switch,
 /// 2026-10-02: Theseus sent a wall-to-wall walk to the next pack, Minerva's uptime steer replaced it every tick, and the
@@ -102,6 +135,10 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
 {
     /// <summary>True once a recorded decision has been applied; the default is "nothing known yet".</summary>
     public bool Known { get; init; }
+
+    /// <summary>The escape is longer than walking covers in the time left, so Minerva asked for Sprint
+    /// (<see cref="DodgeSprint"/>, published as <c>Minerva.Hints.WantSprint</c>).</summary>
+    public bool Sprint { get; init; }
 
     /// <summary>A gaze was up: the hints carried forbidden directions this frame.</summary>
     public bool GazeUp { get; init; }
@@ -215,7 +252,7 @@ public sealed class OpDodgeDecision(DodgeDecision value) : WorldState.Operation
     public override void Write(OperationOutput o)
     {
         var flags = (this.Value.NeedToMove ? 1u : 0u) | (this.Value.Found ? 2u : 0u) | (this.Value.Steering ? 4u : 0u)
-            | (this.Value.GazeUp ? 8u : 0u) | (this.Value.Turning ? 16u : 0u);
+            | (this.Value.GazeUp ? 8u : 0u) | (this.Value.Turning ? 16u : 0u) | (this.Value.Sprint ? 32u : 0u);
         o.Tag("DODG").Emit(flags).Emit(this.Value.Target.X).Emit(this.Value.Target.Z).Emit((uint)this.Value.Reason).Emit((uint)this.Value.Blocker)
             .Emit((uint)this.Value.Mover).Emit(this.Value.MoverBusy).Emit(this.Value.UptimeTargetID, "X");
     }
@@ -249,6 +286,7 @@ public sealed class OpDodgeDecision(DodgeDecision value) : WorldState.Operation
         {
             GazeUp = (flags & 8u) != 0,
             Turning = (flags & 16u) != 0,
+            Sprint = (flags & 32u) != 0,
             Mover = mover,
             MoverBusy = busy,
             UptimeTargetID = uptimeTarget,

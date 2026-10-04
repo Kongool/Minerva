@@ -467,7 +467,44 @@ public static class ArenaPathfinder
             }
         }
 
-        return new SafeSpot(true, false, player, default); // whole reachable arena is dangerous
+        // Nothing can be reached clean in time, by this clock. Standing still is the one answer certain to be hit, so head
+        // for the nearest ground that is clear when it all lands, across whatever lies between, and let the rotation
+        // plugin sprint for it (DodgeSprint). Pallmagia's Occult Missile, 2026-10-03: Xia stood at the arena's edge with
+        // four missiles boxing her in; the clear ground was 11.5y away across one of them, 3.7s out, and under her box's
+        // lead and margin no route counted as clean, so she stood for the whole 3.7s and took two of them -- as did Rosa.
+        // Only reached when every stage and fallback above found nothing, so a pocket that is safe to wait in (Alabaster
+        // Blade's) is still kept.
+        if (NearestClearGround(hints, deadline, solveNow, now, player, cellSize, moveSpeed, out var clear))
+            return new SafeSpot(true, true, clear, (clear - player).Normalized());
+
+        return new SafeSpot(true, false, player, default); // nowhere in the arena is clear
+    }
+
+    /// <summary>The nearest ground clear of everything landing by <paramref name="deadline"/>, by straight distance,
+    /// whether or not it can be reached in time: the last resort when every clean route has been ruled out.</summary>
+    private static bool NearestClearGround(AIHints hints, DateTime deadline, DateTime solveNow, DateTime now, WPos player, float cellSize, float moveSpeed, out WPos best)
+    {
+        var grid = new RouteGrid(hints, deadline, player, cellSize, 0f, solveNow, moveSpeed, now);
+        best = player;
+        var bestDistance = float.MaxValue;
+        for (var gz = 0; gz < grid.Height; ++gz)
+        {
+            for (var gx = 0; gx < grid.Width; ++gx)
+            {
+                if (grid.Blocked(gx, gz) || grid.Outside(gx, gz))
+                    continue;
+                var p = grid.Center(gx, gz);
+                if (hints.InImminentDanger(p, deadline, 0f))
+                    continue;
+                var d = (p - player).LengthSq();
+                if (d < bestDistance)
+                {
+                    bestDistance = d;
+                    best = p;
+                }
+            }
+        }
+        return bestDistance < float.MaxValue;
     }
 
     /// <summary>How far ahead ground counts as "going to fire". Past this it is scenery -- a persistent

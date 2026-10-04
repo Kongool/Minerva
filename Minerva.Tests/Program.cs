@@ -5587,6 +5587,42 @@ t.Section("The validator counts a step of a sequence already on screen as drawn"
     t.True("a spell aimed at a player does not borrow it", !seqResult.Drawn.Contains(5002u));
 }
 
+
+// Pallmagia's Occult Missile, 2026-10-03: Xia at the edge of the 18y arena, four 6y missiles boxing her in, 3.7s out.
+// The clear ground was 11.5y away across one of them; under her box's lead no route was clean, the dodge said "no
+// safe spot" and she stood for all 3.7s. Rosa took the same two missiles. Standing still is the one certain hit.
+t.Section("Boxed in with no clean route, the dodge still heads for clear ground; Sprint when walking cannot make it");
+{
+    var now = new DateTime(2026, 10, 3, 20, 59, 0, DateTimeKind.Utc);
+    var center = new WPos(807f, -562f);
+    var xia = new WPos(798.3f, -577.2f);
+    var h = new AIHints { Center = center, Bounds = new ArenaBoundsCircle(18f), PlayerPosition = xia };
+    foreach (var (x, z) in new[] { (800.7f, -577.1f), (795.6f, -568.2f), (798.4f, -577.6f), (805.4f, -573.9f) })
+        h.AddForbiddenZone(new AOEShapeCircle(6f), new WPos(x, z), default, now.AddSeconds(3.6));
+    var spot = ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1.5f, moveSpeed: 6f, clearanceLead: 3f);
+    t.True("it moves rather than standing in the missiles", spot.NeedToMove && spot.Found && (spot.Target - xia).Length() > 1f);
+    t.True("to ground clear of every missile and inside the arena",
+        !h.InImminentDanger(spot.Target, now.AddSeconds(10), 0f) && h.Bounds.Contains(center, spot.Target));
+    var escape = DodgeSprint.EscapeDistance(xia, spot);
+    t.False($"that walk ({escape:0.0}y in 3.6s) fits without Sprint", DodgeSprint.Wanted(escape, 3.6f, 6f));
+    t.True("Rosa's 18.4y out of Arresting Gaze with 2.9s left asks for Sprint", DodgeSprint.Wanted(18.4f, 2.9f, 6f));
+    t.False("nor one whose ground fires well beyond the horizon", DodgeSprint.Wanted(30f, 9f, 6f));
+}
+
+// Eale's Arresting Gaze, 2026-10-03: Rosa stood on the cone's axis 24y in front of Eale, in line with the tank.
+t.Section("Backline toons keep out of the boss's front");
+{
+    t.Eq("a caster stands flank or rear", UptimeTargeting.SideFor(Role.Ranged, Positional.Any), Positional.Flank | Positional.Rear);
+    t.Eq("so does a healer", UptimeTargeting.SideFor(Role.Healer, Positional.Any), Positional.Flank | Positional.Rear);
+    t.Eq("melee keep the box's side", UptimeTargeting.SideFor(Role.Melee, Positional.Rear), Positional.Rear);
+    t.Eq("tanks keep theirs", UptimeTargeting.SideFor(Role.Tank, Positional.Any), Positional.Any);
+    var boss = new Actor(0x4000F001, 0x1u, 1, "Eale", 0, ActorType.Enemy, new Vector4(0f, 0f, 0f, 0f), 3f);
+    var goal = UptimeGoal.For(boss, Role.Ranged, UptimeTargeting.SideFor(Role.Ranged, Positional.Any));
+    t.False("in front of the boss is not good enough", goal.Satisfied(new WPos(0f, 24f)));
+    t.True("on its flank is", goal.Satisfied(new WPos(20f, 10f)));
+}
+
+
 // Tiny Terror, 2026-10-03: Xia stood 0.6y past the 18y floor (the Occult Crescent barrier margin) on a cell touching the
 // floor only diagonally, and nothing was reachable: "no safe spot" for 30 seconds while two AOEs landed on her.
 t.Section("Just past the edge of the floor, the way back in is always open");

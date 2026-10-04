@@ -63,6 +63,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<ulong[]> deprioritizedTargets;
     private readonly ICallGateProvider<ulong> forcedTarget;
     private readonly ICallGateProvider<ulong> interactTarget;
+    private readonly ICallGateProvider<bool> wantSprint;
     private readonly ICallGateProvider<(uint, ulong, float, System.Numerics.Vector3, float)[]> roleplayActions;
     private readonly ICallGateProvider<ulong> pullTarget;
     private readonly ICallGateProvider<ulong[]> targetsToInterrupt;
@@ -200,6 +201,11 @@ internal sealed class MinervaIpc : IDisposable
         // walks the character there; the click is the rotation plugin's.
         this.interactTarget = pi.GetIpcProvider<ulong>("Minerva.Hints.InteractTarget");
         this.interactTarget.RegisterFunc(() => this.ai.InteractTargetId);
+
+        // The dodge's way out is longer than walking covers before the ground fires: press Sprint (DodgeSprint). Minerva
+        // presses no buttons; the rotation plugin does.
+        this.wantSprint = pi.GetIpcProvider<bool>("Minerva.Hints.WantSprint");
+        this.wantSprint.RegisterFunc(() => this.ai.WantSprint);
 
         // The role-play kit's choices, best first: (action id, target instance id, priority, ground position, facing in
         // radians or NaN). Spell actions from the Roleplay table only; the rotation plugin presses them while you play
@@ -345,6 +351,7 @@ internal sealed class MinervaIpc : IDisposable
         this.deprioritizedTargets.UnregisterFunc();
         this.forcedTarget.UnregisterFunc();
         this.interactTarget.UnregisterFunc();
+        this.wantSprint.UnregisterFunc();
         this.roleplayActions.UnregisterFunc();
         this.pullTarget.UnregisterFunc();
         this.targetsToInterrupt.UnregisterFunc();

@@ -147,6 +147,7 @@ public sealed class AIManager
         this.SecondsUntilMustNotMove = float.NaN;
         this.SecondsUntilGaze = float.NaN;
         this.MaxCastTime = float.MaxValue;
+        this.WantSprint = false;
 
         var module = this.modules.ActiveModule;
         var pc = this.modules.LocalPlayer();
@@ -271,7 +272,7 @@ public sealed class AIManager
         }
         else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)
             goal = this.bandWalk.Apply(
-                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(this.ActivePositional, target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target), role, questDriven && soloDuty)),
+                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(UptimeTargeting.SideFor(role, this.ActivePositional), target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target), role, questDriven && soloDuty)),
                 pc.Position,
                 pc.CastInfo != null);
         else
@@ -431,9 +432,21 @@ public sealed class AIManager
             : incapacitated ? DodgeBlocker.Incapacitated
             : this.movement is NullMovementController or MovementController { HookInstalled: false, UsingNavmesh: false } ? DodgeBlocker.NoController
             : DodgeBlocker.None;
+
+        // Out of ground that fires before walking can clear it: ask the rotation plugin for Sprint (DodgeSprint).
+        this.WantSprint = steering && this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin)
+            && DodgeSprint.Wanted(DodgeSprint.EscapeDistance(pc.Position, this.Current), this.hints.SecondsUntilDangerAt(pc.Position, now, margin), moveSpeed);
+
         this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target,
             this.ReasonFor(pc, goal, now.AddSeconds(horizon + lead), margin), blocker, steering));
     }
+
+    /// <summary>
+    /// The dodge needs Sprint this frame: the way out is longer than walking covers before the ground here fires
+    /// (<see cref="DodgeSprint"/>). Published as <c>Minerva.Hints.WantSprint</c> for the rotation plugin to press, and
+    /// recorded with the decision.
+    /// </summary>
+    public bool WantSprint { get; private set; }
 
     private DodgeDecision published;
 
@@ -450,6 +463,7 @@ public sealed class AIManager
             MoverBusy = this.movement.Busy,
             UptimeTargetID = this.uptimeTargetId,
             UptimeTargetKnown = true,
+            Sprint = this.WantSprint,
         };
 
     /// <summary>

@@ -90,6 +90,17 @@ public static class UptimeTargeting
         => target.TargetID == self ? Positional.Any : wanted;
 
     /// <summary>
+    /// The side a role stands on: melee and tanks take the box's setting (or a rotation's request); everyone else keeps
+    /// out of the boss's front -- flank or rear, wherever on them they already are. A boss faces whoever it fights, so
+    /// a caster in line with the tank stands in every frontal cone. Eale's Arresting Gaze, 2026-10-03: Rosa stood on the
+    /// axis 24y out; the nearest safe ground was 18.4y away with 2.9s left, and she was paralysed a yalm and a half short.
+    /// Proposed 2026-09-25 and deferred; the user asked for it 2026-10-03. Positionals stay off while the boss targets you
+    /// (<see cref="PositionalWorthWalking"/>), so a caster fighting alone is not walked round a boss that turns with it.
+    /// </summary>
+    public static Positional SideFor(Role role, Positional wanted)
+        => role is Role.Tank or Role.Melee ? wanted : Positional.Flank | Positional.Rear;
+
+    /// <summary>
     /// Whether this character has to start the fight itself: a boss module's target that nothing is fighting yet, with
     /// no other player in the party -- nobody, or only Trust and Duty Support NPCs, who wait for you to pull. Minerva
     /// then publishes the boss as the one to pull (<c>Minerva.Hints.PullTarget</c>); the rotation plugin targets it

@@ -39,7 +39,8 @@ public sealed class ReplayRecorder : IDisposable
     /// <para>3: the dodge decision carries the enemy the uptime walk was aimed at (2026-09-24), so a replay can
     /// show the character being walked to the add or back to the boss without inferring it from coordinates.</para>
     /// <para>4: cast events carry where they were aimed (2026-10-02), so location-following components replay.</para>
-    public const int Revision = 4;
+    /// <para>5: the dodge decision says when it asked for Sprint (2026-10-03).</para>
+    public const int Revision = 5;
 
     private readonly WorldState ws;
     private readonly TextWriter writer;
