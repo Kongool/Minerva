@@ -5664,6 +5664,101 @@ t.Section("Just past the edge of the floor, the way back in is always open");
     t.Eq($"no point just past the edge is stranded ({tried} tried)", stranded, 0);
 }
 
+// Quarried Away, 2026-10-03: Korha and Saar were outside the 27y join circle when the screen faded and were put outside
+// the wall. A critical engagement is the fight of those who stood on its floor, not of those who can pass its pull test.
+t.Section("A critical engagement is only the fight of someone who stood on its floor");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new ActorState.OpCreate(0x4000000C1, 0xCE0u, 0, "Alabaster Blade", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 4f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(0x100000C2, 0u, 1, "Saar", 0, ActorType.Player, new Vector4(0, 0, 27.6f, 0), 0.5f, default, true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, 0x100000C2)));
+    ws.Party.PlayerInstanceID = 0x100000C2;
+    var pc = ws.Actors.Find(0x100000C2)!;
+
+    var ce = new WalledProbeModule(ws, ws.Actors.Find(0x4000000C1)!) { Arena = new NullArena() };
+    ce.BuildStates();
+    t.True("a critical engagement is walled; an ordinary fight is not", ce.Walled && !new ArenaPullModule(ws, ws.Actors.Find(0x4000000C1)!).Walled);
+    ce.Update();
+    t.True("before it starts, someone outside is not shut out of it", !ce.InCharge(pc.Position) && !ce.ShutOut(pc.Position));
+    ws.Execute(new ActorState.OpCombat(0x4000000C1, true));
+    ce.Update();
+    t.True("its 30y pull test passes from against the wall", ce.Pulled);
+    t.True("but from outside the floor it is not the player's fight", !ce.InCharge(pc.Position));
+    t.True("they are shut out of it", ce.ShutOut(pc.Position));
+
+    ws.Execute(new ActorState.OpMove(0x100000C2, new Vector4(0, 0, 10, 0)));
+    ce.Update();
+    t.True("on the floor it is theirs", ce.InCharge(pc.Position) && !ce.ShutOut(pc.Position));
+    ws.Execute(new ActorState.OpMove(0x100000C2, new Vector4(0, 0, 22, 0)));
+    ce.Update();
+    t.True("and stays theirs pushed off the edge", ce.InCharge(pc.Position) && !ce.ShutOut(pc.Position));
+    ce.Dispose();
+}
+
+// Saar, Quarried Away 152s: shut out, the dodge picked a spot inside the arena and she slid along the wall for it. From
+// outside, the wall stood at 27.6y from the centre: the 27y join circle and her half-yalm.
+t.Section("Shut out of a critical engagement, its floor is a wall");
+{
+    var now = new DateTime(2026, 10, 3, 21, 35, 13, DateTimeKind.Utc);
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    var center = new WPos(-519f, -641f);
+    ws.Execute(new ActorState.OpCreate(0x4000000C3, 0xCE1u, 0, "Alabaster Blade", 0, ActorType.Enemy, new Vector4(center.X, 0, center.Z, 0), 4f, default, true, false, 0));
+    var quarried = new QuarriedProbeModule(ws, ws.Actors.Find(0x4000000C3)!);
+    var saar = center + new WDir(0f, 27.7f);
+    AIHints Hints()
+    {
+        var h = new AIHints { Center = saar, Bounds = new ArenaBoundsCircle(30f), PlayerPosition = saar };
+        h.AddForbiddenZone(new AOEShapeCircle(6f), saar, default, now.AddSeconds(4));
+        h.AddForbiddenZone(new AOEShapeRect(20f, 30f), center + new WDir(0f, 26f), Angle.FromDirection(new WDir(0f, 1f)), now.AddSeconds(4));
+        return h;
+    }
+    var open = ArenaPathfinder.Solve(Hints(), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True("with nothing in the way the nearest clear ground is on the floor", open.Found && quarried.InBounds(open.Target));
+
+    var walled = Hints();
+    walled.TemporaryObstacles.Add(CriticalEncounterGround.KeepOut(quarried));
+    var spot = ArenaPathfinder.Solve(walled, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True($"with the wall, it stays where a character can stand outside it ({(spot.Target - center).Length():0.0}y out)", spot.Found && (spot.Target - center).Length() > 27.5f);
+    t.True("the wall is the join circle and a half-yalm, and Saar against it is outside it", !walled.InObstacle(saar) && walled.InObstacle(center + new WDir(0f, 27.4f)));
+
+    // an encounter whose circle is not known: its floor and two yalms
+    ws.Execute(new ActorState.OpCreate(0x4000000C4, 0xCE0u, 0, "Probe", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 4f, default, true, false, 0));
+    var unknown = CriticalEncounterGround.KeepOut(new WalledProbeModule(ws, ws.Actors.Find(0x4000000C4)!));
+    t.True("otherwise the wall is the floor grown by its thickness", unknown.Contains(new WPos(0f, 21.9f)) && !unknown.Contains(new WPos(0f, 22.1f)));
+    quarried.Dispose();
+}
+
+// Quarried Away, before the fade: a dodge or a chase carried Korha and Saar 5y out, to just past the 27y join circle.
+t.Section("Waiting to join a critical engagement, the dodge stays in its circle");
+{
+    var now = new DateTime(2026, 10, 3, 21, 32, 38, DateTimeKind.Utc);
+    var center = new WPos(-519f, -641f);
+    var korha = center + new WDir(0f, 22f);
+    AIHints Hints()
+    {
+        var h = new AIHints { Center = korha, Bounds = new ArenaBoundsCircle(30f), PlayerPosition = korha };
+        h.AddForbiddenZone(new AOEShapeCircle(12f), center + new WDir(0f, 14f), default, now.AddSeconds(4));
+        return h;
+    }
+    var free = ArenaPathfinder.Solve(Hints(), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True($"left alone, the shortest way out leaves the circle ({(free.Target - center).Length():0.0}y)", free.Found && (free.Target - center).Length() > 24f);
+
+    var join = CriticalEncounterGround.JoinCircle(51u, default);
+    t.True("Quarried Away's join circle is known: 27y round its centre", join is { } j && j.Center == center && j.Radius == 27f);
+    var keepIn = CriticalEncounterGround.KeepIn(center, 27f, korha);
+    t.NotNull("standing well inside, the circle holds", keepIn);
+    var held = Hints();
+    held.TemporaryObstacles.Add(keepIn!);
+    var spot = ArenaPathfinder.Solve(held, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True($"held, it dodges within 3y of the edge ({(spot.Target - center).Length():0.0}y)", spot.Found && (spot.Target - center).Length() <= 27f - CriticalEncounterGround.JoinMargin);
+    t.True("someone already near the edge is not pulled back in", CriticalEncounterGround.KeepIn(center, 27f, center + new WDir(0f, 25f)) == null);
+
+    t.True("an encounter not in the table gets the smallest circle round its map marker", CriticalEncounterGround.JoinCircle(33u, new WPos(1f, 2f)) is { Radius: CriticalEncounterGround.SmallestJoinRadius } m && m.Center == new WPos(1f, 2f));
+    t.True("and none without a marker", CriticalEncounterGround.JoinCircle(33u, default) == null);
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
@@ -5746,6 +5841,27 @@ sealed class KitAI(ModuleBase module) : Minerva.QuestBattle.RotationModule<KitRo
 sealed class ArenaPullModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f))
 {
     protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InCircle(Center, 20f);
+}
+
+// a critical engagement in miniature: a 20y floor whose pull test reaches 30y, like four Occult Crescent ports
+[ModuleInfo(Group = ModuleGroup.CriticalEngagement, CFCID = 9093u, PrimaryActorOID = 0xCE0u, NameID = 1u)]
+public sealed class WalledProbeModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f))
+{
+    protected override bool CheckPull() => base.CheckPull() && Raid.Player()!.Position.InCircle(Center, 30f);
+}
+
+// Quarried Away's id and floor, for the wall a known join circle draws
+[ModuleInfo(Group = ModuleGroup.CriticalEngagement, CFCID = 9093u, PrimaryActorOID = 0xCE1u, NameID = 51u)]
+public sealed class QuarriedProbeModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(-519f, -641f), new ArenaBoundsCircle(24.5f));
+
+sealed class QuarriedProbeModuleStates : StateMachineBuilder
+{
+    public QuarriedProbeModuleStates(ModuleBase module) : base(module) => this.TrivialPhase();
+}
+
+sealed class WalledProbeModuleStates : StateMachineBuilder
+{
+    public WalledProbeModuleStates(ModuleBase module) : base(module) => this.TrivialPhase();
 }
 
 sealed class ThrowingPullModule(WorldState ws, Actor primary) : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsCircle(20f))

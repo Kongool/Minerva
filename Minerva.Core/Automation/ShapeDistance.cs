@@ -67,6 +67,17 @@ public sealed class SDInvertedCircle(WPos origin, float radius) : ShapeDistance
     public override float Distance(WPos p) => radius - (p - origin).Length();
 }
 
+/// <summary>
+/// An arena's floor grown by <paramref name="grow"/>, as one solid block: what a critical engagement's wall makes it to
+/// someone shut outside. Inside or out only (±1), which is all an obstacle is asked.
+/// </summary>
+public sealed class SDArenaFloor(ArenaBounds bounds, WPos center, float grow) : ShapeDistance
+{
+    private readonly ArenaBounds grown = bounds.Inset(-grow);
+
+    public override float Distance(WPos p) => this.grown.Contains(center, p) ? -1f : 1f;
+}
+
 public sealed class SDDonut(WPos origin, float innerRadius, float outerRadius) : ShapeDistance
 {
     public override float Distance(WPos p)

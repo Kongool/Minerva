@@ -350,6 +350,27 @@ internal static unsafe class GameData
         return null;
     }
 
+    /// <summary>A critical encounter still open to join (Register, or Warmup until the screen fades), with where its
+    /// map marker puts it. <see cref="CriticalEncounterGround.JoinCircle"/> turns that into the circle to stay in.</summary>
+    public readonly record struct OpenEncounter(uint Id, string Name, WPos MarkerCenter, float MarkerRadius);
+
+    /// <summary>Fill <paramref name="into"/> with the Occult Crescent critical encounters open to join right now.</summary>
+    public static void CriticalEncountersOpenToJoin(List<OpenEncounter> into)
+    {
+        into.Clear();
+        var director = PublicContentOccultCrescent.GetInstance();
+        if (director == null)
+            return;
+
+        foreach (var ev in director->DynamicEventContainer.Events)
+        {
+            if (ev.State is not (DynamicEventState.Register or DynamicEventState.Warmup))
+                continue;
+            var marker = ev.MapMarker;
+            into.Add(new OpenEncounter(ev.DynamicEventId, ev.Name.ToString(), new WPos(marker.Position.X, marker.Position.Z), marker.Radius));
+        }
+    }
+
     /// <summary>
     /// Active camera's azimuth in radians, derived from its view matrix (needed to steer under the
     /// "legacy" movement scheme, where forward is relative to the camera rather than the character).

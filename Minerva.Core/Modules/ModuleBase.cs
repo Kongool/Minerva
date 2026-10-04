@@ -405,6 +405,9 @@ public abstract class ModuleBase : IDisposable
                 this.UpdatePreModuleActivation();
         }
 
+        if (this.Pulled && !this.joined && this.Raid.Player() is { } player && this.InBounds(player.Position))
+            this.joined = true;
+
         this.OnUpdate();
         this.AdvancePhase();
         for (var i = 0; i < this.components.Count; ++i)
@@ -463,8 +466,29 @@ public abstract class ModuleBase : IDisposable
     /// arena. A module loads as soon as its boss exists, often a pack or two early (The Ghimlyt Dark, 2026-09-30: two
     /// packs before the Magitek Colossus, "no safe spot" because not in its arena). The arena half keeps Occult
     /// Crescent's critical engagements, whose own pull test can wait on the player being inside.
+    /// <para>A walled fight (<see cref="Walled"/>) is only the player's if they have stood on its floor since the pull:
+    /// someone outside the wall is not in it, however close they stand. Four Occult Crescent ports pull within 30y of
+    /// a 25y floor, which a toon shut out and pressed against the wall can pass.</para>
     /// </summary>
-    public bool InCharge(WPos player) => this.Pulled || this.InBounds(player);
+    public bool InCharge(WPos player) => this.InBounds(player) || this.Pulled && (!this.Walled || this.joined);
+
+    /// <summary>
+    /// A critical engagement. When it starts, the game walls its floor off: whoever is in its circle is in the fight,
+    /// whoever is not stays outside until it ends. Quarried Away, 2026-10-03: Korha and Saar were 27.2y and 27.5y
+    /// from the centre of a 27y circle when the screen faded, and were put outside.
+    /// </summary>
+    public bool Walled => this.walled ??= this.GetType().GetCustomAttribute<ModuleInfoAttribute>()?.Group == ModuleGroup.CriticalEngagement;
+
+    private bool? walled;
+
+    // Has the player stood on the floor since the pull? Latches, so a participant knocked to the edge stays in it.
+    private bool joined;
+
+    /// <summary>
+    /// Is the player outside this walled fight while it is on? Then its floor is a wall to them, and nothing on it can
+    /// be reached. Saar, Quarried Away: the dodge chose spots inside, and she slid along the wall trying to get to them.
+    /// </summary>
+    public bool ShutOut(WPos player) => this.Walled && this.PrimaryActor.InCombat && !this.InCharge(player);
 
     // A ported override that throws falls back to the old test, the boss in combat, and is reported once.
     private bool PullCheck()

@@ -61,6 +61,12 @@ public sealed class AIManager
     private float standNearRange;
     private DateTime standNearUntil;
 
+    // A critical encounter's ground this frame (CriticalEncounterGround): everything outside its join circle while
+    // waiting to join, its floor and wall when shut out of it. Nothing on the far side can be walked to or targeted.
+    private ShapeDistance? encounterGround;
+    private readonly List<GameData.OpenEncounter> openEncounters = [];
+    private readonly HashSet<uint> announcedEncounters = []; // open encounters already written to the log, once each
+
     public SafeSpot Current { get; private set; } = SafeSpot.Stay;
 
     /// <summary>True while the active module says any action would punish the local player (Pyretic-style
@@ -148,6 +154,7 @@ public sealed class AIManager
         this.SecondsUntilGaze = float.NaN;
         this.MaxCastTime = float.MaxValue;
         this.WantSprint = false;
+        this.encounterGround = null;
 
         var module = this.modules.ActiveModule;
         var pc = this.modules.LocalPlayer();
@@ -802,7 +809,7 @@ public sealed class AIManager
             own => this.ReachableOnThisFloor(pc, own),
             () => this.EngagedTarget(pc)
                 ?? (!pulled && module?.PrimaryActor is { IsDeadOrDestroyed: false } boss && !this.hints.IsForbiddenTarget(boss) ? boss : null));
-        return target != null && InTheFight(module, pc, target) ? target : null;
+        return target != null && this.encounterGround?.Contains(target.Position) != true && InTheFight(module, pc, target) ? target : null;
     }
 
     /// <summary>
@@ -1480,6 +1487,45 @@ public sealed class AIManager
         }
 
         this.ApplyKnownVoids();
+        this.ApplyEncounterGround(pc);
         return true;
+    }
+
+    /// <summary>
+    /// A critical encounter's side of its wall (<see cref="CriticalEncounterGround"/>), as ground the dodge and the walk
+    /// may not use: shut out of one that is running, its floor; waiting in one that is open to join, everything outside
+    /// its circle.
+    /// </summary>
+    private void ApplyEncounterGround(Actor pc)
+    {
+        if (this.modules.ActiveModule is { } module && module.ShutOut(pc.Position))
+        {
+            this.encounterGround = CriticalEncounterGround.KeepOut(module);
+        }
+        else if (this.world.CurrentCFCID is 1018 or 1093) // Occult Crescent's two zones: the only join circles known
+        {
+            GameData.CriticalEncountersOpenToJoin(this.openEncounters);
+            if (this.openEncounters.Count == 0)
+                this.announcedEncounters.Clear();
+            foreach (var open in this.openEncounters)
+            {
+                var circle = CriticalEncounterGround.JoinCircle(open.Id, open.MarkerCenter);
+                if (this.announcedEncounters.Add(open.Id))
+                {
+                    // beside BOCCHI's [CriticalEncounterGeometry] line, this is what adds an encounter to the table
+                    Service.Log.Information($"Minerva: critical encounter '{open.Name}' ({open.Id}) is open to join. Join circle: "
+                        + (circle is { } c ? $"({c.Center.X:0.#},{c.Center.Z:0.#}) r={c.Radius:0.#}y, {(CriticalEncounterGround.IsKnown(open.Id) ? "known" : "not known: the smallest, round its map marker")}" : "unknown")
+                        + $"; map marker ({open.MarkerCenter.X:0.#},{open.MarkerCenter.Z:0.#}) r={open.MarkerRadius:0.#}.");
+                }
+                if (circle is { } join && CriticalEncounterGround.KeepIn(join.Center, join.Radius, pc.Position) is { } keepIn)
+                {
+                    this.encounterGround = keepIn;
+                    break;
+                }
+            }
+        }
+
+        if (this.encounterGround != null)
+            this.hints.TemporaryObstacles.Add(this.encounterGround);
     }
 }
