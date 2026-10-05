@@ -5713,6 +5713,28 @@ t.Section("Waiting out a wave inside the next, wait at the door you will run thr
     t.True($"and the run after it is shorter: {Escape(spot.Target):0.0}y against {Escape(xia):0.0}y", Escape(spot.Target) + 4f < Escape(xia));
 }
 
+// Soaking Wet, 2026-10-04: 54 seconds at one spot while Minerva walked her for uptime and the navmesh said it was walking;
+// steering zeroed her cast budget and she cast nothing.
+t.Section("A walk that does not move the character stands down");
+{
+    var t0 = new DateTime(2026, 10, 4, 19, 20, 11, DateTimeKind.Utc);
+    var here = new WPos(-9.084f, 298.547f);
+    var w = new StuckWalk();
+    w.Observe(true, here, t0);
+    t.True("a second without progress is not yet stuck", !w.Observe(true, here, t0.AddSeconds(1.0)) && !w.StandingDown(t0.AddSeconds(1.0)));
+    t.True("a second and a half is", w.Observe(true, here, t0.AddSeconds(1.6)) && w.StandingDown(t0.AddSeconds(1.6)));
+    t.True("and it stands down for four seconds", w.StandingDown(t0.AddSeconds(5.5)) && !w.StandingDown(t0.AddSeconds(5.7)));
+
+    var m = new StuckWalk();
+    m.Observe(true, here, t0);
+    var walked = false;
+    for (var i = 1; i <= 20; ++i)
+        walked |= m.Observe(true, here + new WDir(0.6f * i, 0f), t0.AddSeconds(0.1 * i));
+    t.True("a walk that moves is never stuck", !walked && !m.StandingDown(t0.AddSeconds(2)));
+    var idle = new StuckWalk();
+    t.True("standing still with no walk issued is not stuck", !idle.Observe(false, here, t0) && !idle.Observe(false, here, t0.AddSeconds(5)));
+}
+
 // 2026-10-04: Minerva asked for Sprint dozens of times and Daedalus pressed it twice. The ask was a threshold the walk
 // crosses back over, so it stood for one frame, and a caster mid-cast let that frame pass.
 t.Section("An ask for Sprint stands while the dodge is under way");

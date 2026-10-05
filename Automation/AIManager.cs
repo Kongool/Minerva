@@ -67,6 +67,7 @@ public sealed class AIManager
     private readonly List<GameData.OpenEncounter> openEncounters = [];
     private readonly HashSet<uint> announcedEncounters = []; // open encounters already written to the log, once each
     private DateTime sprintAskedUntil; // DodgeSprint.Holds: an ask for Sprint stands until then
+    private readonly StuckWalk stuckWalk = new();
 
     public SafeSpot Current { get; private set; } = SafeSpot.Stay;
 
@@ -356,6 +357,15 @@ public sealed class AIManager
             yieldedToRunner = true;
         }
 
+        // A walk that does not move the character (StuckWalk): stand uptime and positional walks down for a moment, so
+        // the cast budget comes back and the navmesh stops reporting a walk Daedalus would count as moving. Danger moves.
+        var stuck = false;
+        if (steering && this.stuckWalk.StandingDown(now) && !this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin))
+        {
+            steering = false;
+            stuck = true;
+        }
+
         // BossmodReborn stops all movement for the last half second of a gaze: a step turns the character
         // along its walk, and no facing survives that. Ahead of the Competition, 2026-09-05: a half-second
         // dodge walked the character from 169 to 25 degrees off a Holy Sphere, and the gaze landed.
@@ -415,6 +425,9 @@ public sealed class AIManager
             travelling = pc.CastInfo == null;
         }
 
+        if (this.stuckWalk.Observe(steering && this.movement is not NullMovementController, pc.Position, now))
+            Service.Log.Information($"Minerva: the walk to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckWalk.NoProgressSeconds}s; uptime walks stand down for {StuckWalk.StandDownSeconds}s so the rotation can cast.");
+
         if (steering)
             // Steer is where to head this frame (used when we drive directly); Route is the whole path,
             // for a navmesh follower that walks what it is given rather than being steered.
@@ -435,6 +448,7 @@ public sealed class AIManager
             : !this.config.AutoDodgeEnabled ? DodgeBlocker.AutoDodgeOff
             : held ? DodgeBlocker.Hold
             : yieldedToRunner ? DodgeBlocker.RunnerPath
+            : stuck ? DodgeBlocker.Stuck
             : gazeHold ? DodgeBlocker.Gaze
             : casting ? DodgeBlocker.Casting
             : incapacitated ? DodgeBlocker.Incapacitated

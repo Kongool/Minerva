@@ -46,6 +46,47 @@ public enum DodgeBlocker : byte
     Incapacitated = 8,
     /// <summary>A duty runner (Theseus, Odysseus) was walking a route of its own, and only danger takes the feet from it.</summary>
     RunnerPath = 9,
+    /// <summary>The last walk did not move the character, so walks for uptime and positionals stand down a moment
+    /// (<see cref="StuckWalk"/>).</summary>
+    Stuck = 10,
+}
+
+/// <summary>
+/// A walk the mover reports running but that does not move the character. Soaking Wet (Astrologian, the roommate's box),
+/// 2026-10-04: 54 seconds stood at one spot while Minerva walked her for uptime, the navmesh saying the walk was under way
+/// the whole time. Steering zeroes the cast budget, and Daedalus counts a running navmesh walk as moving, so she cast
+/// nothing ("Holding: mechanic imminent"). After <see cref="NoProgressSeconds"/> without <see cref="ProgressYalms"/> of
+/// progress, walks for uptime and positionals stand down for <see cref="StandDownSeconds"/>; danger still moves.
+/// </summary>
+public sealed class StuckWalk
+{
+    public const double NoProgressSeconds = 1.5d;
+    public const float ProgressYalms = 0.3f;
+    public const double StandDownSeconds = 4d;
+
+    private WPos from;
+    private DateTime since;
+    private DateTime until;
+
+    /// <summary>Whether uptime and positional walks are standing down.</summary>
+    public bool StandingDown(DateTime now) => now < this.until;
+
+    /// <summary>Note this frame: <paramref name="walking"/> when a walk was issued. True on the frame it is found stuck.</summary>
+    public bool Observe(bool walking, WPos position, DateTime now)
+    {
+        if (!walking || (position - this.from).LengthSq() > ProgressYalms * ProgressYalms)
+        {
+            this.from = position;
+            this.since = now;
+            return false;
+        }
+        if ((now - this.since).TotalSeconds < NoProgressSeconds)
+            return false;
+        this.until = now.AddSeconds(StandDownSeconds);
+        this.from = position;
+        this.since = now;
+        return true;
+    }
 }
 
 /// <summary>Which mover a steer went through. Mirrors the plugin's movement controller so a log can say
@@ -214,6 +255,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeBlocker.Casting => $"safe spot {dist}y away ({why}) -- hardcasting; the ground is not lethal yet, so the cast is left to finish",
             DodgeBlocker.Incapacitated => $"safe spot {dist}y away ({why}) -- stunned, asleep or bound: the game will not move you",
             DodgeBlocker.RunnerPath => $"safe spot {dist}y away ({why}) -- yielding to a duty runner's own route",
+            DodgeBlocker.Stuck => $"safe spot {dist}y away ({why}) -- the last walk did not move you; standing down so the rotation can cast",
             _ => $"safe spot {dist}y away ({why}) -- not steering",
         } + this.GazeSuffix;
     }
@@ -247,6 +289,7 @@ public readonly record struct DodgeDecision(bool NeedToMove, bool Found, WPos Ta
             DodgeBlocker.Casting => $"a safe spot {dist}y away was found while you were hardcasting, and Minerva judged the ground not yet lethal, so it let the cast finish instead of moving.",
             DodgeBlocker.Incapacitated => $"a safe spot {dist}y away was found, but you were stunned, asleep or bound: no dodge could move you, and nothing here was a dodge failure. The mechanic to answer is whatever applied it.",
             DodgeBlocker.RunnerPath => $"a spot {dist}y away was wanted, but a duty runner was walking its own route and the ground was not yet judged lethal, so Minerva left the feet to it.",
+            DodgeBlocker.Stuck => $"a spot {dist}y away was wanted, but the last walk had not moved the character, so walks for uptime were standing down: look at what is holding the feet (navmesh, another plugin).",
             // walking for uptime or a positional means the destination was judged clear, so a hit there is a zone
             // the module never drew (Web of Terror, 2026-09-05: back toward the boss into an undrawn funnel lane)
             DodgeBlocker.None when this.Steering && this.Reason == DodgeReason.Clearing
