@@ -226,7 +226,7 @@ public sealed class MainWindow : Window, IDisposable
 
                 Key("Navmesh plugin");
                 var nav = (int)cfg.Navmesh;
-                if (ImGui.Combo("##navmesh", ref nav, "Auto (Ariadne first) Ariadne vnavmesh "))
+                if (ImGui.Combo("##navmesh", ref nav, "Auto (Ariadne first)\0Ariadne\0vnavmesh\0"))
                 {
                     cfg.Navmesh = (NavmeshChoice)nav;
                     changed = true;
