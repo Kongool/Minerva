@@ -14,8 +14,11 @@ public sealed class QuestNavigation : QuestBattle.IQuestNavigation
 {
     private readonly (string Name, ICallGateSubscriber<bool> Ready, ICallGateSubscriber<Vector3, Vector3, bool, Task<List<Vector3>>?> Pathfind)[] backends;
 
-    public QuestNavigation()
+    private readonly Func<NavmeshChoice> choice;
+
+    public QuestNavigation(Func<NavmeshChoice> choice)
     {
+        this.choice = choice;
         var pi = Service.PluginInterface;
         this.backends =
         [
@@ -44,8 +47,11 @@ public sealed class QuestNavigation : QuestBattle.IQuestNavigation
 
     private (string Name, ICallGateSubscriber<bool> Ready, ICallGateSubscriber<Vector3, Vector3, bool, Task<List<Vector3>>?> Pathfind)? Ready()
     {
+        var wanted = this.choice();
         foreach (var b in this.backends)
         {
+            if (!NavmeshIPC.Allowed(b.Name, wanted))
+                continue;
             try
             {
                 if (b.Ready.InvokeFunc())

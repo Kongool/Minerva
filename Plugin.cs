@@ -103,7 +103,7 @@ public sealed class Plugin : IDalamudPlugin
         ModuleBase.ErrorSink = static msg => Service.Log.Warning($"[ModuleError] {msg}");
 
         // quest battle scripts: the mesh to walk a solo duty with, a log, and the game's condition flags they wait on
-        Minerva.QuestBattle.QuestBattle.Navigation = new QuestNavigation();
+        Minerva.QuestBattle.QuestBattle.Navigation = new QuestNavigation(() => this.Config.Navmesh);
         Minerva.QuestBattle.QuestBattle.LogSink = static msg => Service.Log.Information($"Minerva: {msg}");
         Service.Condition.ConditionChange += this.OnConditionChange;
         ClientState.RecastQuery = GameData.RecastRemaining;

@@ -64,9 +64,12 @@ internal sealed class NavmeshIPC
     private Backend? driving;  // backend we last issued a MoveTo to, so Stop targets the right one
     private bool everLogged;   // so the first resolution logs even when it resolves to "none"
     private string? loggedName; // last backend name we logged, to log only on change (no per-probe spam)
+    private readonly Func<NavmeshChoice> choice; // which plugin the user has locked auto-move to
+    private NavmeshChoice probedChoice;          // the choice the cached backend was resolved under
 
-    public NavmeshIPC()
+    public NavmeshIPC(Func<NavmeshChoice> choice)
     {
+        this.choice = choice;
         var pi = Service.PluginInterface;
 
         var ariConnected = pi.GetIpcSubscriber<bool>("Ariadne.IsConnected");
@@ -98,6 +101,14 @@ internal sealed class NavmeshIPC
         ];
     }
 
+    /// <summary>Whether a backend may be used under the user's choice: any under Auto, only the named one otherwise.</summary>
+    internal static bool Allowed(string backend, NavmeshChoice choice) => choice switch
+    {
+        NavmeshChoice.Ariadne => backend == "Ariadne",
+        NavmeshChoice.Vnavmesh => backend == "vnavmesh",
+        _ => true,
+    };
+
     /// <summary>True when some navmesh backend is present and has a usable mesh for the current zone.</summary>
     public bool Ready() => this.Resolve() != null;
 
@@ -108,12 +119,16 @@ internal sealed class NavmeshIPC
     private Backend? Resolve()
     {
         var now = DateTime.UtcNow;
-        if (now - this.lastProbe >= ProbeInterval)
+        var wanted = this.choice();
+        if (now - this.lastProbe >= ProbeInterval || wanted != this.probedChoice)
         {
             this.lastProbe = now;
+            this.probedChoice = wanted;
             this.active = null;
             foreach (var b in this.backends)
             {
+                if (!Allowed(b.Name, wanted))
+                    continue;
                 try { if (b.Ready()) { this.active = b; break; } }
                 catch { /* that plugin isn't loaded — try the next */ }
             }

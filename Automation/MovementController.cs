@@ -48,7 +48,7 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
     private delegate bool RMIWalkIsInputEnabledDelegate(void* self);
 
     private readonly Configuration config;
-    private readonly NavmeshIPC nav = new();
+    private readonly NavmeshIPC nav;
     private readonly Hook<RMIWalkDelegate>? walkHook;
     private readonly RMIWalkIsInputEnabledDelegate? inputEnabled1;
     private readonly RMIWalkIsInputEnabledDelegate? inputEnabled2;
@@ -94,6 +94,7 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
 
     public MovementController(Configuration config)
     {
+        this.nav = new NavmeshIPC(() => config.Navmesh);
         this.config = config;
         try
         {

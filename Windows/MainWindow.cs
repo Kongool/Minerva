@@ -224,6 +224,15 @@ public sealed class MainWindow : Window, IDisposable
                 ImGui.TableSetupColumn("k", ImGuiTableColumnFlags.WidthFixed, 110f);
                 ImGui.TableSetupColumn("v", ImGuiTableColumnFlags.WidthStretch);
 
+                Key("Navmesh plugin");
+                var nav = (int)cfg.Navmesh;
+                if (ImGui.Combo("##navmesh", ref nav, "Auto (Ariadne first) Ariadne vnavmesh "))
+                {
+                    cfg.Navmesh = (NavmeshChoice)nav;
+                    changed = true;
+                }
+                UiKit.Tip("Which navmesh plugin auto-move drives. Lock it to the one you use: with both loaded they fight over movement, and a walk can report itself running while the character stands still.");
+
                 Key("Safety margin");
                 var margin = cfg.AutoDodgeSafetyMargin;
                 if (ImGui.SliderFloat("##margin", ref margin, 0f, 10f, "%.1f y"))

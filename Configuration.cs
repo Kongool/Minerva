@@ -9,6 +9,23 @@ namespace Minerva;
 /// What a party marker's colour means. Mutually exclusive rather than a pair of toggles: a marker has one
 /// colour, and two switches that both claim it would just mean one silently losing.
 /// </summary>
+/// <summary>
+/// Which navmesh plugin auto-move drives. Ariadne is a fork of vnavmesh and both take over the game's movement input;
+/// with both loaded, Minerva steered through Ariadne while vnavmesh held the character still (Soaking Wet, 2026-10-04:
+/// a walk reported running for 54 seconds, the character never moved).
+/// </summary>
+public enum NavmeshChoice
+{
+    /// <summary>Ariadne when it is loaded, else vnavmesh.</summary>
+    Auto,
+
+    /// <summary>Only Ariadne, even with vnavmesh loaded.</summary>
+    Ariadne,
+
+    /// <summary>Only vnavmesh, even with Ariadne loaded.</summary>
+    Vnavmesh,
+}
+
 public enum PartyColoring
 {
     /// <summary>One colour for everyone.</summary>
@@ -150,6 +167,9 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>When the Ariadne/vnavmesh plugin is loaded, route auto-move through its pathfinding instead
     /// of the raw walk override (paths around geometry). Falls back to the raw override when it's absent.</summary>
     public bool UseNavmesh { get; set; } = true;
+
+    /// <summary>Which navmesh plugin to drive (<see cref="NavmeshChoice"/>). Auto keeps the old order, Ariadne first.</summary>
+    public NavmeshChoice Navmesh { get; set; } = NavmeshChoice.Auto;
 
     /// <summary>Leave other players (and pets) out of recordings — much smaller, cleaner logs, especially in
     /// open-field content. Your own character and party are kept. On by default.</summary>
