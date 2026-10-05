@@ -5713,6 +5713,21 @@ t.Section("Waiting out a wave inside the next, wait at the door you will run thr
     t.True($"and the run after it is shorter: {Escape(spot.Target):0.0}y against {Escape(xia):0.0}y", Escape(spot.Target) + 4f < Escape(xia));
 }
 
+// 2026-10-04: Minerva asked for Sprint dozens of times and Daedalus pressed it twice. The ask was a threshold the walk
+// crosses back over, so it stood for one frame, and a caster mid-cast let that frame pass.
+t.Section("An ask for Sprint stands while the dodge is under way");
+{
+    var t0 = new DateTime(2026, 10, 4, 18, 45, 24, DateTimeKind.Utc);
+    var until = default(DateTime);
+    t.True("asked on the frame the walk is too long", DodgeSprint.Holds(true, true, t0, ref until));
+    t.True("and still asked a step later, when it no longer is", DodgeSprint.Holds(false, true, t0.AddSeconds(0.1), ref until));
+    t.True("for the rest of the two seconds", DodgeSprint.Holds(false, true, t0.AddSeconds(1.9), ref until));
+    t.True("but not past them", !DodgeSprint.Holds(false, true, t0.AddSeconds(2.1), ref until));
+    DodgeSprint.Holds(true, true, t0.AddSeconds(3), ref until);
+    t.True("and let go of as soon as the dodge is over", !DodgeSprint.Holds(false, false, t0.AddSeconds(3.1), ref until)
+        && !DodgeSprint.Holds(false, true, t0.AddSeconds(3.2), ref until));
+}
+
 // Holminster, Philia, newtoon2, 2026-10-04: a new line of Fierce Beating started 3.6y from the character, its first circle
 // 0.6s out. Clear ground lay 7.8y north-east through that circle; 0.4y west was out of it.
 t.Section("When the clear ground lies through what is about to fire, step out of that first");

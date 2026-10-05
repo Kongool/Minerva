@@ -80,6 +80,27 @@ public static class DodgeSprint
     public static bool Wanted(float escapeDistance, float secondsLeft, float moveSpeed)
         => secondsLeft > 0f && secondsLeft <= Horizon && escapeDistance > secondsLeft * moveSpeed * Slack;
 
+    /// <summary>How long an ask stands once made, while the dodge is still under way.</summary>
+    public const double HoldSeconds = 2d;
+
+    /// <summary>
+    /// Whether to ask this frame. <see cref="Wanted"/> is a threshold the walk itself crosses back over: a step later the
+    /// way out is a step shorter and the ask is gone, so it stood for one frame, and a caster mid-cast or a GCD's
+    /// animation lock let that frame pass. Daedalus pressed Sprint for it twice in a day of asks (2026-10-04). Once
+    /// asked, it holds for <see cref="HoldSeconds"/> while the dodge is under way, and lets go as soon as it is not.
+    /// </summary>
+    public static bool Holds(bool wantedNow, bool dodging, DateTime now, ref DateTime askedUntil)
+    {
+        if (!dodging)
+        {
+            askedUntil = default;
+            return false;
+        }
+        if (wantedNow)
+            askedUntil = now.AddSeconds(HoldSeconds);
+        return now < askedUntil;
+    }
+
     /// <summary>The walk to <paramref name="spot"/>: along its route when it has one, else straight.</summary>
     public static float EscapeDistance(WPos from, SafeSpot spot)
     {

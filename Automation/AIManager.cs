@@ -66,6 +66,7 @@ public sealed class AIManager
     private ShapeDistance? encounterGround;
     private readonly List<GameData.OpenEncounter> openEncounters = [];
     private readonly HashSet<uint> announcedEncounters = []; // open encounters already written to the log, once each
+    private DateTime sprintAskedUntil; // DodgeSprint.Holds: an ask for Sprint stands until then
 
     public SafeSpot Current { get; private set; } = SafeSpot.Stay;
 
@@ -441,8 +442,10 @@ public sealed class AIManager
             : DodgeBlocker.None;
 
         // Out of ground that fires before walking can clear it: ask the rotation plugin for Sprint (DodgeSprint).
-        this.WantSprint = steering && this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin)
-            && DodgeSprint.Wanted(DodgeSprint.EscapeDistance(pc.Position, this.Current), this.hints.SecondsUntilDangerAt(pc.Position, now, margin), moveSpeed);
+        var dodging = steering && this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin);
+        this.WantSprint = DodgeSprint.Holds(
+            dodging && DodgeSprint.Wanted(DodgeSprint.EscapeDistance(pc.Position, this.Current), this.hints.SecondsUntilDangerAt(pc.Position, now, margin), moveSpeed),
+            dodging, now, ref this.sprintAskedUntil);
 
         this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target,
             this.ReasonFor(pc, goal, now.AddSeconds(horizon + lead), margin), blocker, steering));
