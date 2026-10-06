@@ -110,9 +110,12 @@ public static class UptimeTargeting
     /// and opens from where the character stands, which for a caster is already in range of it.
     /// <para>The Porta Decumana, 2026-09-27: an Astrologian with Duty Support stood 23y from Ultima for 49 seconds,
     /// inside her cast range, and nothing happened until she was walked in by hand.</para>
+    /// <para>A solo duty's script also names targets already fighting something else: a False Temple trooper on a mob
+    /// (Spearheading Initiatives, 2026-10-05). In combat itself, it is still one to pull while this character is not
+    /// (<paramref name="scriptedAndIdle"/>), or the rotation never opens on it.</para>
     /// </summary>
-    public static bool Pulls(bool hasModule, bool targetInCombat, int otherPlayers)
-        => hasModule && !targetInCombat && otherPlayers == 0;
+    public static bool Pulls(bool hasModule, bool targetInCombat, int otherPlayers, bool scriptedAndIdle = false)
+        => hasModule && (!targetInCombat || scriptedAndIdle) && otherPlayers == 0;
 
     /// <summary>How near an object to interact with the walk ends, past its hitbox, in yalms: inside the game's
     /// interact range, which the rotation plugin checks exactly before it clicks.</summary>

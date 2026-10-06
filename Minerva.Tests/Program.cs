@@ -5554,6 +5554,8 @@ t.Section("Solo duty scripts: who walks, who pulls");
     t.True("melee keeps its band", UptimeTargeting.ApproachOnly(new RangeBand(0f, 2f, 3f), Role.Melee, true) == new RangeBand(0f, 2f, 3f));
     t.True("without a script nothing changes", UptimeTargeting.ApproachOnly(new RangeBand(8f, 15f, 20f), Role.Ranged, false) == new RangeBand(8f, 15f, 20f));
     t.True("a script's duty is pulled with no boss module", UptimeTargeting.Pulls(true, false, 0));
+    t.True("a script's target already fighting a mob is pulled while we are not fighting", UptimeTargeting.Pulls(true, true, 0, scriptedAndIdle: true));
+    t.False("but not once we are", UptimeTargeting.Pulls(true, true, 0, scriptedAndIdle: false));
 }
 
 

@@ -244,7 +244,7 @@ public sealed class AIManager
         var target = walks ? this.UptimeTarget(module, pc) : null;
         this.uptimeTargetId = target?.InstanceID ?? 0ul;
         // Nobody else will start this fight (UptimeTargeting.Pulls): published for the rotation plugin to open on.
-        this.PullTargetId = target != null && UptimeTargeting.Pulls(module != null || questDriven, target.InCombat, otherPlayers) ? target.InstanceID : 0ul;
+        this.PullTargetId = target != null && UptimeTargeting.Pulls(module != null || questDriven, target.InCombat, otherPlayers, questDriven && !pc.InCombat) ? target.InstanceID : 0ul;
         // The script's walk to the next room (AIHints.QuestTravel): taken whenever nothing dangerous needs answering,
         // so uptime is not walked meanwhile -- the solve below looks after safety alone.
         var travel = this.config.PlaySoloDuties && this.hints.QuestTravel is { Count: > 0 } ? this.hints.QuestTravel : null;
