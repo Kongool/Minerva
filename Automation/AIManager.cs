@@ -1487,7 +1487,11 @@ public sealed class AIManager
         // barrier, all of which look like clean floor to a rectangle. The party spreads out within seconds,
         // so this costs a little reach on arrival and nothing after that, and standing still for those few
         // seconds is much the cheaper mistake.
-        this.hints.WalkableGround = this.knownGround;
+        // Not in a solo duty: there is no party to spread out, so the known ground is the character's own trail and
+        // every mob off it is behind a wall. The Oracle of Light, newtoon1 2026-10-04: an archer on the slope 14y off
+        // the road was Shield Lobbed for 30s and never walked to. The floor probe (RejectFloorless) still refuses a
+        // ledge.
+        this.hints.WalkableGround = GameData.IsSoloDuty(this.world.CurrentCFCID) ? null : this.knownGround;
 
         // Who there is to fight. Nothing else fills this without a module, so the walk back to uptime had only the
         // character's own game target to work from and modules' priority calls had nothing to act on. Enemies out of
