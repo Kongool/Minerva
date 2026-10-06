@@ -2060,6 +2060,20 @@ t.Section("Component library");
     iconStack.OnEventCast(lsBoss, new ActorCastEvent(ActionID.MakeSpell(703u), 0xDEAD, default, default, 0)); // unrelated target
     t.Eq("counted resolve clears regardless of target", iconStack.ActiveBaits.Count, 0);
 
+    // The AI side of a line stack: off the line is forbidden, on it is not; holding the marker sends you to a teammate.
+    // Holminster's Philia, Saar 2026-10-05: Into the Light marked Alisaie's Avatar twice, Saar outside the line both times.
+    var intoTheLight = new Minerva.Components.LineStack(module, aidMarker: 704u, 705u, activationDelay: 5d, range: 50f, halfWidth: 2f);
+    intoTheLight.OnEventCast(lsBoss, new ActorCastEvent(ActionID.MakeSpell(704u), p1, default, default, 0));
+    var lineHints = new AIHints { Center = module.Center, Bounds = module.Bounds, PlayerPosition = actorP2.Position };
+    intoTheLight.AddAIHints(1, actorP2, PartyRolesConfig.Assignment.Unassigned, lineHints);
+    t.True("a line stack on someone else forbids the ground off the line",
+        lineHints.ForbiddenZones.Count == 1 && lineHints.InImminentDanger(new WPos(115f, 105f), DateTime.MaxValue));
+    t.True("on the line is allowed", !lineHints.InImminentDanger(new WPos(100.5f, 110f), DateTime.MaxValue));
+    var holderHints = new AIHints { Center = module.Center, Bounds = module.Bounds, PlayerPosition = actorP1.Position };
+    intoTheLight.AddAIHints(0, actorP1, PartyRolesConfig.Assignment.Unassigned, holderHints);
+    t.True("the marked one is sent to a teammate", holderHints.ForbiddenZones.Count == 1
+        && !holderHints.InImminentDanger(actorP2.Position, DateTime.MaxValue) && holderHints.InImminentDanger(new WPos(100f, 120f), DateTime.MaxValue));
+
     // StayMove -> SpecialModes: a stand-still punisher must be machine-readable, not just a text hint,
     // so the auto-dodge holds position and rotation plugins can stop casting (Minerva.MustNotAct IPC).
     var stayMod = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };

@@ -217,8 +217,63 @@ public abstract class GenericBaitStack(ModuleBase module, uint aid = default, bo
         hints.Add(HintStack);
     }
 
-    // stacks are approached, not avoided — contribute no forbidden zone
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }
+    /// <summary>
+    /// Stand in someone else's stack; holding one, keep clear of the others' and stand by a party member who holds none,
+    /// since they may not come to you. Ported from BossmodReborn, its predicted damage dropped as everywhere in Minerva.
+    /// <para>This was an empty override, on the reasoning that stacks are approached rather than avoided. Approaching
+    /// still has to be asked for: with nothing raised the dodge had no reason to go in. Holminster's Philia, Saar
+    /// 2026-10-05: Into the Light marked Alisaie's Avatar twice, and both times resolved on the three NPCs with Saar
+    /// outside the line.</para>
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var baits = this.ActiveBaits;
+        if (baits.Count == 0)
+            return;
+        var holding = baits.Exists(b => b.Target == actor);
+        var inside = new List<ShapeDistance>();
+        var insideBy = DateTime.MaxValue;
+        foreach (var b in baits)
+        {
+            var origin = this.BaitOrigin(in b);
+            if (b.Target != actor && !holding)
+            {
+                if (b.Forbidden[slot])
+                {
+                    hints.AddForbiddenZone(b.Shape, origin, b.Rotation, b.Activation);
+                    continue;
+                }
+                inside.Add(b.Shape.InvertedDistance(origin, b.Rotation));
+                insideBy = insideBy < b.Activation ? insideBy : b.Activation;
+            }
+            else if (b.Target != actor)
+            {
+                // holding a stack of our own: keep clear of the others', twice their width as BossmodReborn does, so
+                // the two do not overlap
+                ShapeDistance clear = b.Shape switch
+                {
+                    AOEShapeCone cone => new SDCone(origin, cone.Radius, b.Rotation, cone.HalfAngle * 2f),
+                    AOEShapeRect rect => new SDRect(origin, b.Rotation, rect.LenFront, rect.LenBack, rect.HalfWidth * 2f),
+                    AOEShapeCircle circle => new SDCircle(origin, circle.Radius * 2f),
+                    _ => b.Shape.Distance(origin, b.Rotation),
+                };
+                hints.AddForbiddenZone(clear, b.Activation);
+            }
+            else
+            {
+                var company = new List<ShapeDistance>();
+                foreach (var (i, a) in this.Raid.WithSlot())
+                    if (a != actor && !b.Forbidden[i] && !this.IsBaitTarget(a))
+                        company.Add(new SDInvertedCircle(a.Position, 2f));
+                if (company.Count != 0)
+                    hints.AddForbiddenZone(new SDIntersection([.. company]), b.Activation);
+            }
+        }
+        if (inside.Count == 1)
+            hints.AddForbiddenZone(inside[0], insideBy);
+        else if (inside.Count > 1)
+            hints.AddForbiddenZone(new SDOutsideOfUnion([.. inside]), insideBy);
+    }
 }
 
 /// <summary>
