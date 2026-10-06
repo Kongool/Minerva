@@ -44,6 +44,7 @@ public static class WHM
     public enum AID : uint
     {
         None = 0,
+        Cure = 120,
         Repose = (uint)ClassShared.AID.Repose,
     }
 }

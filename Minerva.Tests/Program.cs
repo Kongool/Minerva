@@ -5496,6 +5496,43 @@ t.Section("What a quest script asks for reaches the rotation plugin");
     t.Eq("a kit's duty action is a request", Minerva.QuestBattle.RoleplayRequests.From(q, kitDutyActions: duty).Length, 2);
 }
 
+// Slings and Arrows, Saar 2026-10-05: Quimperain went from 98% to dead in 34 seconds while Saar, on Astrologian, cast
+// Malefic; the duty fails when he dies. Daedalus heals the party, and solo that is the player alone.
+t.Section("A healer in a scripted solo duty heals the allied NPCs");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong me = 0x10000F01, quimperain = 0x40000F02, leveva = 0x40000F03, captain = 0x40000F04, far = 0x40000F05;
+    ws.Execute(new ActorState.OpCreate(me, 0u, 0, "Saar", 0, ActorType.Player, new Vector4(0, 0, 0, 0), 0.5f, new ActorHPMP(2063, 2063, 0, 0, 0), true, true, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, me)));
+    ws.Execute(new ActorState.OpClassChange(me, Class.AST));
+    ws.Execute(new ActorState.OpCreate(quimperain, 0x129Eu, 1, "Quimperain", 0, ActorType.Enemy, new Vector4(5, 0, 5, 0), 0.5f, new ActorHPMP(1197, 3282, 0, 0, 0), true, true, 0));
+    ws.Execute(new ActorState.OpCreate(leveva, 0x129Fu, 2, "Leveva", 0, ActorType.Enemy, new Vector4(-5, 0, 5, 0), 0.5f, new ActorHPMP(2000, 5283, 0, 0, 0), true, true, 0));
+    ws.Execute(new ActorState.OpCreate(captain, 0x12A1u, 3, "Pirate Captain", 0, ActorType.Enemy, new Vector4(10, 0, 10, 0), 0.5f, new ActorHPMP(1000, 8005, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(far, 0x129Eu, 4, "Far", 0, ActorType.Enemy, new Vector4(50, 0, 0, 0), 0.5f, new ActorHPMP(100, 3282, 0, 0, 0), true, true, 0));
+    var player = ws.Actors.Find(me)!;
+
+    var hints = new AIHints();
+    var healed = Minerva.QuestBattle.AllyHeals.Request(ws, player, hints);
+    t.True("the lowest ally in reach gets Benefic II", healed?.InstanceID == quimperain
+        && hints.ActionsToExecute.Entries.Count == 1 && hints.ActionsToExecute.Entries[0].action == ActionID.MakeSpell(AST.AID.BeneficII));
+    t.True("never the enemy, however low", hints.ActionsToExecute.Entries.All(e => e.target?.InstanceID != captain));
+
+    ws.Execute(new ActorState.OpHPMP(quimperain, new ActorHPMP(2400, 3282, 0, 0, 0)));
+    ws.Execute(new ActorState.OpHPMP(leveva, new ActorHPMP(4000, 5283, 0, 0, 0)));
+    t.True("allies above 60%: nothing asked", Minerva.QuestBattle.AllyHeals.Request(ws, player, new AIHints()) == null);
+
+    ws.Execute(new ActorState.OpHPMP(quimperain, new ActorHPMP(1197, 3282, 0, 0, 0)));
+    ws.Execute(new ActorState.OpClassChange(me, Class.SAM));
+    t.True("a Samurai has no heal to ask for", Minerva.QuestBattle.AllyHeals.Request(ws, player, new AIHints()) == null);
+
+    ws.Execute(new ActorState.OpClassChange(me, Class.WHM));
+    ws.Execute(new ActorState.OpStatus(me, 0, new ActorStatus((uint)Roleplay.SID.RolePlaying, 0, DateTime.MaxValue, me)));
+    t.True("playing a kit, the kit heals", Minerva.QuestBattle.AllyHeals.Request(ws, player, new AIHints()) == null);
+    t.Eq("the basic heals", (Minerva.QuestBattle.AllyHeals.BasicHeal(Class.CNJ), Minerva.QuestBattle.AllyHeals.BasicHeal(Class.SCH), Minerva.QuestBattle.AllyHeals.BasicHeal(Class.SGE)), (120u, 190u, 24284u));
+}
+
+
 t.Section("Solo duty scripts: who walks, who pulls");
 {
     t.True("a ranged role under a script closes in and never backs off",

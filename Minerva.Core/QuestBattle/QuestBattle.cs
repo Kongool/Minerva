@@ -389,6 +389,7 @@ public abstract class QuestBattle : ZoneModule
                 this.MoveNext(player, obj, hints);
         }
 
+        AllyHeals.Request(this.World, player, hints);
         this.AddQuestAIHints(player, hints);
     }
 
