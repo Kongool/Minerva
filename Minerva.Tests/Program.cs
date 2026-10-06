@@ -5555,6 +5555,16 @@ t.Section("A hand-played solo duty becomes a quest script draft");
 }
 
 
+// The Oracle of Light, newtoon1 and newtoon2, 2026-10-04: the script planned its route and stood still, because the walk
+// asked "more than the hold to go before a gaze?" and the countdown is NaN when no gaze is coming.
+t.Section("No gaze coming holds no walk");
+{
+    t.False("no gaze anywhere: walk", GazeHold.Holds(float.NaN));
+    t.True("a gaze about to land: stand", GazeHold.Holds(0.3f));
+    t.False("a gaze still seconds off: walk", GazeHold.Holds(3f));
+}
+
+
 // Ariadne has one follower and no owner. Holminster Switch, 2026-10-02: Theseus sent a walk to the next pack, Minerva's
 // uptime steer replaced it every tick, and the tank stood on the first pack for 22 seconds.
 t.Section("A duty runner's route owns the feet; only danger takes them back");

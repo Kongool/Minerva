@@ -89,6 +89,21 @@ public sealed class StuckWalk
     }
 }
 
+/// <summary>
+/// The last moments of a gaze, when no walk may run: a step turns the character along its walk, and no facing survives
+/// that. BossmodReborn's AI stops for half a second.
+/// <para>The countdown is NaN when no gaze is coming, and every comparison with NaN is false: the quest battle walk
+/// asked "more than <see cref="Seconds"/> to go?", got false with no gaze anywhere, and never ran. Solo duty scripts
+/// planned their route and stood still from their first commit until 2026-10-04 (The Oracle of Light, newtoon1 and
+/// newtoon2). Ask this instead.</para>
+/// </summary>
+public static class GazeHold
+{
+    public const float Seconds = 0.6f;
+
+    public static bool Holds(float secondsUntilGaze) => secondsUntilGaze <= Seconds;
+}
+
 /// <summary>Which mover a steer went through. Mirrors the plugin's movement controller so a log can say
 /// whether a steer had anything under it.</summary>
 public enum Mover : byte

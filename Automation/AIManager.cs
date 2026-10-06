@@ -370,7 +370,7 @@ public sealed class AIManager
         // along its walk, and no facing survives that. Ahead of the Competition, 2026-09-05: a half-second
         // dodge walked the character from 169 to 25 degrees off a Holy Sphere, and the gaze landed.
         var gazeHold = false;
-        if (steering && this.SecondsUntilGaze <= GazeHoldSeconds)
+        if (steering && GazeHold.Holds(this.SecondsUntilGaze))
         {
             steering = false;
             gazeHold = true;
@@ -418,7 +418,7 @@ public sealed class AIManager
         // stunned character. Recorded as steering with reason Travel.
         var travelling = false;
         if (!steering && travel != null && this.config.AutoDodgeEnabled && this.movement is not NullMovementController
-            && !this.Current.NeedToMove && !this.HoldActive && !runnerPath && this.SecondsUntilGaze > GazeHoldSeconds
+            && !this.Current.NeedToMove && !this.HoldActive && !runnerPath && !GazeHold.Holds(this.SecondsUntilGaze)
             && Incapacitation.Blocking(pc) == null && !GameData.Occupied())
         {
             this.MaxCastTime = 0f;
@@ -473,9 +473,6 @@ public sealed class AIManager
     public bool WantSprint { get; private set; }
 
     private DodgeDecision published;
-
-    /// <summary>How long before a gaze resolves the dodge stops walking; BossmodReborn's AI uses half a second.</summary>
-    private const float GazeHoldSeconds = 0.6f;
 
     // the facing half of the decision rides along: whether a gaze was up and whether Minerva answered it
     private DodgeDecision Decide(bool needToMove, bool found, WPos target, DodgeReason reason, DodgeBlocker blocker, bool steering)
