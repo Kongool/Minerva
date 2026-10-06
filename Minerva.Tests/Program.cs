@@ -5565,6 +5565,38 @@ t.Section("No gaze coming holds no walk");
 }
 
 
+// The Oracle of Light, newtoon2, 2026-10-04: the script clicked the Bindings without targeting them, so the recording
+// shows no target change, only her cast bar on the object; the draft came out with no click at all.
+t.Section("A cast bar on an object is a click in the draft");
+{
+    var ws = new WorldState(10_000_000, "test");
+    var cap = Minerva.Generation.QuestScriptCapture.Attach(ws);
+    var i = 0u;
+    void Tick() => ws.Execute(new WorldState.OpFrameStart(Frame(ws, ++i, dtSeconds: 1f), TimeSpan.FromSeconds(1)));
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    ws.Execute(new WorldState.OpZoneChange(zone: 861, cfcID: 662));
+    ws.Execute(new ActorState.OpCreate(0x10000B11, 0u, 0, "Hero", 0, ActorType.Player, new Vector4(-45, 161, -372, 0), 0.5f, new ActorHPMP(50000, 50000, 0, 10000, 10000), true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, 0x10000B11)));
+    ws.Execute(new ActorState.OpCreate(0x40000B12, 0x1EADB9u, 1, "Bindings", 0, ActorType.EventObj, new Vector4(-48, 161, -371, 0), 0.5f, default, true, false, 0));
+    Tick();
+    ws.Execute(new ActorState.OpCastInfo(0x10000B11, new ActorCastInfo { Action = new ActionID(ActionType.None, 0x1Au), TargetID = 0x40000B12, TotalTime = 2f }));
+    Tick();
+    // the first cast was cut short and started again: still one click
+    ws.Execute(new ActorState.OpCastInfo(0x10000B11, null));
+    ws.Execute(new ActorState.OpCastInfo(0x10000B11, new ActorCastInfo { Action = new ActionID(ActionType.None, 0x1Au), TargetID = 0x40000B12, TotalTime = 2f }));
+    Tick();
+    ws.Execute(new ActorState.OpCastInfo(0x10000B11, null));
+    ws.Execute(new ActorState.OpDestroy(0x40000B12));
+    Tick();
+    cap.Finish();
+
+    t.True("one click on the Bindings, ended by their removal",
+        cap.Interactions.Count == 1 && cap.Interactions[0].Target.OID == 0x1EADB9u && cap.Interactions[0].End == Minerva.Generation.QuestScriptCapture.InteractEnd.Destroyed);
+    var src = Minerva.Generation.QuestScriptGenerator.Generate(cap, "Oracle", "The Oracle of Light", new Minerva.Generation.NullNameResolver(), "test.log");
+    t.True("the draft clicks them and waits for them to go", src.Contains(".WithInteract(0x1EADB9u)") && src.Contains(".CompleteOnDestroyed(0x1EADB9u)"));
+}
+
+
 // Ariadne has one follower and no owner. Holminster Switch, 2026-10-02: Theseus sent a walk to the next pack, Minerva's
 // uptime steer replaced it every tick, and the tank stood on the first pack for 22 seconds.
 t.Section("A duty runner's route owns the feet; only danger takes them back");

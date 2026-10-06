@@ -9,7 +9,8 @@ namespace Minerva.Generation;
 ///
 /// <para>Recordings already carry all of it: the player's position each frame, their target changes, every action
 /// they used and on whom, and each object's spawn, death, targetability and event state. A click is not recorded as
-/// such; it is read as "targeted an event object, stood next to it, and the object then changed".</para>
+/// such; it is read as "targeted an event object, stood next to it, and the object then changed", or as a cast bar
+/// the player started on an object.</para>
 /// </summary>
 public sealed class QuestScriptCapture
 {
@@ -63,6 +64,7 @@ public sealed class QuestScriptCapture
         });
         ws.Actors.Added.Subscribe(a => c.actors[a.InstanceID] = new ActorInfo(a.InstanceID, a.OID, a.Type, a.Name, a.IsAlly));
         ws.Actors.TargetChanged.Subscribe(c.OnTarget);
+        ws.Actors.CastStarted.Subscribe(c.OnCastStarted);
         ws.Actors.EventStateChanged.Subscribe((a, state) => c.OnObjectChanged(a, state == 7 ? InteractEnd.State7 : InteractEnd.None));
         ws.Actors.Removed.Subscribe(a => c.OnObjectChanged(a, InteractEnd.Destroyed));
         ws.Actors.IsTargetableChanged.Subscribe(a => c.OnObjectChanged(a, a.IsTargetable ? InteractEnd.None : InteractEnd.Untargetable));
@@ -113,6 +115,18 @@ public sealed class QuestScriptCapture
         if (a != this.Player)
             return;
         this.pendingClick = this.ws.Actors.Find(a.TargetID) is { Type: ActorType.EventObj or ActorType.EventNpc } t ? (this.Info(t), this.ws.CurrentTime) : null;
+    }
+
+    // a cast bar on an object is a click too: an interact sent without targeting (a script's, The Oracle of Light's
+    // Bindings, 2026-10-04) shows no target change, only the player's cast on the object
+    private void OnCastStarted(Actor a)
+    {
+        if (a != this.Player || a.CastInfo is not { } cast || this.ws.Actors.Find(cast.TargetID) is not { Type: ActorType.EventObj or ActorType.EventNpc } obj
+            || this.Interactions.Exists(i => i.Target.InstanceID == obj.InstanceID && i.End == InteractEnd.None))
+            return;
+        this.Interactions.Add(new Interaction(this.ws.CurrentTime, a.PosRot.XYZ(), this.Info(obj), InteractEnd.None, default));
+        if (this.pendingClick?.Target.InstanceID == obj.InstanceID)
+            this.pendingClick = null;
     }
 
     private void OnObjectChanged(Actor a, InteractEnd end)
