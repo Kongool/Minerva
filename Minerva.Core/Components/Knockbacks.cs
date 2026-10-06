@@ -6,8 +6,8 @@ namespace Minerva.Components;
 /// Generic knockback / attract component: subclasses expose a set of active <see cref="Knockback"/>
 /// sources and this base predicts where the player is shoved, draws the arrow, and warns when the
 /// landing spot leaves the arena. Ported from BossmodReborn's GenericKnockback (BSD-3; see
-/// THIRD-PARTY-NOTICES.txt), simplified for Minerva's local-player focus — party-wide status-immunity
-/// tracking and wall-segment ray tests are omitted (Minerva has no party state / ray-bounds helper).
+/// THIRD-PARTY-NOTICES.txt), simplified for Minerva's local-player focus — <see cref="Knockback.SafeWalls"/> are carried
+/// but not ray-tested. Unlike BossmodReborn it also tells the dodge where not to stand (<see cref="AddAIHints"/>).
 /// </summary>
 public abstract class GenericKnockback(ModuleBase module, uint aid = default, int maxCasts = int.MaxValue, bool stopAtWall = false, bool stopAfterWall = false) : CastCounter(module, aid)
 {
@@ -133,35 +133,117 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
         var sources = this.ActiveKnockbacks(slot, actor);
         foreach (ref readonly var s in sources)
         {
-            if (s.Shape != null && !s.Shape.Check(from, s.Origin, s.Direction))
-                continue; // player is outside the shove's AOE
-
-            var dir = s.Kind switch
-            {
-                Kind.AwayFromOrigin => from != s.Origin ? (from - s.Origin).Normalized() : default,
-                Kind.TowardsOrigin => from != s.Origin ? (s.Origin - from).Normalized() : default,
-                Kind.DirBackward => (s.Direction + 180f.Degrees()).ToDirection(),
-                Kind.DirForward => s.Direction.ToDirection(),
-                Kind.DirLeft => s.Direction.ToDirection().OrthoL(),
-                Kind.DirRight => s.Direction.ToDirection().OrthoR(),
-                _ => default
-            };
-            if (dir == default)
+            var to = this.Displace(s, from);
+            if (to == from)
                 continue;
-
-            var distance = s.Distance;
-            if (s.Kind == Kind.TowardsOrigin)
-                distance = Math.Min(distance, (s.Origin - from).Length() - s.MinDistance);
-            if (distance <= 0f)
-                continue;
-
-            var to = from + distance * dir;
             movements.Add((from, to));
             from = to;
             if (++count == this.MaxCasts)
                 break;
         }
         return movements;
+    }
+
+    // BossmodReborn's allowance for where the wall test meets the boundary: 0.5 less its approximate hitbox, 0.499
+    private const float MaxIntersectionError = 0.001f;
+
+    /// <summary>Where one source puts someone standing at <paramref name="from"/>; <paramref name="from"/> itself when it
+    /// does not move them (outside its shape, on its origin, or already at the pull's minimum).</summary>
+    public WPos Displace(in Knockback s, WPos from)
+    {
+        if (s.Shape != null && !s.Shape.Check(from, s.Origin, s.Direction))
+            return from; // outside the shove's AOE
+
+        var dir = s.Kind switch
+        {
+            Kind.AwayFromOrigin => from != s.Origin ? (from - s.Origin).Normalized() : default,
+            Kind.TowardsOrigin => from != s.Origin ? (s.Origin - from).Normalized() : default,
+            Kind.DirBackward => (s.Direction + 180f.Degrees()).ToDirection(),
+            Kind.DirForward => s.Direction.ToDirection(),
+            Kind.DirLeft => s.Direction.ToDirection().OrthoL(),
+            Kind.DirRight => s.Direction.ToDirection().OrthoR(),
+            _ => default
+        };
+        if (dir == default)
+            return from;
+
+        var distance = s.Distance;
+        if (s.Kind == Kind.TowardsOrigin)
+            distance = Math.Min(distance, (s.Origin - from).Length() - s.MinDistance);
+        // BossmodReborn's clamps: a solid wall stops the push at the boundary, StopAfterWall carries it just past
+        if (this.StopAtWall)
+            distance = Math.Min(distance, this.Module.Bounds.IntersectRay(this.Module.Center, from, dir) - MaxIntersectionError);
+        if (this.StopAfterWall)
+            distance = Math.Min(distance, this.Module.Bounds.IntersectRay(this.Module.Center, from, dir) + MaxIntersectionError);
+        return distance > 0f ? from + distance * dir : from;
+    }
+
+    /// <summary>A zone that goes off this long after a shove is one it can throw you into; any later and there is time
+    /// to walk out of it.</summary>
+    public const float LandingWindowSeconds = 3f;
+
+    // A zone resolving with the shove has already hit where you stood, not where you land. Casts that end together are
+    // stamped a frame or two apart.
+    private const float SameMomentSeconds = 0.2f;
+
+    /// <summary>
+    /// Forbid standing where the shove lands you in a zone going off just after it. The Oracle of Light, newtoon2
+    /// 2026-10-04: clear of all eight Burns, she was thrown 11.8y by Unbridled Wrath into one with a second left. The
+    /// arrow and the text warning said where she would land; nothing told the dodge. BossmodReborn leaves this to each
+    /// module, and only some of them do it.
+    /// <para>One zone per source, timed at its shove: by the next one the character has had time to move. Skipped
+    /// while immune. A subclass that writes its own hints replaces this, as before.</para>
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (this.MaxCasts <= 0)
+            return;
+        var sources = this.ActiveKnockbacks(slot, actor);
+        foreach (ref readonly var s in sources)
+        {
+            if (s.Activation == default || !s.IgnoreImmunes && this.IsImmune(slot, s.Activation))
+                continue;
+            if (this.ZonesAfter(slot, actor, s.Activation) is { Length: > 0 } after)
+                hints.AddForbiddenZone(new SDLanding(this, s, after), s.Activation);
+        }
+    }
+
+    /// <summary>The module's risky zones going off within <see cref="LandingWindowSeconds"/> after a shove at
+    /// <paramref name="shove"/>.</summary>
+    private ShapeDistance[] ZonesAfter(int slot, Actor actor, DateTime shove)
+    {
+        List<ShapeDistance>? zones = null;
+        var components = this.Module.Components;
+        for (var i = 0; i < components.Count; ++i)
+        {
+            if (components[i] is not GenericAOEs aoes)
+                continue;
+            var active = aoes.ActiveAOEs(slot, actor);
+            foreach (ref readonly var aoe in active)
+            {
+                var after = (aoe.Activation - shove).TotalSeconds;
+                if (aoe.Risky && after >= SameMomentSeconds && after <= LandingWindowSeconds
+                    && this.Module.MechanicAppliesToArenaProjectionLayer(actor, aoe.ArenaProjectionLayer, aoe.RestrictToArenaProjectionLayer))
+                    (zones ??= []).Add(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation));
+            }
+        }
+        return zones != null ? [.. zones] : [];
+    }
+
+    /// <summary>"Standing here, the shove lands you in one of these": each zone's distance, taken at the landing point.
+    /// Ground the shove does not move you from is clear as far as this is concerned; the zones forbid it themselves.</summary>
+    private sealed class SDLanding(GenericKnockback owner, Knockback source, ShapeDistance[] zones) : ShapeDistance
+    {
+        public override float Distance(WPos p)
+        {
+            var to = owner.Displace(source, p);
+            if (to == p)
+                return 1000f; // "far", as the other fields say it
+            var d = float.MaxValue;
+            for (var i = 0; i < zones.Length; ++i)
+                d = Math.Min(d, zones[i].Distance(to));
+            return d;
+        }
     }
 
     public override void AddHints(int slot, Actor actor, TextHints hints)
@@ -195,7 +277,7 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
 /// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).
 /// </summary>
 public class SimpleKnockbacks(ModuleBase module, uint aid, float distance, bool ignoreImmunes = false, int maxCasts = int.MaxValue, AOEShape? shape = null, GenericKnockback.Kind kind = GenericKnockback.Kind.AwayFromOrigin, float minDistance = default, bool minDistanceBetweenHitboxes = false, bool stopAtWall = false, bool stopAfterWall = false)
-    : GenericKnockback(module, aid, maxCasts, stopAtWall)
+    : GenericKnockback(module, aid, maxCasts, stopAtWall, stopAfterWall)
 {
     public readonly float Distance = distance;
     public readonly AOEShape? Shape = shape;
@@ -203,7 +285,6 @@ public class SimpleKnockbacks(ModuleBase module, uint aid, float distance, bool 
     public readonly float MinDistance = minDistance;
     public readonly bool IgnoreImmunes = ignoreImmunes;
     public readonly bool MinDistanceBetweenHitboxes = minDistanceBetweenHitboxes;
-    public readonly bool StopAfterWall = stopAfterWall;
     public readonly List<Knockback> Casters = [];
 
     public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) => CollectionsMarshal.AsSpan(this.Casters);

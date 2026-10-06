@@ -5597,6 +5597,54 @@ t.Section("A cast bar on an object is a click in the draft");
 }
 
 
+// The Oracle of Light, newtoon2 2026-10-04: clear of every Burn, Unbridled Wrath threw her 11.8y to the wall and into one
+// that went off a second later. The arrow showed where she would land; nothing told the dodge.
+t.Section("A knockback forbids ground that lands you in a zone going off just after");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x400000E01, pc = 0x10000E02, early = 0x400000E03, late = 0x400000E04, burn = 0x400000E05;
+    ws.Execute(new ActorState.OpCreate(boss, 0xE01u, 0, "Ran'jit", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 2f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(pc, 0u, 1, "Grakur", 0, ActorType.Player, new Vector4(0, 0, -10, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    foreach (var h in new[] { early, late, burn })
+        ws.Execute(new ActorState.OpCreate(h, 0x233Cu, 2, "", 0, ActorType.Helper, new Vector4(0, 0, 14, 0), 0.5f, default, true, false, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0xC0FFEE, pc)));
+    var module = new ArenaPullModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<ProbeBurn>();
+    module.ActivateComponent<ProbeWrath>();
+    var wrath = module.FindComponent<ProbeWrath>()!;
+    var player = ws.Actors.Find(pc)!;
+    AIHints Hints()
+    {
+        var h = new AIHints();
+        wrath.AddAIHints(0, player, default, h);
+        return h;
+    }
+
+    // a 20y shove north from the boss in the middle of a 20y circle, stopped by the wall
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(103u), TotalTime = 5f, Rotation = 0f.Degrees() }));
+    // two Burns by the north wall: one going off with the shove, one four seconds after it
+    ws.Execute(new ActorState.OpCastInfo(early, new ActorCastInfo { Action = ActionID.MakeSpell(102u), TotalTime = 5f, Location = new Vector3(0, 0, 14) }));
+    ws.Execute(new ActorState.OpCastInfo(late, new ActorCastInfo { Action = ActionID.MakeSpell(102u), TotalTime = 9f, Location = new Vector3(0, 0, 14) }));
+    t.Eq("a Burn with the shove hit where you stood, and one 4s later can be walked out of", Hints().ForbiddenZones.Count, 0);
+
+    // and the one a second after it
+    ws.Execute(new ActorState.OpCastInfo(burn, new ActorCastInfo { Action = ActionID.MakeSpell(102u), TotalTime = 6f, Location = new Vector3(0, 0, 14) }));
+    var hints = Hints();
+    t.Eq("a Burn a second after the shove: one zone", hints.ForbiddenZones.Count, 1);
+    var zone = hints.ForbiddenZones[0];
+    t.True("timed at the shove", zone.Activation == wrath.Casters[0].Activation);
+    t.True("10y south of the boss lands you in it", zone.Contains(new WPos(0, -10)));
+    t.True("5y north, the wall stops you in it", zone.Contains(new WPos(0, 5)));
+    t.False("12y east lands clear of it", zone.Contains(new WPos(12, -10)));
+    t.True("the shove stops at the wall", Math.Abs(wrath.Displace(wrath.Casters[0], new WPos(0, 5)).Z - 20f) < 0.01f);
+
+    wrath.PlayerImmunes[0].RoleBuffExpire = DateTime.MaxValue;
+    t.Eq("Arm's Length up: nothing to land anywhere", Hints().ForbiddenZones.Count, 0);
+    module.Dispose();
+}
+
+
 // Ariadne has one follower and no owner. Holminster Switch, 2026-10-02: Theseus sent a walk to the next pack, Minerva's
 // uptime steer replaced it every tick, and the tank stood on the first pack for 22 seconds.
 t.Section("A duty runner's route owns the feet; only danger takes them back");
@@ -6018,6 +6066,11 @@ sealed class NullArena : Arena
 }
 
 sealed class TestCircleAOE(ModuleBase module) : Minerva.Components.SimpleAOEs(module, 100u, new AOEShapeCircle(5f));
+
+// Ran'jit's Burn and Unbridled Wrath, for the landing test
+sealed class ProbeBurn(ModuleBase module) : Minerva.Components.SimpleAOEs(module, 102u, 8f);
+
+sealed class ProbeWrath(ModuleBase module) : Minerva.Components.SimpleKnockbacks(module, 103u, 20f, kind: Minerva.Components.GenericKnockback.Kind.DirForward, stopAtWall: true);
 
 // keeps its zone after the cast, until something else takes it off (CE205's centre puddle)
 sealed class KeptCircleAOE(ModuleBase module) : Minerva.Components.SimpleAOEs(module, 101u, new AOEShapeCircle(5f))
