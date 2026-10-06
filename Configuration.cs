@@ -176,17 +176,35 @@ public sealed class Configuration : IPluginConfiguration
     public bool RecordExcludeOtherPlayers { get; set; } = true;
 
     /// <summary>
-    /// The backline's range band, in yalms from the target's hitbox edge: casters, ranged and healers only move for
-    /// range when outside [<see cref="RangedBandMin"/>, <see cref="RangedBandMax"/>], and then walk to
-    /// <see cref="RangedBandPreferred"/>. Replaces the old caster standoff, which was the same floor capped at three.
+    /// The healers' range band in a boss fight, in yalms from the target's hitbox edge: they move for range only when
+    /// outside [Min, Max], then walk to Preferred. Casters and physical ranged have their own; out of a boss fight the
+    /// backline keeps no band at all (<see cref="BacklineBand"/>). Replaces the one shared RangedBand (8/12/15).
     /// </summary>
-    public float RangedBandMin { get; set; } = 8f;
+    public float HealerBandMin { get; set; } = 1f;
 
-    /// <inheritdoc cref="RangedBandMin"/>
-    public float RangedBandPreferred { get; set; } = 12f;
+    /// <inheritdoc cref="HealerBandMin"/>
+    public float HealerBandPreferred { get; set; } = 8f;
 
-    /// <inheritdoc cref="RangedBandMin"/>
-    public float RangedBandMax { get; set; } = 15f;
+    /// <inheritdoc cref="HealerBandMin"/>
+    public float HealerBandMax { get; set; } = 12f;
+
+    /// <summary>The casters' range band in a boss fight (<see cref="HealerBandMin"/>).</summary>
+    public float CasterBandMin { get; set; } = 5f;
+
+    /// <inheritdoc cref="CasterBandMin"/>
+    public float CasterBandPreferred { get; set; } = 12f;
+
+    /// <inheritdoc cref="CasterBandMin"/>
+    public float CasterBandMax { get; set; } = 18f;
+
+    /// <summary>The physical ranged's band in a boss fight (<see cref="HealerBandMin"/>).</summary>
+    public float PhysRangedBandMin { get; set; } = 1f;
+
+    /// <inheritdoc cref="PhysRangedBandMin"/>
+    public float PhysRangedBandPreferred { get; set; } = 12f;
+
+    /// <inheritdoc cref="PhysRangedBandMin"/>
+    public float PhysRangedBandMax { get; set; } = 20f;
 
     /// <summary>The melee band, for tanks and melee, in yalms from the hitbox edge. No floor: melee stand on the boss.</summary>
     public float MeleeBandPreferred { get; set; } = 1.5f;

@@ -6093,6 +6093,46 @@ t.Section("Waiting to join a critical engagement, the dodge stays in its circle"
     t.True("and none without a marker", CriticalEncounterGround.JoinCircle(33u, default) == null);
 }
 
+t.Section("The backline's bands: one per role, boss fights only");
+{
+    var healer = RangeBand.Healer;
+    var caster = RangeBand.Caster;
+    var ranged = RangeBand.PhysRanged;
+
+    // the user, 2026-10-06: healers close (party in heal range), casters further out (line of sight on a dashing boss),
+    // physical ranged barely moved -- and a yalm of floor for all, so nobody hugs the hitbox
+    t.True("healers keep 1 / 8 / 12", healer == new RangeBand(1f, 8f, 12f));
+    t.True("casters keep 5 / 12 / 18", caster == new RangeBand(5f, 12f, 18f));
+    t.True("physical ranged keep 1 / 12 / 20", ranged == new RangeBand(1f, 12f, 20f));
+    t.True("each is already consistent", healer.Normalized() == healer && caster.Normalized() == caster && ranged.Normalized() == ranged);
+
+    t.True("a healer in a boss fight keeps the healer band", BacklineBand.For(ClassCategory.Healer, true, healer, caster, ranged) == healer);
+    t.True("a caster keeps the caster band", BacklineBand.For(ClassCategory.Caster, true, healer, caster, ranged) == caster);
+    t.True("a bard keeps the ranged band", BacklineBand.For(ClassCategory.PhysRanged, true, healer, caster, ranged) == ranged);
+    t.True("a limited job (blue mage) plays as a caster", BacklineBand.For(ClassCategory.Limited, true, healer, caster, ranged) == caster);
+
+    // on trash: dodge only, walk in only from out of reach -- no running into walls and corridors
+    foreach (var c in new[] { ClassCategory.Healer, ClassCategory.Caster, ClassCategory.PhysRanged })
+        t.True($"{c} on trash keeps no band, only reach", BacklineBand.For(c, false, healer, caster, ranged) == RangeBand.TrashReach);
+    t.Near("trash never backs anyone off a mob", RangeBand.TrashReach.Min, 0f);
+    t.True("and walks in only from beyond 23y", RangeBand.TrashReach.Max == 23f);
+}
+
+t.Section("A dashing boss: walk once it lands, not on every leg");
+{
+    var settle = new TargetSettle();
+    var now = new DateTime(2026, 10, 6, 12, 0, 0);
+    var boss = 0x40000001ul;
+
+    t.True("a new target counts as settled", settle.Settled(boss, new WPos(0f, 0f), now));
+    t.True("a stationary boss stays settled", settle.Settled(boss, new WPos(0.2f, 0f), now.AddSeconds(0.5)));
+    t.True("a dash unsettles it", !settle.Settled(boss, new WPos(10f, 0f), now.AddSeconds(0.6)));
+    t.True("still moving: still unsettled", !settle.Settled(boss, new WPos(18f, 0f), now.AddSeconds(0.9)));
+    t.True("landed, but under a second ago: still waiting", !settle.Settled(boss, new WPos(18.2f, 0f), now.AddSeconds(1.5)));
+    t.True("a second after landing: settled", settle.Settled(boss, new WPos(18.1f, 0f), now.AddSeconds(2.0)));
+    t.True("a different target starts settled", settle.Settled(0x40000002ul, new WPos(40f, 0f), now.AddSeconds(2.1)));
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.

@@ -280,10 +280,18 @@ public sealed class AIManager
             this.bandWalk.Reset();
         }
         else if (target != null && !this.hints.UptimeHeld)   // a module can hold uptime: dodge only (AIHints.UptimeHeld)
-            goal = this.bandWalk.Apply(
-                UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(UptimeTargeting.SideFor(role, this.ActivePositional, InCharge(module, pc) && target == module!.PrimaryActor), target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target), role, questDriven && soloDuty)),
-                pc.Position,
-                pc.CastInfo != null);
+        {
+            // The backline does not START a band walk while the boss is moving: a dash crosses the band's edges leg by
+            // leg, and walking after each was the in-and-out that cost casts. One decision once it lands (TargetSettle).
+            var settled = this.targetSettle.Settled(target.InstanceID, target.Position, now);
+            if (role is not (Role.Tank or Role.Melee) && !settled && !this.bandWalk.Walking)
+                goal = null;
+            else
+                goal = this.bandWalk.Apply(
+                    UptimeGoal.For(target, role, UptimeTargeting.PositionalWorthWalking(UptimeTargeting.SideFor(role, this.ActivePositional, InCharge(module, pc) && target == module!.PrimaryActor), target, pc.InstanceID), Math.Clamp(this.config.PositionalArcMarginDeg, 0f, 44f), UptimeTargeting.ApproachOnly(this.BandFor(pc, role, target, InCharge(module, pc)), role, questDriven && soloDuty)),
+                    pc.Position,
+                    pc.CastInfo != null);
+        }
         else
             this.bandWalk.Reset();
         var lead = Math.Clamp(this.config.AutoDodgeClearanceLead, 0f, 5f);
@@ -860,13 +868,24 @@ public sealed class AIManager
         return GameData.PathHasFloor(from, new Vector3(edge.X, pc.PosRot.Y, edge.Z));
     }
 
-    /// <summary>The configured band for a role: tanks and melee share one, everyone else the backline's -- and the
-    /// backline's never asks for more distance from the boss than the rest of the party is keeping.</summary>
-    private RangeBand BandFor(Actor pc, Role role, Actor target)
+    private readonly TargetSettle targetSettle = new();
+
+    /// <summary>The configured band for a role: tanks and melee share one; healers, casters and physical ranged each
+    /// have their own in a boss fight and none out of one (<see cref="BacklineBand"/>) -- and a boss-fight band never asks
+    /// for more distance from the boss than the rest of the party is keeping.</summary>
+    private RangeBand BandFor(Actor pc, Role role, Actor target, bool bossFight)
     {
         if (role is Role.Tank or Role.Melee)
             return new RangeBand(0f, this.config.MeleeBandPreferred, this.config.MeleeBandMax);
-        var band = new RangeBand(this.config.RangedBandMin, this.config.RangedBandPreferred, this.config.RangedBandMax);
+        if (!bossFight)
+            return RangeBand.TrashReach;   // reach only: following the group here would walk a caster into the pack
+
+        // A role-play kit can make a character ranged whatever its job; it plays as a caster.
+        var category = role == pc.Role ? pc.Class.GetClassCategory() : ClassCategory.Caster;
+        var band = BacklineBand.For(category, bossFight,
+            new RangeBand(this.config.HealerBandMin, this.config.HealerBandPreferred, this.config.HealerBandMax),
+            new RangeBand(this.config.CasterBandMin, this.config.CasterBandPreferred, this.config.CasterBandMax),
+            new RangeBand(this.config.PhysRangedBandMin, this.config.PhysRangedBandPreferred, this.config.PhysRangedBandMax));
         return band.FollowGroup(RangeBand.GroupDistance(this.GroupPositions(pc), target.Position, target.HitboxRadius));
     }
 

@@ -39,6 +39,20 @@ public readonly record struct RangeBand(float Min, float Preferred, float Max)
     /// <summary>Casters, ranged and healers: out of the cleaves, inside the stacks and heals.</summary>
     public static readonly RangeBand Ranged = new(8f, 12f, 15f);
 
+    /// <summary>Healers in a boss fight: close, so the whole party stays inside the heals; the yalm floor only keeps
+    /// them off the boss's hitbox, so a boss that comes to them barely moves them.</summary>
+    public static readonly RangeBand Healer = new(1f, 8f, 12f);
+
+    /// <summary>Casters in a boss fight: further out, so a dashing boss sweeps a narrower arc and line of sight
+    /// holds.</summary>
+    public static readonly RangeBand Caster = new(5f, 12f, 18f);
+
+    /// <summary>Physical ranged in a boss fight: no cast times, so the band only brings them in from out of reach.</summary>
+    public static readonly RangeBand PhysRanged = new(1f, 12f, 20f);
+
+    /// <summary>The backline out of a boss fight: no band, a walk in only when nothing it has can reach.</summary>
+    public static readonly RangeBand TrashReach = new(0f, 20f, 23f);
+
     /// <summary>Tanks share the melee band. Healers and anyone whose role is unknown share the ranged one: standing
     /// too far back costs damage, standing too close costs the pull.</summary>
     public static RangeBand DefaultFor(Role role) => role is Role.Tank or Role.Melee ? Melee : Ranged;

@@ -251,14 +251,20 @@ public sealed class MainWindow : Window, IDisposable
                 }
                 UiKit.Tip("Be clear this early. Costs uptime, buys margin.");
 
-                Key("Ranged min");
-                var bandMin = cfg.RangedBandMin;
-                if (ImGui.SliderFloat("##bandmin", ref bandMin, 0f, 15f, bandMin <= 0f ? "off" : "%.0f y"))
-                {
-                    cfg.RangedBandMin = Math.Clamp(MathF.Round(bandMin), 0f, 15f);
-                    changed = true;
-                }
-                UiKit.Tip($"Casters, ranged and healers keep at least this far off the target's hitbox -- but never farther out than the rest of the party stands, so they stay with the group. They move only when outside {cfg.RangedBandMin:0}-{cfg.RangedBandMax:0}y, then walk to {cfg.RangedBandPreferred:0}y or the group, whichever is closer.");
+                // Per-role bands, boss fights only: min / preferred / max yalms off the hitbox. On trash the backline
+                // keeps no band (it dodges, and walks in only when out of reach).
+                changed |= BandRow("Healer band", "##healerband",
+                    () => (cfg.HealerBandMin, cfg.HealerBandPreferred, cfg.HealerBandMax),
+                    b => (cfg.HealerBandMin, cfg.HealerBandPreferred, cfg.HealerBandMax) = b,
+                    "Healers in a boss fight: min / preferred / max yalms off the boss. Close, so the whole party stays in heal range; the floor only keeps them off the hitbox.");
+                changed |= BandRow("Caster band", "##casterband",
+                    () => (cfg.CasterBandMin, cfg.CasterBandPreferred, cfg.CasterBandMax),
+                    b => (cfg.CasterBandMin, cfg.CasterBandPreferred, cfg.CasterBandMax) = b,
+                    "Casters in a boss fight: further out, so a dashing boss keeps in line of sight.");
+                changed |= BandRow("Ranged band", "##rangedband",
+                    () => (cfg.PhysRangedBandMin, cfg.PhysRangedBandPreferred, cfg.PhysRangedBandMax),
+                    b => (cfg.PhysRangedBandMin, cfg.PhysRangedBandPreferred, cfg.PhysRangedBandMax) = b,
+                    "Bard, Machinist, Dancer in a boss fight. Out of a boss fight nobody in the backline keeps a band: they dodge, and walk in only when out of reach. A band walk waits for a dashing boss to land.");
 
                 ImGui.EndTable();
             }
@@ -420,5 +426,22 @@ public sealed class MainWindow : Window, IDisposable
 
     public void Dispose()
     {
+    }
+
+    /// <summary>One band row: min / preferred / max yalms, kept consistent (RangeBand.Normalized) as it is edited.</summary>
+    private static bool BandRow(string label, string id, Func<(float, float, float)> get, Action<(float, float, float)> set, string tip)
+    {
+        Key(label);
+        var (min, preferred, max) = get();
+        var v = new Vector3(min, preferred, max);
+        var changed = false;
+        if (ImGui.DragFloat3(id, ref v, 0.25f, 0f, 30f, "%.0f y"))
+        {
+            var band = new RangeBand(MathF.Round(v.X), MathF.Round(v.Y), MathF.Round(v.Z)).Normalized();
+            set((band.Min, band.Preferred, band.Max));
+            changed = true;
+        }
+        UiKit.Tip(tip);
+        return changed;
     }
 }
