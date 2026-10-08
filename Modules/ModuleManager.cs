@@ -18,6 +18,7 @@ public sealed class ModuleManager : IDisposable
     private readonly ModuleRegistry registry;
     private readonly ZoneModuleRegistry zoneRegistry;
     private uint zoneModuleCFC;   // the CFC the current zone module was built for
+    private readonly Dictionary<uint, uint> questDuties;   // quest row -> its solo duty's CFC
 
     public ModuleBase? ActiveModule { get; private set; }
     public ModuleRegistry.Info? ActiveModuleInfo { get; private set; }
@@ -35,13 +36,25 @@ public sealed class ModuleManager : IDisposable
     /// <summary>All registered modules, grouped by duty (CFC id) — for the in-game module list.</summary>
     public IReadOnlyDictionary<uint, List<ModuleRegistry.Info>> ModulesByCFC => this.registry.ByCFC;
 
+    /// <summary>
+    /// Whether a module covers this quest's solo duty — a zone module (quest battles are) or a boss
+    /// module on its CFC. For a quest runner deciding whether the fight can be left to Minerva. Takes
+    /// the quest's row id or its short id (row minus 65536).
+    /// </summary>
+    public bool CoversQuestBattle(uint questId)
+    {
+        var row = questId < 0x10000 ? questId + 0x10000 : questId;
+        return this.questDuties.TryGetValue(row, out var cfc)
+               && (this.zoneRegistry.For(cfc) != null || this.registry.ByCFC.ContainsKey(cfc));
+    }
+
     public ModuleManager(WorldState world)
     {
         InstallBrokenComponentReporter();
         this.world = world;
         // scan both the plugin assembly (content modules) and the core assembly; quest modules are keyed on
         // their quest id and need the game to say which duty that is (see ModuleRegistry.Build)
-        var questDuties = GameData.QuestBattleDuties();
+        var questDuties = this.questDuties = GameData.QuestBattleDuties();
         this.registry = ModuleRegistry.Build(quest => questDuties.TryGetValue(quest, out var cfc) ? cfc : 0u, Assembly.GetExecutingAssembly(), typeof(ModuleRegistry).Assembly);
         this.zoneRegistry = ZoneModuleRegistry.Build(Assembly.GetExecutingAssembly(), typeof(ModuleRegistry).Assembly);
         Service.Log.Information($"Minerva: {this.registry.Count} module(s) and {this.zoneRegistry.Count} zone module(s) registered; {questDuties.Count} quest battle(s) mapped to duties.");

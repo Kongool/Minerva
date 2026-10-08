@@ -39,6 +39,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly bool[] mustNotTurn;
 
     private readonly ICallGateProvider<bool> isConnected;
+    private readonly ICallGateProvider<uint, bool> coversQuestBattle;
     private readonly ICallGateProvider<bool> mustNotActGate;
     private readonly ICallGateProvider<bool> mustNotMoveGate;
     private readonly ICallGateProvider<string> activeModule;
@@ -94,6 +95,11 @@ internal sealed class MinervaIpc : IDisposable
 
         this.isConnected = pi.GetIpcProvider<bool>("Minerva.IsConnected");
         this.isConnected.RegisterFunc(() => true);
+
+        // A quest runner asks before a solo duty its path data calls unattended-unsafe: a module here
+        // (ported since that data was written) means the fight can be left to us.
+        this.coversQuestBattle = pi.GetIpcProvider<uint, bool>("Minerva.CoversQuestBattle");
+        this.coversQuestBattle.RegisterFunc(quest => modules.CoversQuestBattle(quest));
 
         this.mustNotActGate = pi.GetIpcProvider<bool>("Minerva.MustNotAct");
         this.mustNotActGate.RegisterFunc(() => this.ai.MustNotAct);
@@ -327,6 +333,7 @@ internal sealed class MinervaIpc : IDisposable
         this.setAutoDodge.UnregisterFunc();
         this.isAutoDodgeEnabled.UnregisterFunc();
         this.isConnected.UnregisterFunc();
+        this.coversQuestBattle.UnregisterFunc();
         this.mustNotActGate.UnregisterFunc();
         this.mustNotMoveGate.UnregisterFunc();
         this.activeModule.UnregisterFunc();
