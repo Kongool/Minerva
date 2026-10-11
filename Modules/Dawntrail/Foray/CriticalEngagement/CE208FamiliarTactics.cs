@@ -93,25 +93,33 @@ sealed class UnbowedSpirit(ModuleBase module) : Components.GenericAOEs(module)
     private const float PuddleRadius = 4.2f;
 
     /// <summary>
-    /// How much further ahead the dodge is told about, and when that ground turns lethal.
-    /// <para>The drawn capsule reaches four yalms. Measured over 7,317 movement samples in
-    /// <c>minerva-20260906-221928-Elm Gigas.log</c>, a puddle travels 3.1 yalms a second at the median and
-    /// 5.2 at the ninetieth percentile, so four yalms is between eight tenths of a second and one and a
-    /// third of warning -- and a dodge takes two to three seconds. The character walked to ground that was
-    /// clear when it was chosen and occupied by the time it arrived: five puddle hits in the 09-06 pull, six
-    /// in Korha's 09-07 pull and two in Saar's. The module was ported carrying the note "needs extended
-    /// moving AOE support", and this is it.</para>
-    /// <para>Distances are stamped at the ninetieth-percentile speed rather than the median, so the warning
-    /// errs early. Rasterising the arena at the four hit moments, the whole set costs about a fifth of the
-    /// floor: 67-72% of the circle is free at four yalms of lead and 49-55% at sixteen, so there is no risk
-    /// of walling the dodge in.</para>
+    /// How far ahead in time the dodge is told about a rolling puddle's path.
+    /// <para>The drawn capsule reaches four yalms, which is about a second of warning, and a dodge takes two to three.
+    /// The character walked to ground that was clear when it was chosen and occupied by the time it arrived: five
+    /// puddle hits in the 09-06 pull, six in Korha's 09-07 pull and two in Saar's. The module was ported carrying the
+    /// note "needs extended moving AOE support", and this is it.</para>
     /// </summary>
-    private static readonly (float Length, double Seconds)[] Lookahead =
-    [
-        (8f, 1.5d),
-        (12f, 2.3d),
-        (16f, 3.1d),
-    ];
+    private static readonly double[] LookaheadSeconds = [1.5d, 2.3d, 3.1d];
+
+    /// <summary>
+    /// How fast a puddle goes, measured over six recordings (2026-09-26 to 2026-10-11, 100,000 one-second samples):
+    /// one rolling straight does 3.0 yalms a second (3.5 at the 99th percentile); one orbiting turns at a constant
+    /// 0.20 radians a second (0.23 at the 99th), so 2 yalms a second on an inner ring and 6 at the rim.
+    /// <para>The forecast used one length for all of them, sized for a fast one: 16 yalms in 3.1 seconds. That is
+    /// nearly twice an inner orbiter's reach, and with eight of them out the arcs covered ground no puddle would get to
+    /// in time. Korha, 2026-10-11: dodging Spinning Sweep near the middle, the only way out the solve had left ran
+    /// across the front of an orbiter doing 1.9 yalms a second, and it caught him. It was also short for one at the rim.</para>
+    /// </summary>
+    private const float StraightSpeed = 3.5f;
+
+    private const float OrbitRadiansPerSecond = 0.23f;
+
+    /// <summary>A pulse lands this far ahead of where the puddle is drawn: 1.4-1.5 yalms at the median over the same
+    /// recordings, the actor's position trailing the server's.</summary>
+    private const float PulseRunsAhead = 1.5f;
+
+    private float Speed(Actor puddle)
+        => circular ? OrbitRadiansPerSecond * (puddle.Position - Module.Center).Length() : StraightSpeed;
 
     /// <summary>
     /// The swept shape a puddle covers over the next <paramref name="length"/> yalms of its travel. Puddles
@@ -120,6 +128,11 @@ sealed class UnbowedSpirit(ModuleBase module) : Components.GenericAOEs(module)
     /// </summary>
     private AOEShape SweptShape(Actor puddle, float length)
     {
+        if (Parked(puddle))
+        {
+            return new AOEShapeCircle(PuddleRadius);
+        }
+
         if (!circular)
         {
             return new AOEShapeCapsule(PuddleRadius, length);
@@ -138,6 +151,15 @@ sealed class UnbowedSpirit(ModuleBase module) : Components.GenericAOEs(module)
         return new AOEShapeArcCapsule(PuddleRadius, (angleDirection ? -span : span).Radians(), center);
     }
 
+    /// <summary>
+    /// A puddle casting its cross or its circle has stopped for good: it stands where it is until it goes. Korha and
+    /// Saar, 2026-10-11: eight puddles rolled at 3y/s until 50.0s and then stood for the whole 5.7s of Inspirited
+    /// Crosswinds, each still forecasting sixteen yalms of path. With those on top of the eight crosses no ground was
+    /// clear of everything, the solve fell back to a stage inside the second set of crosses (0.17s after the first),
+    /// and both were hit standing where it had sent them.
+    /// </summary>
+    private static bool Parked(Actor puddle) => puddle.CastInfo != null;
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         // the drawn capsule: the puddle and the next four yalms, dangerous right now
@@ -147,12 +169,15 @@ sealed class UnbowedSpirit(ModuleBase module) : Components.GenericAOEs(module)
         for (var i = 0; i < countP; ++i)
         {
             var puddle = puddles[i];
+            if (Parked(puddle))
+                continue;
             var pos = puddle.Position;
             var rot = puddle.Rotation;
-            for (var t = 0; t < Lookahead.Length; ++t)
+            var speed = Speed(puddle);
+            for (var t = 0; t < LookaheadSeconds.Length; ++t)
             {
-                var (length, seconds) = Lookahead[t];
-                hints.AddForbiddenZone(SweptShape(puddle, length), pos, rot, World.FutureTime(seconds));
+                var seconds = LookaheadSeconds[t];
+                hints.AddForbiddenZone(SweptShape(puddle, (speed * (float)seconds) + PulseRunsAhead), pos, rot, World.FutureTime(seconds));
             }
         }
     }
@@ -194,7 +219,7 @@ sealed class CE208FamiliarTacticsStates : StateMachineBuilder
 }
 
 // Moving-AOE support is in: UnbowedSpirit publishes the puddle's future path as timed forbidden zones
-// (see its Lookahead). Still WIP for the rest -- Ancient Aero (47540) clipped both toons repeatedly on
+// (see its LookaheadSeconds). Still WIP for the rest -- Ancient Aero (47540) clipped both toons repeatedly on
 // 09-07, twice while the dodge believed the spot was safe inside its margin.
 [ModuleInfo(Group = ModuleGroup.CriticalEngagement, CFCID = 1093u, NameID = 58u, PrimaryActorOID = (uint)OID.ElmGigas, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 [SkipLocalsInit]
