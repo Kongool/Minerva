@@ -308,6 +308,9 @@ public sealed class AIManager
                 this.hints.SecondsUntilDangerAt(pc.Position, now, margin),
                 horizon + lead);
 
+        // this character's own taste in landing spots, so the party does not dodge as one block (LandingSpread)
+        this.hints.LandingSpread = Math.Clamp(this.config.DodgeLandingSpread, 0f, 5f);
+        this.hints.LandingSeed = pc.InstanceID;
         this.Current = this.SolveOrReuse(pc, now, horizon, margin, goal, moveSpeed, lead);
         // the hold has to judge safety on the same clock the solve did, or it keeps a target the solve rejected
         this.Current = this.HoldCommitment(pc, now, now.AddSeconds(horizon + lead), margin, moveSpeed, goal);

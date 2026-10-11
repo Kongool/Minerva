@@ -1149,6 +1149,10 @@ public static class ArenaPathfinder
                 if (moveSpeed > 0f && timeBudget != float.MaxValue && travel / moveSpeed > timeBudget)
                     continue;                                   // cannot get there before it lands
 
+                // each character's own taste among cells of similar cost, paid for out of the walk and the time to spare
+                if (hints.LandingSpread > 0f)
+                    travel -= LandingSpread.Discount(hints, p, travel, moveSpeed > 0f && timeBudget != float.MaxValue ? (timeBudget * moveSpeed) - travel : float.MaxValue);
+
                 // cost is travel distance, discounted for cells inside goal zones (a gentle attractor)
                 if (hasGoals)
                     travel = MathF.Max(travel - (hints.GoalScore(p) * GoalWorthYalms), 0f);

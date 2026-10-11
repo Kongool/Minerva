@@ -171,11 +171,20 @@ public sealed class AIHints
     /// AI hands it to the navmesh follower whenever no danger needs answering (<see cref="QuestBattle.QuestBattle"/>).</summary>
     public IReadOnlyList<Vector3>? QuestTravel;
 
+    /// <summary>How far a dodge may land from the cheapest safe spot, in yalms, so characters standing together do not
+    /// all walk to the same cell (<see cref="LandingSpread"/>); 0 is off. Set per frame by the caller, with whose taste
+    /// it is (<see cref="LandingSeed"/>).</summary>
+    public float LandingSpread;
+
+    public ulong LandingSeed;
+
     public void Clear()
     {
         this.RoleplayKitRange = 0f;
         this.QuestDriven = false;
         this.QuestTravel = null;
+        this.LandingSpread = 0f;
+        this.LandingSeed = 0ul;
         this.touchZones = [];
         this.touchValid = false;
         this.ForbiddenZones.Clear();

@@ -143,6 +143,14 @@ public sealed class Configuration : IPluginConfiguration
     public float AutoDodgeClearanceLead { get; set; } = 1f;
 
     /// <summary>
+    /// How far a dodge may land from the nearest safe spot, in yalms, so characters standing together do not all walk
+    /// to the same cell and move as one block (<see cref="LandingSpread"/>). Each character has its own fixed taste, so
+    /// nothing is set per character. It costs a little walking, never safety: only spots the dodge already accepts,
+    /// at most half the walk and half the time to spare. Clamped to [0, 5]; 0 is off.
+    /// </summary>
+    public float DodgeLandingSpread { get; set; } = 2f;
+
+    /// <summary>
     /// Which side of the target to stand on when the dodge has a free choice. Only a tiebreak: it never
     /// sends the character somewhere unsafe, and never across the arena, to satisfy a positional.
     /// </summary>

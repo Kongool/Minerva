@@ -251,6 +251,15 @@ public sealed class MainWindow : Window, IDisposable
                 }
                 UiKit.Tip("Be clear this early. Costs uptime, buys margin.");
 
+                Key("Landing spread");
+                var spread = cfg.DodgeLandingSpread;
+                if (ImGui.SliderFloat("##spread", ref spread, 0f, 5f, "%.1f y"))
+                {
+                    cfg.DodgeLandingSpread = Math.Clamp(spread, 0f, 5f);
+                    changed = true;
+                }
+                UiKit.Tip("How far apart characters land when they dodge the same thing. 0 = everyone takes the nearest spot.");
+
                 // Per-role bands, boss fights only: min / preferred / max yalms off the hitbox. On trash the backline
                 // keeps no band (it dodges, and walks in only when out of reach).
                 changed |= BandRow("Healer band", "##healerband",

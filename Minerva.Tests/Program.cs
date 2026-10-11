@@ -5608,6 +5608,47 @@ t.Section("A hand-played solo duty becomes a quest script draft");
 }
 
 
+// The user, 2026-10-11: "can we add a landing variance for dodging? so we all dont just huddle and move to same spot as
+// our other bots". Characters standing together all took the cheapest safe cell, which is the same cell.
+t.Section("Characters that dodge together land apart");
+{
+    var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    var center = new WPos(100f, 100f);
+    SafeSpot Dodge(ulong seed, float spread, double secondsOut)
+    {
+        // eight characters on one spot, a 8y circle on them
+        var hints = new AIHints { Center = center, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = center, LandingSeed = seed, LandingSpread = spread };
+        hints.AddForbiddenZone(new AOEShapeCircle(8f), center, default, now.AddSeconds(secondsOut));
+        return ArenaPathfinder.Solve(hints, now, horizonSeconds: 5f);
+    }
+    float Walk(SafeSpot spot) => (spot.Target - center).Length();
+
+    var plain = Dodge(0x1001, 0f, 5d);
+    t.True("with no spread everyone takes the same spot", plain.Found && Enumerable.Range(0, 8).All(i => Dodge(0x1001ul + (ulong)i, 0f, 5d).Target == plain.Target));
+
+    var landed = Enumerable.Range(0, 8).Select(i => Dodge(0x1001ul + (ulong)i, 3f, 5d)).ToList();
+    t.True("with 3y of spread they land in different places", landed.Select(l => l.Target).Distinct().Count() >= 6);
+    t.True("every one of them clear of the circle", landed.All(l => l.Found && Walk(l) > 8f));
+    t.True("and none walks more than the spread further", landed.All(l => Walk(l) <= Walk(plain) + 3f + 0.75f));
+    t.True("a character's own spot does not change from frame to frame", Dodge(0x1003, 3f, 5d).Target == landed[2].Target);
+
+    // tight: 1.6s to walk 8y and more at 6y/s leaves about a yalm to spare, and half of that is all the spread gets
+    var tightPlain = Dodge(0x1001, 0f, 1.6d);
+    var tight = Enumerable.Range(0, 8).Select(i => Dodge(0x1001ul + (ulong)i, 3f, 1.6d)).ToList();
+    t.True("a tight dodge still takes about the nearest spot", tightPlain.Found && tight.All(l => l.Found && Walk(l) > 8f && Walk(l) <= Walk(tightPlain) + 0.75f));
+
+    var cell = new WPos(104.3f, 97.8f);
+    t.True("a cell's worth is fixed, within the spread, and differs by character",
+        LandingSpread.Worth(7, cell, 3f) == LandingSpread.Worth(7, new WPos(104.9f, 97.1f), 3f)
+        && Enumerable.Range(0, 64).All(i => LandingSpread.Worth((ulong)i, cell, 3f) is >= 0f and < 3f)
+        && Enumerable.Range(0, 64).Select(i => LandingSpread.Worth((ulong)i, cell, 3f)).Distinct().Count() > 48
+        && LandingSpread.Worth(7, cell, 0f) == 0f);
+    var short_ = new AIHints { LandingSeed = 7, LandingSpread = 3f };
+    t.True("worth at most half the walk, and half the time to spare", LandingSpread.Discount(short_, cell, 1f, float.MaxValue) <= 0.5f
+        && LandingSpread.Discount(short_, cell, 10f, 0.4f) <= 0.2f);
+}
+
+
 // The Oracle of Light, newtoon1 and newtoon2, 2026-10-04: the script planned its route and stood still, because the walk
 // asked "more than the hold to go before a gaze?" and the countdown is NaN when no gaze is coming.
 t.Section("No gaze coming holds no walk");
