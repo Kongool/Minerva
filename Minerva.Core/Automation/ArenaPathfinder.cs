@@ -1149,18 +1149,20 @@ public static class ArenaPathfinder
                 if (moveSpeed > 0f && timeBudget != float.MaxValue && travel / moveSpeed > timeBudget)
                     continue;                                   // cannot get there before it lands
 
-                // each character's own taste among cells of similar cost, paid for out of the walk and the time to spare
-                if (hints.LandingSpread > 0f)
+                // Prefer ground with room around it. Everything reaching this line already passed the
+                // margin, so this is not a safety test — it is the difference between clear and barely.
+                var shortfall = ClearanceFloor - hints.ClearanceAt(p, deadline, ClearanceFloor);
+
+                // Each character's own taste among cells of similar cost, paid for out of the walk and the time to
+                // spare -- and only among cells with room around them. In a gap thinner than that every yalm of
+                // clearance is the dodge, and none of it is traded for variety.
+                if (hints.LandingSpread > 0f && shortfall <= ClearanceFloor - RoomyYalms)
                     travel -= LandingSpread.Discount(hints, p, travel, moveSpeed > 0f && timeBudget != float.MaxValue ? (timeBudget * moveSpeed) - travel : float.MaxValue);
 
                 // cost is travel distance, discounted for cells inside goal zones (a gentle attractor)
                 if (hasGoals)
                     travel = MathF.Max(travel - (hints.GoalScore(p) * GoalWorthYalms), 0f);
                 var cost = travel * travel;
-
-                // Prefer ground with room around it. Everything reaching this line already passed the
-                // margin, so this is not a safety test — it is the difference between clear and barely.
-                var shortfall = ClearanceFloor - hints.ClearanceAt(p, deadline, ClearanceFloor);
                 if (shortfall > 0f)
                     cost += shortfall * shortfall * ClearanceWeight;
 
@@ -1195,6 +1197,10 @@ public static class ArenaPathfinder
         // cut through the same puddles the route keeps clear of. The cell the player stands in can be kept as a
         // corner of its own; steering at that would be steering at your feet.
         var route = grid.Route(player, best);
+        // the route ends on the cell; the character ends in the middle of the gap the cell is in
+        var stand = MiddleOfTheGap(hints, deadline, best, cellSize);
+        if (stand != best && route.Count > 0)
+            route[^1] = stand;
         var waypoint = route[^1];
         foreach (var corner in route)
         {
@@ -1204,7 +1210,60 @@ public static class ArenaPathfinder
                 break;
             }
         }
-        spot = new SafeSpot(true, true, best, (waypoint - player).Normalized(), waypoint, route);
+        spot = new SafeSpot(true, true, stand, (waypoint - player).Normalized(), waypoint, route);
         return true;
+    }
+
+    /// <summary>A spot with this much room around it is taken as the grid gives it.</summary>
+    private const float RoomyYalms = 1f;
+
+    /// <summary>
+    /// In a gap thinner than the grid, the roomiest point within a cell of the one chosen; the cell itself where it
+    /// already has <see cref="RoomyYalms"/> around it, which is every ordinary dodge.
+    /// <para>A cell's centre is only where the grid happened to fall. Accept No Imitators, 2026-10-11: four wind
+    /// spheres and a Cyclone Crossing left wedges about 1.3y across, the cell Korha was sent to had 0.10y of room and
+    /// a point half a yalm from it had 0.66y; he stopped 0.3y short of the cell, 0.14y inside a sphere, and took
+    /// three Made Magic in a row. Saar's cell had 0.29y against 0.67y next to it.</para>
+    /// </summary>
+    private static WPos MiddleOfTheGap(AIHints hints, DateTime deadline, WPos cell, float cellSize)
+    {
+        var best = cell;
+        var room = Room(hints, deadline, cell);
+        if (room >= RoomyYalms)
+            return cell;
+        const int Steps = 4;   // a quarter of a cell
+        for (var dz = -Steps; dz <= Steps; ++dz)
+        {
+            for (var dx = -Steps; dx <= Steps; ++dx)
+            {
+                var p = cell + new WDir(dx * cellSize / Steps, dz * cellSize / Steps);
+                // danger asked outright as well: a zone that cannot measure a distance adds no room, and still fires
+                if (hints.Misplaced(p) || hints.InImminentDanger(p, deadline))
+                    continue;
+                var r = Room(hints, deadline, p);
+                if (r > room + 0.01f)
+                {
+                    room = r;
+                    best = p;
+                }
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Room around a point up to <see cref="RoomyYalms"/>: to the nearest zone, and to the arena's edge.</summary>
+    private static float Room(AIHints hints, DateTime deadline, WPos p)
+    {
+        var room = hints.ClearanceAt(p, deadline, RoomyYalms);
+        // the edge has no distance to ask for: step out a quarter yalm at a time, eight ways
+        for (var r = 0.25f; r <= room; r += 0.25f)
+        {
+            for (var i = 0; i < 8; ++i)
+            {
+                if (!hints.Bounds.Contains(hints.Center, p + (r * (45f * i).Degrees().ToDirection())))
+                    return r - 0.25f;
+            }
+        }
+        return room;
     }
 }

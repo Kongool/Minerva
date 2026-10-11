@@ -5657,6 +5657,34 @@ t.Section("A walk is finished, not stopped half a yalm short");
 }
 
 
+// Accept No Imitators, Korha and Saar 2026-10-11: four wind spheres and a Cyclone Crossing leave wedges about 1.3y across.
+// The cell Korha was sent to had 0.10y of room and a point half a yalm from it 0.66y; he stopped 0.3y short of the cell,
+// 0.14y inside a sphere, and took three Made Magic in a row.
+t.Section("In a gap thinner than the grid, the dodge stands in the middle of it");
+{
+    var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    var center = new WPos(500f, -310f);
+    AIHints Metamorph(WPos player, ulong seed = 0, float spread = 0f)
+    {
+        var hints = new AIHints { Center = center, Bounds = new ArenaBoundsCircle(25f), PlayerPosition = player, LandingSeed = seed, LandingSpread = spread };
+        foreach (var sphere in new WPos[] { new(494.5f, -304.5f), new(505.5f, -304.5f), new(494.5f, -315.5f), new(505.5f, -315.5f) })
+            hints.AddForbiddenZone(new AOEShapeCircle(17.5f), sphere, default, now.AddSeconds(5));
+        hints.AddForbiddenZone(new AOEShapeCross(60f, 8f), center, (-167.003f).Degrees(), now.AddSeconds(6));
+        return hints;
+    }
+    float RoomAt(WPos p) => Metamorph(p).ClearanceAt(p, now.AddSeconds(30), 4f);
+
+    var stood = new WPos(496.96f, -287.32f);   // where Korha stood
+    t.True("the grid cell he was sent to has a tenth of a yalm around it", RoomAt(new WPos(497f, -287f)) is > 0f and < 0.2f);
+    var spot = ArenaPathfinder.Solve(Metamorph(stood), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True("the dodge now aims at a point with half a yalm or more", spot.NeedToMove && spot.Found && RoomAt(spot.Target) >= 0.5f);
+    t.True("within a yalm of that cell, and on the floor", (spot.Target - new WPos(497f, -287f)).Length() <= 1.5f && (spot.Target - center).Length() < 25f);
+
+    var spots = Enumerable.Range(0, 8).Select(i => ArenaPathfinder.Solve(Metamorph(stood, 0x2001ul + (ulong)i, 3f), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f).Target).ToList();
+    t.True("and landing spread buys no variety with clearance there: every character keeps the room", spots.All(s => RoomAt(s) >= RoomAt(spot.Target) - 0.05f && (s - spot.Target).Length() <= 0.5f));
+}
+
+
 // The user, 2026-10-11: "can we add a landing variance for dodging? so we all dont just huddle and move to same spot as
 // our other bots". Characters standing together all took the cheapest safe cell, which is the same cell.
 t.Section("Characters that dodge together land apart");
