@@ -59,6 +59,7 @@ public sealed class RouteGrid
     private readonly int[] came;
     private readonly bool[] intoHit;  // the route here steps into something new that fires before it is crossed
     private readonly ulong pending;   // zones that have not fired yet: telegraphs, as against ground already live
+    private readonly AIHints hints;
 
     public int Width => this.w;
     public int Height => this.h;
@@ -78,6 +79,7 @@ public sealed class RouteGrid
     {
         this.cell = cellSize;
         this.speed = moveSpeed;
+        this.hints = hints;
         var center = hints.Center;
         // wide enough to hold a character who is a little way outside the arena, so there is a route back in
         var reach = MathF.Max(hints.Bounds.Radius, MathF.Min((player - center).Length() + cellSize, hints.Bounds.Radius + MaxOutsideReach));
@@ -186,6 +188,20 @@ public sealed class RouteGrid
         }
 
         return depth;
+    }
+
+    /// <summary>Is the cell's centre inside one of these zones proper, not merely within the margin of it?</summary>
+    private bool InsideAny(int cell, ulong zoneMask)
+    {
+        if (zoneMask == 0)
+            return false;
+        var p = this.Center(cell % this.w, cell / this.w);
+        for (var k = 0; k < Math.Min(this.hints.ForbiddenZones.Count, 63); ++k)
+        {
+            if ((zoneMask & (1ul << k)) != 0 && this.hints.ForbiddenZones[k].Contains(p))
+                return true;
+        }
+        return false;
     }
 
     public bool TryCellOf(WPos p, out int x, out int z)
@@ -376,6 +392,19 @@ public sealed class RouteGrid
         this.length[start] = 0f;
         var startZones = this.zones[start];   // what the character is standing in: leaving it is not a new hit
 
+        // ... and what it is only standing beside. A cell holds every zone within the safety margin of it, so a
+        // character a step outside a telegraph has that telegraph among its own, and walking the whole width of it was
+        // "leaving". Elm Gigas, 2026-10-11: Korha stood 0.8y clear of an Ancient Aero line due in a second when another
+        // landed on him, due in three; the way out of the second ran straight across the first, and he was in the
+        // middle of it when it fired. Beside one, stepping into it is the hit, the same as for any other.
+        var beside = 0ul;
+        for (var k = 0; k < Math.Min(this.hints.ForbiddenZones.Count, 63); ++k)
+        {
+            var bit = 1ul << k;
+            if ((startZones & this.pending & bit) != 0 && !this.hints.ForbiddenZones[k].Contains(player))
+                beside |= bit;
+        }
+
         // From outside the floor, outside ground is the way back in and nothing else: each step through it must be
         // nearer the floor than the last. Priced like floor and walkable in any direction, it was also a way AROUND:
         // Appalling Behavior, 2026-09-26, Saar stood 0.8y past the 18y floor with a circle about to fire between him and
@@ -446,7 +475,7 @@ public sealed class RouteGrid
                             // only a telegraph that has not gone off yet: a puddle or an orbiting hazard that is already
                             // live is ground to cross at a price, and stepping over one to escape something worse is
                             // often the right call (Elm Gigas' capsules, 2026-09-26, held a character inside a cyclone)
-                            hit = (this.zones[j] & ~startZones & this.pending) != 0;
+                            hit = (this.zones[j] & ~startZones & this.pending) != 0 || this.InsideAny(j, this.zones[j] & beside);
                         }
                     }
                     var next = baseCost + (step * penalty);

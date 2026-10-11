@@ -5608,6 +5608,41 @@ t.Section("A hand-played solo duty becomes a quest script draft");
 }
 
 
+// Elm Gigas, Korha 2026-10-11: a step outside an Ancient Aero line due in half a second, with another on top of him due
+// in two and a half, the way out of the second ran across the first, and he was in the middle of it when it fired.
+// Standing beside a telegraph is not standing in it: the cell holds every zone within the margin, and "leaving" a zone
+// was allowed to mean walking its whole width.
+t.Section("Beside a line about to fire, the way out does not cross it");
+{
+    var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    var line = new AOEShapeRect(70f, 3f);
+    WPos firstFrom = new(-401.5f, 727.7f), secondFrom = new(-417.7f, 711.4f);
+    Angle firstRot = (-166.585f).Degrees(), secondRot = 172.584f.Degrees();
+    AIHints Lines(WPos player)
+    {
+        var hints = new AIHints { Center = new WPos(-390f, 700f), Bounds = new ArenaBoundsCircle(27.5f), PlayerPosition = player };
+        hints.AddForbiddenZone(line, firstFrom, firstRot, now.AddSeconds(0.5));
+        hints.AddForbiddenZone(line, secondFrom, secondRot, now.AddSeconds(2.5));
+        return hints;
+    }
+
+    // where he stood: 0.4y outside the first line's edge, inside the second
+    var beside = new WPos(-414.2f, 688.7f);
+    t.True("the spot is beside the first line and in the second", !line.Check(beside, firstFrom, firstRot) && line.Check(beside, secondFrom, secondRot));
+    var spot = ArenaPathfinder.Solve(Lines(beside), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    var crosses = false;
+    if (spot.NeedToMove)
+        for (var i = 1; i <= 20; ++i)
+            crosses |= line.Check(beside + ((spot.Target - beside) * (i / 20f)), firstFrom, firstRot);
+    t.True("the answer does not walk through the line about to fire", spot.Found && !crosses);
+
+    // actually standing in it is different: crossing it is the way out, as before
+    var within = new WPos(-411.5f, 688.7f);
+    var leave = ArenaPathfinder.Solve(Lines(within), now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: 6f, clearanceLead: 1f);
+    t.True("standing in the line, the dodge still leaves it", leave.NeedToMove && leave.Found && !line.Check(leave.Target, firstFrom, firstRot));
+}
+
+
 // Elm Gigas, Saar 2026-10-11: sent to a cell in a 0.8y gap, the follower stopped half a yalm short of it, 0.1y inside a
 // cross arm, and he stood there for 3.8s with the dodge asking for a move the follower would not make.
 t.Section("A walk is finished, not stopped half a yalm short");
