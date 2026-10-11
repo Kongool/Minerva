@@ -30,7 +30,8 @@ namespace Minerva.Automation;
 /// </summary>
 public sealed unsafe class MovementController : IMovementController, IDisposable
 {
-    // Stop overriding once we're within this radius of the target, so we glide in instead of jittering on top of it.
+    // Two targets or two corners this close are the same one: a route is re-issued only when it moves by more.
+    // (Where a walk stops is FinalApproach.Reached.)
     private const float ArrivalRadius = 0.5f;
 
     /// <summary>
@@ -153,7 +154,9 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
             var bends = route is { Count: > 1 };
             if (!bends && this.nav.CanSteer && GameData.TryLocalPlayerPose(out var here, out _))
             {
-                this.nav.Steer(new Vector3(target.X, here.Y, target.Z));
+                // the follower stops half a yalm short of what it is steered at; finish the walk (FinalApproach)
+                var aim = FinalApproach.Aim(new WPos(here.X, here.Z), target);
+                this.nav.Steer(new Vector3(aim.X, here.Y, aim.Z));
                 this.Mode = Mover.NavSteer;
                 this.navTarget = target;
                 this.navRoute = route;
@@ -347,7 +350,7 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
             return false;
 
         var toDest = dest - new WPos(pos3.X, pos3.Z);
-        if (toDest.LengthSq() <= ArrivalRadius * ArrivalRadius)
+        if (toDest.LengthSq() <= FinalApproach.Reached * FinalApproach.Reached)
             return false; // close enough — stop steering so we don't oscillate on the target
 
         var worldAngle = toDest.Normalized().ToAngle();

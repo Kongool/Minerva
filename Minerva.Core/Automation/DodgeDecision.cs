@@ -104,6 +104,31 @@ public static class GazeHold
     public static bool Holds(float secondsUntilGaze) => secondsUntilGaze <= Seconds;
 }
 
+/// <summary>
+/// The last half-yalm of a walk. The followers call a point reached half a yalm short of it (Ariadne's steer stops there,
+/// and our own hook did), which is harmless when the spot has a yalm of clearance and not when it is a gap thinner than
+/// that. Elm Gigas, Saar 2026-10-11: sent to a cell in a 0.8y gap between two Inspirited Crosswinds arms, he stopped
+/// 0.5y short of it, 0.1y inside one arm, and stood there for 3.8 seconds with the dodge asking for a move the follower
+/// would not make; the arm hit him. While that close the steer is aimed a yalm on through the point, so the follower
+/// keeps walking, until the character is within <see cref="Reached"/> of it.
+/// </summary>
+public static class FinalApproach
+{
+    /// <summary>How close to its target a follower stops, in yalms.</summary>
+    public const float FollowerStops = 0.5f;
+
+    /// <summary>How close is close enough for us: a couple of frames of walking, so the walk cannot step over it.</summary>
+    public const float Reached = 0.2f;
+
+    /// <summary>Where to steer to end within <see cref="Reached"/> of <paramref name="target"/>.</summary>
+    public static WPos Aim(WPos here, WPos target)
+    {
+        var to = target - here;
+        var d = to.Length();
+        return d <= Reached || d > FollowerStops + 0.25f ? target : here + (to / d * (FollowerStops + 0.5f));
+    }
+}
+
 /// <summary>Which mover a steer went through. Mirrors the plugin's movement controller so a log can say
 /// whether a steer had anything under it.</summary>
 public enum Mover : byte

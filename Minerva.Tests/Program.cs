@@ -5608,6 +5608,20 @@ t.Section("A hand-played solo duty becomes a quest script draft");
 }
 
 
+// Elm Gigas, Saar 2026-10-11: sent to a cell in a 0.8y gap, the follower stopped half a yalm short of it, 0.1y inside a
+// cross arm, and he stood there for 3.8s with the dodge asking for a move the follower would not make.
+t.Section("A walk is finished, not stopped half a yalm short");
+{
+    var target = new WPos(-401.5f, 684.5f);
+    t.True("far off, the steer is at the spot itself", FinalApproach.Aim(new WPos(-409.9f, 686f), target) == target);
+    var stopped = new WPos(-402f, 684.6f);   // where he stopped
+    var aim = FinalApproach.Aim(stopped, target);
+    t.True("half a yalm short, it is aimed on through the spot, past where the follower stops",
+        (aim - stopped).Length() > FinalApproach.FollowerStops + 0.25f && (aim - stopped).Normalized().Dot((target - stopped).Normalized()) > 0.999f);
+    t.True("on the spot, the steer is the spot, and the follower stops", FinalApproach.Aim(new WPos(-401.6f, 684.5f), target) == target);
+}
+
+
 // The user, 2026-10-11: "can we add a landing variance for dodging? so we all dont just huddle and move to same spot as
 // our other bots". Characters standing together all took the cheapest safe cell, which is the same cell.
 t.Section("Characters that dodge together land apart");
