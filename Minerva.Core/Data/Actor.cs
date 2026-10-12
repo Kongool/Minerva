@@ -63,6 +63,7 @@ public enum ActorType : ushort
 {
     None = 0,
     Player = 0x104,
+    Part = 0x201, // a piece of a boss that is a target of its own: the Voracious Maw that holds whoever the Decaying Gourmand ate
     Pet = 0x202,
     Chocobo = 0x203,
     Enemy = 0x205,

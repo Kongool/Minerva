@@ -792,6 +792,19 @@ t.Section("Auto-dodge pathfinding");
         idle.SeedPotentialTargets([Mob(4, 1f, 1f, combat: false)]);
         t.Eq("a mob out of combat is not one to pull", idle.PotentialTargets[0].Priority, AIHints.Enemy.PriorityUndesirable);
 
+        // The Decaying Gourmand, 2026-10-11: the Voracious Maw that holds whoever was eaten is a part of the boss, not
+        // an enemy of its own kind, and it has to die first.
+        static Actor Part(ulong id, bool targetable = true)
+            => new(id, 0xA81u, (int)id, "maw", 0u, ActorType.Part, new Vector4(0f, 0f, 2f, 0f), 2.85f) { InCombat = true, IsTargetable = targetable };
+        var eaten = new AIHints();
+        eaten.SeedPotentialTargets([near, Part(20)]);
+        t.Eq("a boss's part is a potential target too", eaten.PotentialTargets.Count, 2);
+        eaten.SetPriority(eaten.PotentialTargets[1].Actor, 2);
+        t.True("and the one a module can put first", eaten.BestPrioritisedTarget(me, near.InstanceID, 0ul) is { InstanceID: 20ul });
+        var notYet = new AIHints();
+        notYet.SeedPotentialTargets([Part(21, targetable: false)]);
+        t.Eq("but not while it cannot be targeted", notYet.PotentialTargets.Count, 0);
+
         // nothing raised above the default: the caller keeps its own boss
         t.True("no priorities means no answer", pack.BestPrioritisedTarget(me, 0ul, 0ul) == null);
 

@@ -976,12 +976,14 @@ public sealed class AIHints
     /// that". BossmodReborn scores its own list the same way (aggro table or attacking the party, else passive).
     /// <para>Modules seed this so their priority calls have something to act on; trash seeds it so the walk back to
     /// uptime has a target at all.</para>
+    /// <para>A boss's part counts. The Decaying Gourmand, 2026-10-11: the Voracious Maw is one, it was never in this
+    /// list, and so no module could have said "kill that first" while Korha sat inside it for 12.8s.</para>
     /// </summary>
     public void SeedPotentialTargets(IEnumerable<Actor> actors)
     {
         foreach (var a in actors)
         {
-            if (a.Type != ActorType.Enemy || a.IsAlly || a.IsDeadOrDestroyed || !a.IsTargetable)
+            if (a.Type is not (ActorType.Enemy or ActorType.Part) || a.IsAlly || a.IsDeadOrDestroyed || !a.IsTargetable)
                 continue;
             this.PotentialTargets.Add(new Enemy(a, a.InCombat ? 0 : Enemy.PriorityUndesirable));
         }

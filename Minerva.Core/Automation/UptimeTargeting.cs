@@ -143,5 +143,5 @@ public static class UptimeTargeting
         return reach < 1f ? null : from + (to.Normalized() * reach);
     }
 
-    private static bool IsHostile(Actor? a) => a is { IsDeadOrDestroyed: false, Type: ActorType.Enemy, IsAlly: false };
+    private static bool IsHostile(Actor? a) => a is { IsDeadOrDestroyed: false, Type: ActorType.Enemy or ActorType.Part, IsAlly: false };
 }
