@@ -306,7 +306,9 @@ public sealed class ReplayService : IDisposable
     /// A big enemy, near the player, that the player is fighting. The rule itself lives in
     /// <see cref="EncounterTrigger"/> so it can be tested without a game.
     /// </summary>
-    private Actor? UnknownBoss() => EncounterTrigger.NearbyEngagedBoss(this.modules.LocalPlayer(), this.world.Actors);
+    private Actor? UnknownBoss()
+        // inside a duty the game's own boss flag counts as well: there is no ambient elite to mistake for the fight
+        => EncounterTrigger.NearbyEngagedBoss(this.modules.LocalPlayer(), this.world.Actors, this.world.CurrentCFCID != 0 ? GameData.IsFlaggedBoss : null);
 
     private void OnActorDeath(Actor actor)
     {

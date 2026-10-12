@@ -3533,6 +3533,17 @@ t.Section("Auto-record only fires on the fight you are in");
     var untargetable = Make(7, ActorType.Enemy, 20f, 10f, 5_000_000u, ally: false, targetable: false);
     t.True("an untargetable boss does not start it", EncounterTrigger.NearbyEngagedBoss(me, [untargetable]) == null);
 
+    // The Lost City of Amdapor, 2026-10-11, synced: 7,300 HP players, a boss at five times that, trash at half. The
+    // HP rule alone never saw a low-level dungeon boss; the game's own flag for the enemy does.
+    var synced = Make(8, ActorType.Player, 0f, 0f, 7_300u, ally: true);
+    var gourmand = Make(9, ActorType.Enemy, 8f, 0f, 36_000u, ally: false);
+    var sandBat = Make(10, ActorType.Enemy, 4f, 0f, 3_439u, ally: false);
+    t.True("a synced dungeon boss is too small for the HP rule", EncounterTrigger.NearbyEngagedBoss(synced, [gourmand, sandBat]) == null);
+    t.True("but the game calls it a boss, and that starts it", ReferenceEquals(EncounterTrigger.NearbyEngagedBoss(synced, [sandBat, gourmand], oid => oid == gourmand.OID), gourmand));
+    t.True("trash the game does not flag still does not", EncounterTrigger.NearbyEngagedBoss(synced, [sandBat], oid => oid == gourmand.OID) == null);
+    var idleGourmand = Make(11, ActorType.Enemy, 8f, 0f, 36_000u, ally: false, inCombat: false);
+    t.True("nor a flagged boss nobody is fighting", EncounterTrigger.NearbyEngagedBoss(synced, [idleGourmand], _ => true) == null);
+
     // the boundary, so the constant cannot drift unnoticed
     var atEdge = Make(8, ActorType.Enemy, EncounterTrigger.MaxDistance - 1f, 0f, 5_000_000u, ally: false);
     var pastEdge = Make(9, ActorType.Enemy, EncounterTrigger.MaxDistance + 1f, 0f, 5_000_000u, ally: false);

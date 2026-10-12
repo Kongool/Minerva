@@ -87,6 +87,28 @@ internal static unsafe class GameData
             || c[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInQuestEvent];
     }
 
+    private static readonly Dictionary<uint, bool> bossByBase = [];
+
+    /// <summary>
+    /// Does the game's own sheet call this enemy a boss? BNpcBase.Rank is 2 or 6 for nearly every dungeon and trial
+    /// boss (37 of 39 dungeon modules' primary actors, every trial's and deep dungeon's; checked against 189 modules,
+    /// 2026-10-11). Not the other ranks: 0 is trash, adds and props, and 3 is trash the game merely marks -- the Lost
+    /// City of Amdapor's Hecteyes, Allotaurs and Dirty Eyes are all 3 at about one player's HP, and counting them
+    /// started two recordings on a trash pack. Bosses the sheet ranks otherwise (1 in the Occult Crescent, 0 for a
+    /// few alliance, criterion and treasure-hunt ones) are left to the HP rule (<see cref="EncounterTrigger"/>).
+    /// </summary>
+    public static bool IsFlaggedBoss(uint baseId)
+    {
+        if (baseId == 0)
+            return false;
+        if (bossByBase.TryGetValue(baseId, out var known))
+            return known;
+        var sheet = Service.DataManager.GetExcelSheet<Lumina.Excel.Sheets.BNpcBase>();
+        var boss = sheet != null && sheet.TryGetRow(baseId, out var row) && row.Rank is 2 or 6;
+        bossByBase[baseId] = boss;
+        return boss;
+    }
+
     public static ushort CurrentContentFinderConditionId()
     {
         var gm = GameMain.Instance();

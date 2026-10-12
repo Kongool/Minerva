@@ -24,8 +24,13 @@ public static class EncounterTrigger
     /// <summary>
     /// The enemy the player is fighting, or null. All three conditions have to hold at once — big, near,
     /// and mutually in combat — because each on its own is satisfied constantly in an open-world zone.
+    /// <para>"Big" is ten times the player's HP, or the game's own word for it (<paramref name="flaggedBoss"/>, by
+    /// the enemy's id): the HP rule was sized for content at level, and a synced low-level dungeon is another
+    /// scale. Cutter's Cry and the Lost City of Amdapor, 2026-10-11: players at 7,300 HP, trash at 0.2-0.5 times
+    /// that and bosses at 3.5-6.7 times, so no boss without a module was ever recorded. No multiple fits both: in a
+    /// current dungeon the trash is several times a player.</para>
     /// </summary>
-    public static Actor? NearbyEngagedBoss(Actor? player, IEnumerable<Actor> actors)
+    public static Actor? NearbyEngagedBoss(Actor? player, IEnumerable<Actor> actors, Func<uint, bool>? flaggedBoss = null)
     {
         if (player == null || player.HPMP.MaxHP == 0 || !player.InCombat)
             return null;
@@ -36,7 +41,7 @@ public static class EncounterTrigger
         {
             if (a.IsAlly || !a.InCombat || !a.IsTargetable || a.IsDeadOrDestroyed)
                 continue;
-            if (a.HPMP.CurHP == 0 || a.HPMP.MaxHP < floor)
+            if (a.HPMP.CurHP == 0 || a.HPMP.MaxHP < floor && flaggedBoss?.Invoke(a.OID) != true)
                 continue;
             if ((a.Position - player.Position).LengthSq() > reachSq)
                 continue;
