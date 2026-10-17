@@ -5357,10 +5357,9 @@ t.Section("Pending effects");
 
 // ---- Timeline: NextTransitionWithFlag ----
 //
-// Built from the module author's DECLARED durations, anchored at the cast that last moved the pointer.
-// BossmodReborn does the same, so a ported component gets the answer it was written against -- including
-// DateTime.MaxValue for "I cannot say", which is part of the contract rather than a stub: a fight that has
-// gone off-script must not invent a time.
+// Built from the module author's DECLARED durations, from the state the machine is in. BossmodReborn does the same,
+// so a ported component gets the answer it was written against -- including DateTime.MaxValue for "I cannot say",
+// which is part of the contract rather than a stub: a fight that has gone off-script must not invent a time.
 {
     var tlWs = new WorldState(1000UL, "test");
     const ulong tlBossId = 0x1000UL;
@@ -5372,15 +5371,20 @@ t.Section("Pending effects");
     tlM.BuildStates();   // states are built explicitly, not by Update
     tlM.Update();
 
-    t.True("no cast seen yet -> no active state", tlM.StateMachine.ActiveState == null);
-    t.True("and no answer, rather than a guess",
+    t.True("before the pull a timeline has not started", tlM.StateMachine.ActiveState == null && tlM.StateMachine.ActivePhaseIndex == -1);
+    t.True("and gives no answer, rather than a guess",
         tlM.StateMachine.NextTransitionWithFlag(StateMachine.StateHint.Raidwide) == DateTime.MaxValue);
+
+    tlWs.Execute(new ActorState.OpCombat(tlBossId, true));
+    tlM.Update();
+    t.True("the pull starts it, waiting on the opener's cast", tlM.StateMachine.ActiveState is { Name: "" } && tlM.StateMachine.ActivePhaseIndex == 0);
 
     var tl0 = tlWs.CurrentTime;
     tlWs.Execute(new ActorState.OpCastInfo(tlBossId, new ActorCastInfo { Action = ActionID.MakeSpell(7001u), TotalTime = 5f }));
-    t.True("the opener's cast moves the pointer onto its state", tlM.StateMachine.ActiveState?.Name == "opener");
+    tlM.Update();
+    t.True("the opener's cast moves it onto the opener", tlM.StateMachine.ActiveState?.Name == "opener");
 
-    // opener 5 + buster 7 + wide 8 = 20s from the transition
+    // opener 5 + buster's wait 3 and cast 4 + wide's wait 2 and cast 6 = 20s from the transition
     var tlWide = tlM.StateMachine.NextTransitionWithFlag(StateMachine.StateHint.Raidwide);
     t.Near("raidwide is the sum of declared durations up to and including it",
         (float)(tlWide - tl0).TotalSeconds, 20f, 0.2f);
@@ -5394,10 +5398,77 @@ t.Section("Pending effects");
         tlM.StateMachine.NextTransitionWithFlag(StateMachine.StateHint.Knockback) == DateTime.MaxValue);
 
     tlWs.Execute(new ActorState.OpCastInfo(tlBossId, null));
+    tlM.Update();
     tlWs.Execute(new ActorState.OpCastInfo(tlBossId, new ActorCastInfo { Action = ActionID.MakeSpell(7002u), TotalTime = 4f }));
+    tlM.Update();
     t.True("the next cast moves it again", tlM.StateMachine.ActiveState?.Name == "buster");
     t.True("and the raidwide is nearer than it was",
         tlM.StateMachine.NextTransitionWithFlag(StateMachine.StateHint.Raidwide) < tlWide);
+}
+
+// ---- State machine: states switch components on and off, phases clear them ----
+//
+// Another Mount Rokkon against Splatoon's presets, 2026-10-17: everything a state activated used to be on for the
+// whole phase and nothing was switched off, so components that remember (Gorai's cross, Moko's Oni's Claw, Unnatural
+// Wail's targets) drew stale danger all fight. Now the states run as BossmodReborn runs them.
+{
+    var smWs = new WorldState(1000UL, "test");
+    const ulong smBossId = 0x1100UL;
+    smWs.Execute(new WorldState.OpFrameStart(Frame(smWs, 0), TimeSpan.Zero));
+    smWs.Execute(new ActorState.OpCreate(smBossId, 0x9100u, 1, "boss", 0, ActorType.Enemy,
+        new Vector4(0, 0, 0, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    var sm = new StateTestModule(smWs, smWs.Actors.Find(smBossId)!) { Arena = new NullArena() };
+    sm.BuildStates();
+    sm.Update();
+    t.True("before the pull nothing a state switches on is on", sm.FindComponent<StateCompA>() == null && sm.FindComponent<StateKeep>() == null);
+    t.Eq("and the module's own update has not run", sm.ModuleUpdates, 0);
+
+    smWs.Execute(new ActorState.OpCombat(smBossId, true));
+    sm.Update();
+    t.True("the pull enters the first state, and what it switches on is on", sm.FindComponent<StateCompA>() != null && sm.FindComponent<StateKeep>() != null);
+    t.True("the module's own update runs once the fight is on", sm.ModuleUpdates > 0);
+
+    smWs.Execute(new ActorState.OpCastInfo(smBossId, new ActorCastInfo { Action = ActionID.MakeSpell(8001u), TotalTime = 3f }));
+    sm.Update();
+    t.True("its cast moves the walk on, and the component stays for the cast", sm.StateMachine.ActiveState?.Name == "a" && sm.FindComponent<StateCompA>() != null);
+    smWs.Execute(new ActorState.OpCastInfo(smBossId, null));
+    sm.Update();
+    t.True("the cast ending switches it off", sm.FindComponent<StateCompA>() == null);
+    var first = sm.FindComponent<StateCompB>();
+    t.True("and the next state switches its own on", sm.StateMachine.ActiveState?.Name == "b" && first != null);
+
+    smWs.Execute(new ActorState.OpCastEvent(smBossId, new ActorCastEvent(ActionID.MakeSpell(8002u), 0, default, default, 1)));
+    sm.Update();
+    var fresh = sm.FindComponent<StateCompB>();
+    t.True("a reset hands the next round a fresh component, not one that remembers", fresh != null && !ReferenceEquals(fresh, first) && fresh!.Hits == 0);
+    t.Eq("and the walk has gone on to the timeout", sm.StateMachine.ActiveState?.Name, "wait");
+
+    StateTestModuleStates.NextPhase = true;
+    sm.Update();
+    t.Eq("a phase change moves to the next phase", sm.StateMachine.ActivePhaseIndex, 1);
+    t.True("and clears the last phase's components", sm.FindComponent<StateCompB>() == null);
+    t.True("except one that keeps across phases", sm.FindComponent<StateKeep>() != null);
+    t.True("a phase that ends on its boss's death is not the module's own end", !sm.HasOwnEnd);
+    StateTestModuleStates.NextPhase = false;
+    sm.Dispose();
+}
+
+// a branch: whichever cast the boss starts picks the chain
+{
+    var fkWs = new WorldState(1000UL, "test");
+    const ulong fkBossId = 0x1200UL;
+    fkWs.Execute(new WorldState.OpFrameStart(Frame(fkWs, 0), TimeSpan.Zero));
+    fkWs.Execute(new ActorState.OpCreate(fkBossId, 0x9200u, 1, "boss", 0, ActorType.Enemy,
+        new Vector4(0, 0, 0, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    var fk = new ForkTestModule(fkWs, fkWs.Actors.Find(fkBossId)!) { Arena = new NullArena() };
+    fk.BuildStates();
+    fkWs.Execute(new ActorState.OpCombat(fkBossId, true));
+    fk.Update();
+    fkWs.Execute(new ActorState.OpCastInfo(fkBossId, new ActorCastInfo { Action = ActionID.MakeSpell(9002u), TotalTime = 4f }));
+    fk.Update();
+    t.Eq("a fork follows the cast that started", fk.StateMachine.ActiveState?.Name, "right");
+    t.True("and only that branch's component is on", fk.FindComponent<StateCompB>() != null && fk.FindComponent<StateCompA>() == null);
+    fk.Dispose();
 }
 
 // ---------------------------------------------------------------------------
@@ -6374,6 +6445,58 @@ sealed class KeptCircleAOE(ModuleBase module) : Minerva.Components.SimpleAOEs(mo
 
 sealed class TimelineModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(100f, 100f), new ArenaBoundsSquare(20f));
+
+// a two-phase fight: a cast, a component condition with a reset, a timeout; then a phase that ends on the boss's death
+sealed class StateTestModule(WorldState ws, Actor primary)
+    : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsSquare(20f))
+{
+    public int ModuleUpdates;
+    protected override void UpdateModule() => ++this.ModuleUpdates;
+}
+
+sealed class StateTestModuleStates : StateMachineBuilder
+{
+    public static bool NextPhase;
+    public StateTestModuleStates(ModuleBase module) : base(module)
+    {
+        this.SimplePhase(0, id =>
+        {
+            this.CastStart(id, 8001u, 0f).ActivateOnEnter<StateCompA>().ActivateOnEnter<StateKeep>();
+            this.CastEnd(id + 1, 3f, "a").DeactivateOnExit<StateCompA>();
+            this.ComponentCondition<StateCompB>(id + 0x10, 5f, c => c.Hits > 0, "b").ActivateOnEnter<StateCompB>().ResetComp<StateCompB>();
+            this.Timeout(id + 0x20, 100f, "wait");
+        }, "P1").Raw.Update = () => NextPhase;
+        this.DeathPhase(1, id => this.Timeout(id, 100f, "end"));
+    }
+}
+
+sealed class ForkTestModule(WorldState ws, Actor primary)
+    : ModuleBase(ws, primary, new WPos(0f, 0f), new ArenaBoundsSquare(20f));
+
+sealed class ForkTestModuleStates : StateMachineBuilder
+{
+    public ForkTestModuleStates(ModuleBase module) : base(module)
+        => this.DeathPhase(0, id => this.CastStartFork(id, new()
+        {
+            [9001u] = (1, b => this.CastEnd(b, 4f, "left").ActivateOnEnter<StateCompA>()),
+            [9002u] = (2, b => this.CastEnd(b, 4f, "right").ActivateOnEnter<StateCompB>()),
+        }, 0f));
+}
+
+sealed class StateCompA(ModuleBase module) : ModuleComponent(module);
+sealed class StateKeep(ModuleBase module) : ModuleComponent(module)
+{
+    public override bool KeepOnPhaseChange { get; set; } = true;
+}
+sealed class StateCompB(ModuleBase module) : ModuleComponent(module)
+{
+    public int Hits;
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == 8002u)
+            ++this.Hits;
+    }
+}
 
 // A linear stretch with a tankbuster and a raidwide behind it -- the shape NextTransitionWithFlag reasons about.
 sealed class TimelineModuleStates : StateMachineBuilder

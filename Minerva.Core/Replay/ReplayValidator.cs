@@ -344,6 +344,7 @@ public sealed class ReplayValidator
         world.Party.PlayerInstanceID = timeline.PlayerInstanceID;
         ModuleBase? module = null;
         var watched = new HashSet<uint>();
+        var learnt = new HashSet<ModuleComponent>(ReferenceEqualityComparer.Instance);
         var castCount = new SortedDictionary<uint, int>();
         var drawn = new HashSet<uint>();
         var helperCast = new HashSet<uint>(); // AIDs cast by Helpers (0x233C) — only ever mechanics
@@ -578,21 +579,30 @@ public sealed class ReplayValidator
             world.Execute(op);
             if (module == null)
             {
-                module = TryActivate(world, registry, watched);
+                module = TryActivate(world, registry);
                 if (module != null)
                 {
                     initialBounds = module.Bounds;
                     autos.UnionWith(AutoAttackIds(module));
-                    foreach (var c in module.Components)
-                    {
-                        if (c is Components.GenericGaze g && g.WatchedAction != 0)
-                            gazes.Add(g.WatchedAction);
-                        if (c is Components.GenericKnockback k && k.WatchedAction != 0)
-                            knockbacks.Add(k.WatchedAction);
-                    }
                 }
             }
             module?.Update();
+
+            // What the module watches, learnt from each component as it appears: a module with states switches them on
+            // as the fight goes, from the pull, and one learnt only at activation would watch nothing.
+            if (module != null)
+            {
+                foreach (var c in module.Components)
+                {
+                    if (!learnt.Add(c))
+                        continue;
+                    CollectWatchedActions(c, watched);
+                    if (c is Components.GenericGaze g && g.WatchedAction != 0)
+                        gazes.Add(g.WatchedAction);
+                    if (c is Components.GenericKnockback k && k.WatchedAction != 0)
+                        knockbacks.Add(k.WatchedAction);
+                }
+            }
             DrawCounts(module, countsAfter);
             // a Sprint request opens on the first decision that carries it; it came if Sprint (status 50) went up within
             // a second and a half of it
@@ -785,18 +795,14 @@ public sealed class ReplayValidator
         return new Result(module?.GetType().Name ?? (guess != null ? "(no module: cast-bar guesser)" : "(no module activated)"), castCount.Count, drawnList, hinted, uncoveredMechanics, uncoveredVisuals, arenaNote) with { Hits = hits, PovName = povName, Dumps = dumps, GazeNote = GazeSummary(gazeFrames, refaceFrames, holdFrames, impossibleFrames, maxArcs, gazeSamples), SprintNote = SprintSummary(sprintAsks), FrontNote = FrontSummary(frontSamples, frontFightSamples) };
     }
 
-    private static ModuleBase? TryActivate(WorldState world, ModuleRegistry registry, HashSet<uint> watched)
+    private static ModuleBase? TryActivate(WorldState world, ModuleRegistry registry)
     {
         if (world.CurrentCFCID == 0)
             return null;
         foreach (var info in registry.ForDuty(world.CurrentCFCID))
             foreach (var actor in world.Actors)
                 if (actor.OID == info.PrimaryActorOID && !actor.IsDestroyed)
-                {
-                    var module = info.Create(world, actor);
-                    CollectWatchedActions(module, watched);
-                    return module;
-                }
+                    return info.Create(world, actor);
         return null;
     }
 
@@ -1090,16 +1096,15 @@ public sealed class ReplayValidator
     // "handled" even though they draw no AOE zone. Any uint field whose name ends in Action qualifies:
     // CastCounter calls it WatchedAction, but CastStackSpread splits it into StackAction/SpreadAction, and
     // matching only the first name filed every cast-driven stack and spread as an uncovered mechanic.
-    private static void CollectWatchedActions(ModuleBase module, HashSet<uint> watched)
+    private static void CollectWatchedActions(ModuleComponent c, HashSet<uint> watched)
     {
-        foreach (var c in module.Components)
-            foreach (var f in c.GetType().GetFields())
-            {
-                if (f.FieldType == typeof(uint) && f.Name.EndsWith("Action", StringComparison.Ordinal))
-                    watched.Add((uint)f.GetValue(c)!);
-                else if (f.FieldType == typeof(uint[]) && f.Name is "AIDs" or "Actions" or "WatchedActions")
-                    foreach (var a in (uint[])f.GetValue(c)!)
-                        watched.Add(a);
-            }
+        foreach (var f in c.GetType().GetFields())
+        {
+            if (f.FieldType == typeof(uint) && f.Name.EndsWith("Action", StringComparison.Ordinal))
+                watched.Add((uint)f.GetValue(c)!);
+            else if (f.FieldType == typeof(uint[]) && f.Name is "AIDs" or "Actions" or "WatchedActions")
+                foreach (var a in (uint[])f.GetValue(c)!)
+                    watched.Add(a);
+        }
     }
 }

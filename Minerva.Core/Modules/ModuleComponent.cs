@@ -59,10 +59,8 @@ public abstract class ModuleComponent(ModuleBase module)
 
     /// <summary>
     /// Survive a phase change instead of being torn down with the phase that activated it.
-    /// <para>Components are deactivated on phase change because a phase can end at any moment; a few need
-    /// to persist across one — a lingering voidzone, a debuff that outlives the mechanic that applied it.
-    /// Minerva's phase machine does not tear components down today, so this is carried rather than acted
-    /// on, and setting it is harmless either way.</para>
+    /// <para>Components are cleared on a phase change because a phase can end at any moment; a few need
+    /// to persist across one — a lingering voidzone, a debuff that outlives the mechanic that applied it.</para>
     /// </summary>
     public virtual bool KeepOnPhaseChange { get; set; }
 

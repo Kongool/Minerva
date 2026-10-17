@@ -61,7 +61,8 @@ public abstract class ModuleBase : IDisposable
     private readonly EventSubscriptions subscriptions;
     private readonly HashSet<(byte index, uint state)> seenMapEffects = [];
     private StateMachineBuilder? states;
-    private int currentPhase = -1;
+    private bool machineBroken; // the state machine threw: it stops where it was, the components keep going
+    private bool moduleUpdateBroken; // UpdateModule threw: not called again for this encounter
 
     /// <param name="onlyLoadIfTargetable">BossmodReborn holds a module back until its boss is targetable,
     /// for fights whose primary actor exists long before the encounter starts. Minerva gates activation on
@@ -83,9 +84,6 @@ public abstract class ModuleBase : IDisposable
             {
                 if (a.CastInfo == null)
                     return;
-                // the timeline pointer moves on the same event the components see, so a component asking
-                // "when is the next raidwide" during OnCastStarted is answered against this cast, not the last
-                this.StateMachine.NotifyCastStarted(a.CastInfo.Action.ID, world.CurrentTime);
                 this.Dispatch(c => c.OnCastStarted(a, a.CastInfo));
             }),
             world.Actors.CastFinished.Subscribe((a, cast) => this.Dispatch(c => c.OnCastFinished(a, cast))),
@@ -106,9 +104,10 @@ public abstract class ModuleBase : IDisposable
     }
 
     /// <summary>
-    /// Instantiate the paired <c>&lt;Name&gt;States</c> builder (which declares the phases) and enter
-    /// phase 0, activating its components. Later phases are entered by <see cref="Update"/> as their
-    /// transitions fire.
+    /// Instantiate the paired <c>&lt;Name&gt;States</c> builder, which declares the phases and states. A module with
+    /// no states starts its machine here, entering phase 0 and activating its components, as it always has; one
+    /// with states starts on the pull (<see cref="Update"/>), as BossmodReborn's does, so its timeline counts from
+    /// the fight.
     /// </summary>
     public void BuildStates()
     {
@@ -120,7 +119,24 @@ public abstract class ModuleBase : IDisposable
         var statesType = this.GetType().Assembly.GetType(this.GetType().FullName + "States");
         if (statesType != null)
             this.states = (StateMachineBuilder)Activator.CreateInstance(statesType, this)!;
-        this.EnterPhase(0);
+        // Unguarded, as it always was: a component that throws on construction fails the module's creation, and the
+        // module manager tries again on a later frame, when what the component looks for may be there.
+        if (this.states is { Timeline.Count: 0 } stateless)
+            this.StateMachine.Start(stateless.Phases);
+    }
+
+    private void StartMachine()
+    {
+        try
+        {
+            this.StateMachine.Start(this.states!.Phases);
+        }
+        catch (Exception ex)
+        {
+            this.machineBroken = true;
+            var e = ex.GetBaseException();
+            this.ReportError($"State machine threw starting ({e.GetType().Name}: {e.Message}); it stays where it was for the rest of the encounter.");
+        }
     }
 
     /// <summary>
@@ -140,10 +156,10 @@ public abstract class ModuleBase : IDisposable
     public static BossModuleConfig WindowConfig => ConfigRoot.Instance.Get<BossModuleConfig>();
 
     /// <summary>When the current phase began; <c>default</c> before the machine starts.</summary>
-    public DateTime PhaseEnteredAt { get; private set; }
+    public DateTime PhaseEnteredAt => this.StateMachine.PhaseEnteredAt;
 
     /// <summary>Zero-based index of the phase currently running, or -1 before the machine starts.</summary>
-    public int CurrentPhase => this.currentPhase;
+    public int CurrentPhase => this.StateMachine.ActivePhaseIndex;
 
     /// <summary>The running machine, under BossmodReborn's name, so ported modules reach
     /// <c>StateMachine.ActivePhaseIndex</c> unchanged.</summary>
@@ -155,56 +171,13 @@ public abstract class ModuleBase : IDisposable
     /// </summary>
     public IReadOnlyList<StateMachineBuilder.State> Timeline => this.states?.Timeline ?? [];
 
-    // --- phase machine ---
-    private void EnterPhase(int index)
-    {
-        if (this.states == null || index < 0 || index >= this.states.Phases.Count)
-            return;
-        this.currentPhase = index;
-        this.PhaseEnteredAt = this.World.CurrentTime;
-        var phase = this.states.Phases[index];
-        foreach (var t in phase.EnterComponents)
-            this.ActivateComponent(t);
-
-        // setup a ported module hung on state entry — components activate above, this is everything else
-        for (var i = 0; i < phase.EnterActions.Count; ++i)
-            phase.EnterActions[i]();
-    }
-
-    private void ExitPhase()
-    {
-        if (this.states == null || this.currentPhase < 0 || this.currentPhase >= this.states.Phases.Count)
-            return;
-        foreach (var t in this.states.Phases[this.currentPhase].EnterComponents)
-            this.DeactivateComponent(t);
-    }
-
-    /// <summary>The module says when its fight is over: its last phase has an end condition (a ported <c>Raw.Update</c>
-    /// or <c>TransitionOn</c>). Such a module runs until that holds, not until its boss dies (see <see cref="ModuleLifetime"/>).</summary>
-    public bool HasOwnEnd => this.states is { Phases.Count: > 0 } s && s.Phases[^1].Transition != null;
+    /// <summary>The module says when its fight is over: its last phase has an end condition of its own (a ported
+    /// <c>Raw.Update</c> or <c>TransitionOn</c>, not just its boss dying). Such a module runs until that holds, not until
+    /// its boss dies (see <see cref="ModuleLifetime"/>).</summary>
+    public bool HasOwnEnd => this.states is { Phases.Count: > 0 } s && s.Phases[^1].Transition != null && !s.Phases[^1].EndsOnDeath;
 
     /// <summary>The end condition of <see cref="HasOwnEnd"/> has held.</summary>
-    public bool Finished { get; private set; }
-
-    // advance through as many phases as fire this frame (a guard prevents a bad predicate from looping forever)
-    private void AdvancePhase()
-    {
-        if (this.states == null)
-            return;
-        for (var guard = 0; this.currentPhase >= 0 && this.currentPhase < this.states.Phases.Count - 1 && guard < 16; ++guard)
-        {
-            var transition = this.states.Phases[this.currentPhase].Transition;
-            if (transition == null || !transition())
-                break;
-            this.ExitPhase();
-            this.EnterPhase(this.currentPhase + 1);
-        }
-
-        // the last phase's transition is the fight's own end; nothing reads it but this
-        if (!this.Finished && this.currentPhase == this.states.Phases.Count - 1
-            && this.states.Phases[this.currentPhase].Transition is { } end && end())
-            this.Finished = true;
-    }
+    public bool Finished => this.StateMachine.Finished;
 
     /// <summary>True if any actor of <paramref name="oid"/> exists in the world and is targetable.</summary>
     /// <summary>Is any actor of <paramref name="oid"/> in combat? Used by CheckPull to start a module when
@@ -370,6 +343,10 @@ public abstract class ModuleBase : IDisposable
             this.components.Remove(c);
     }
 
+    /// <summary>Remove every component <paramref name="condition"/> picks: what a phase change does to those that
+    /// do not keep across one.</summary>
+    public void ClearComponents(Predicate<ModuleComponent> condition) => this.components.RemoveAll(condition);
+
     private ModuleComponent? FindComponent(Type componentType)
     {
         for (var i = 0; i < this.components.Count; ++i)
@@ -409,7 +386,45 @@ public abstract class ModuleBase : IDisposable
             this.joined = true;
 
         this.OnUpdate();
-        this.AdvancePhase();
+
+        // a module with states starts on the pull; one without started when it was built
+        if (!this.StateMachine.Started && this.states != null && this.Pulled)
+            this.StartMachine();
+
+        if (this.StateMachine.Started)
+        {
+            // Before the machine, unlike BossmodReborn: modules find their actors here, and a phase that ends when one
+            // dies reads it. Another Mount Rokkon's first trash pack ended on its first frame because its Raiko was
+            // still null -- found here, which nothing called until 2026-10-17 (64 modules override it).
+            if (!this.moduleUpdateBroken)
+            {
+                try
+                {
+                    this.UpdateModule();
+                }
+                catch (Exception ex)
+                {
+                    this.moduleUpdateBroken = true;
+                    var e = ex.GetBaseException();
+                    this.ReportError($"UpdateModule threw ({e.GetType().Name}: {e.Message}); it is not called again for this encounter.");
+                }
+            }
+
+            if (!this.machineBroken)
+            {
+                try
+                {
+                    this.StateMachine.Update();
+                }
+                catch (Exception ex)
+                {
+                    this.machineBroken = true;
+                    var e = ex.GetBaseException();
+                    this.ReportError($"State machine threw ({e.GetType().Name}: {e.Message}); it stays in state {this.StateMachine.ActiveState?.ID:X} for the rest of the encounter.");
+                }
+            }
+        }
+
         for (var i = 0; i < this.components.Count; ++i)
             this.components[i].Update();
     }
@@ -446,9 +461,10 @@ public abstract class ModuleBase : IDisposable
     public void ReportError(string message) => this.ReportError(null, message);
 
     // module-level virtuals BMR's BossModule exposes, so ported modules that override them compile.
-    // CalculateModuleAIHints is called from BuildAIHints (2026-09-28) and CheckPull from Update (2026-09-30); Minerva
-    // does not yet call UpdateModule/CheckReset in its loop, nor read ShouldPrioritizeAllEnemies (tracked). They are
-    // declared rather than deleted because a ported module overriding one is recording something real about the fight.
+    // CalculateModuleAIHints is called from BuildAIHints (2026-09-28), CheckPull from Update (2026-09-30), UpdateModule
+    // from Update once the machine runs (2026-10-17); Minerva does not yet call CheckReset, nor read
+    // ShouldPrioritizeAllEnemies (tracked). They are declared rather than deleted because a ported module overriding
+    // one is recording something real about the fight.
     protected virtual bool CheckPull() => this.PrimaryActor.IsTargetable && this.PrimaryActor.InCombat;
 
     /// <summary>
