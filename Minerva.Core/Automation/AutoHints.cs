@@ -117,11 +117,15 @@ public sealed class AutoHints
         }
     }
 
-    /// <summary>Add every tracked cast to the hints as a forbidden zone.</summary>
-    public void AddForbiddenZones(AIHints hints)
+    /// <summary>
+    /// Add every tracked cast to the hints as a forbidden zone, except the casts <paramref name="replaced"/> says
+    /// someone who knows better draws instead (<see cref="CastCorrections"/>).
+    /// </summary>
+    public void AddForbiddenZones(AIHints hints, Func<uint, bool>? replaced = null)
     {
         foreach (var p in this.active.Values)
-            hints.AddForbiddenZone(p.Shape, p.Origin, p.Rotation, p.Activation);
+            if (replaced?.Invoke(p.Action) != true)
+                hints.AddForbiddenZone(p.Shape, p.Origin, p.Rotation, p.Activation);
     }
 
     /// <summary>Forbid facing each suspected gaze's caster, the same arc a module's gaze component uses.</summary>

@@ -1528,6 +1528,62 @@ t.Section("Auto-dodge pathfinding");
     t.True("guesser draws a ground circle", Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Circle, Radius: 8f)));
     t.True("guesser draws a cone", Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Cone, Radius: 12f, HalfAngleDeg: 45f)));
     t.True("guesser skips a raidwide-sized circle", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Circle, Radius: 30f)));
+
+    // Pilgrim's Traverse, 2026-10-17: the sheet's Right-sided Shockwave is a 180-degree cone with no side, so the guess
+    // drew it in front of the mob. A zone module's corrections draw it on the mob's right and, once it lands, the hit
+    // that follows on its left, until that one lands too.
+    {
+        var pt = new WorldState(qpf: 10_000_000, gameVersion: "test");
+        pt.Execute(new WorldState.OpFrameStart(Frame(pt, 0), TimeSpan.Zero));
+        const ulong riot = 0x400000002;
+        // facing south (+z), so its right hand is west (-x)
+        pt.Execute(new ActorState.OpCreate(riot, 0x4923, 0, "Forgiven Riot", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+        var guess = new Minerva.Automation.AutoHints(pt, new StubShapeResolver());
+        using var fix = new Minerva.Automation.CastCorrections(pt, new Dictionary<uint, Minerva.Automation.CastCorrections.Entry>
+        {
+            [42214u] = new(a => new AOEShapeCone(30f + a.HitboxRadius, 90f.Degrees(), (-90f).Degrees()),
+                new Minerva.Automation.CastCorrections.FollowUp(a => new AOEShapeCone(30f + a.HitboxRadius, 90f.Degrees(), 90f.Degrees()), 4d, EndedBy: 42215u)),
+        });
+        AIHints Hints(bool corrected)
+        {
+            var h = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(60f) };
+            guess.AddForbiddenZones(h, corrected ? fix.Replaces : null);
+            if (corrected)
+                fix.AddForbiddenZones(h);
+            return h;
+        }
+        var ahead = new WPos(3f, 10f);
+        var right = new WPos(-10f, -1f);
+        var left = new WPos(10f, -1f);
+        pt.Execute(new ActorState.OpCastInfo(riot, new ActorCastInfo { Action = ActionID.MakeSpell(42214u), TotalTime = 5f, Rotation = default }));
+        t.True("the guess alone puts a right-sided cleave in front of the mob", !Hints(false).IsPositionSafe(ahead) && Hints(false).IsPositionSafe(right));
+        var during = Hints(true);
+        t.True("corrected, it is on the mob's right", !during.IsPositionSafe(right));
+        t.True("and its left and front-left are clear", during.IsPositionSafe(left) && during.IsPositionSafe(ahead));
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(42214u), 0, default, default, 1)));
+        pt.Execute(new ActorState.OpCastInfo(riot, null));
+        var after = Hints(true);
+        t.True("once it lands the second hit is on the left, and the right is clear", !after.IsPositionSafe(left) && after.IsPositionSafe(right));
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(42215u), 0, default, default, 2)));
+        t.Eq("and the second hit landing ends it", fix.Count, 0);
+
+        // a follow-up that repeats lasts until its last landing; one whose own action is not known lasts its seconds
+        using var more = new Minerva.Automation.CastCorrections(pt, new Dictionary<uint, Minerva.Automation.CastCorrections.Entry>
+        {
+            [44759u] = new(_ => new AOEShapeCone(8f, 90f.Degrees()), new Minerva.Automation.CastCorrections.FollowUp(_ => new AOEShapeCone(8f, 90f.Degrees()), 8d, EndedBy: 44760u, Count: 3)),
+            [44347u] = new(_ => new AOEShapeCircle(5f), new Minerva.Automation.CastCorrections.FollowUp(_ => new AOEShapeCircle(5f), 2.5d)),
+        });
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(44759u), 0, default, default, 3)));
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(44760u), 0, default, default, 4)));
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(44760u), 0, default, default, 5)));
+        t.Eq("two of three repeats in, it is still drawn", more.Count, 1);
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(44760u), 0, default, default, 6)));
+        t.Eq("the third ends it", more.Count, 0);
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(44347u), 0, default, default, 7)));
+        pt.Execute(new WorldState.OpFrameStart(Frame(pt, 1, dtSeconds: 3f), TimeSpan.FromSeconds(3)));
+        more.AddForbiddenZones(new AIHints());
+        t.Eq("a timed follow-up is gone after its seconds", more.Count, 0);
+    }
     t.True("guesser skips single-target and unknown", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.SingleTarget)) && !Minerva.Automation.AutoHints.Draws(Minerva.Generation.ShapeHint.Unknown));
 
     // a big circle AOE lands right on the player -> must dodge out of it
@@ -6549,6 +6605,7 @@ sealed class StubShapeResolver : Minerva.Generation.IShapeResolver
         100u => new(Minerva.Generation.ShapeKind.Circle, Radius: 40f),               // big self circle -> raidwide
         101u => new(Minerva.Generation.ShapeKind.Cone, Radius: 60f, HalfAngleDeg: 15f),
         102u => new(Minerva.Generation.ShapeKind.Circle, Radius: 6f),
+        42214u => new(Minerva.Generation.ShapeKind.Cone, Radius: 30f, HalfAngleDeg: 90f),  // Right-sided Shockwave: the sheet gives no side
         104u => new(Minerva.Generation.ShapeKind.Circle, Radius: 5f),                 // spread radius
         106u => new(Minerva.Generation.ShapeKind.Circle, Radius: 4f),                 // icon-spread radius
         107u => new(Minerva.Generation.ShapeKind.Circle, Radius: 10f),

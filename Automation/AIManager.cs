@@ -1522,7 +1522,7 @@ public sealed class AIManager
 
         if (guess != null && (guess.Count != 0 || guess.GazeCount != 0))
         {
-            guess.AddForbiddenZones(this.hints);
+            guess.AddForbiddenZones(this.hints, this.modules.ActiveZoneModule is { } zone ? zone.ReplacesGuess : null);
             guess.AddForbiddenDirections(this.hints, pc.Position);
         }
 

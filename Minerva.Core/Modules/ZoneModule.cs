@@ -81,6 +81,12 @@ public abstract class ZoneModule(WorldState ws) : IDisposable
     /// </summary>
     public virtual void CalculateAIHints(int playerSlot, Actor player, AIHints hints) { }
 
+    /// <summary>
+    /// Does this module draw this cast itself, so the cast-bar guess must leave it alone? For trash whose real shape the
+    /// game's sheet gets wrong (<see cref="Automation.CastCorrections"/>).
+    /// </summary>
+    public virtual bool ReplacesGuess(uint action) => false;
+
     /// <summary>Does this module have hints worth showing while no boss module is active?</summary>
     public virtual bool WantDrawHints() => false;
 
