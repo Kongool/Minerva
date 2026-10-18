@@ -82,7 +82,7 @@ public sealed class RouteGrid
         this.hints = hints;
         var center = hints.Center;
         // wide enough to hold a character who is a little way outside the arena, so there is a route back in
-        var reach = MathF.Max(hints.Bounds.Radius, MathF.Min((player - center).Length() + cellSize, hints.Bounds.Radius + MaxOutsideReach));
+        var reach = MathF.Max(hints.Bounds.Extent, MathF.Min((player - center).Length() + cellSize, hints.Bounds.Extent + MaxOutsideReach));
         this.origin = new WPos(center.X - reach, center.Z - reach);
         this.w = Math.Max(1, (int)MathF.Ceiling((reach * 2f) / cellSize) + 1);
         this.h = this.w;

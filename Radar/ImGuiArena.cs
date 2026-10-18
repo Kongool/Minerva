@@ -59,7 +59,7 @@ public sealed class ImGuiArena : Arena
         this.canvasTopLeft = canvasTopLeft;
         this.canvasSize = canvasSize;
         var half = MathF.Min(canvasSize.X, canvasSize.Y) * 0.5f - margin;
-        this.scale = this.Bounds.Radius > 0f ? half / this.Bounds.Radius : 1f;
+        this.scale = this.Bounds.Extent > 0f ? half / this.Bounds.Extent : 1f;
         if (clip)
         {
             this.draw.PushClipRect(canvasTopLeft, canvasTopLeft + canvasSize, true);
@@ -112,6 +112,16 @@ public sealed class ImGuiArena : Arena
         if (color == 0u)
             color = Colors.AOE;
 
+        // A custom shape is drawn from its combined polygon, cut-outs and all. Its contour loops are only the shapes
+        // it unites, and filled one by one they paint its holes too. Moko the Restless, 2026-10-18: the band outside a
+        // shrinking floor (a 24.5y square less a 20y one) filled the whole arena red while the dodge, which reads the
+        // real shape, said nothing was imminent.
+        if (shape is AOEShapeCustom custom)
+        {
+            this.FillComplex(custom.Polygon, custom.PolygonOrigin, color);
+            return;
+        }
+
         if (this.ClipZones)
         {
             var loops = shape.Contours(origin, rotation);
@@ -151,6 +161,17 @@ public sealed class ImGuiArena : Arena
         if (shape is AOEShapeCircle c)
         {
             this.draw.AddCircle(this.W2S(origin), c.Radius * this.scale, color, 48, thickness);
+            return;
+        }
+        if (shape is AOEShapeCustom custom)
+        {
+            var delta = custom.PolygonOrigin - this.Center;
+            foreach (var part in custom.Polygon.Parts)
+            {
+                this.PolylineRel(part.Exterior, color, delta, thickness);
+                for (var h = 0; h < part.HoleStarts.Count; ++h)
+                    this.PolylineRel(part.Interior(h), color, delta, thickness);
+            }
             return;
         }
         foreach (var loop in shape.Contours(origin, rotation))
@@ -285,7 +306,7 @@ public sealed class ImGuiArena : Arena
     /// </summary>
     public void DrawCompass()
     {
-        var radius = this.Bounds.Radius;
+        var radius = this.Bounds.Extent;
         if (radius <= 0f)
             return;
 
@@ -410,7 +431,39 @@ public sealed class ImGuiArena : Arena
             subject.AddContour(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(offsets));
         }
 
-        var clipped = this.clipper.Intersect(subject, this.BoundsOperand());
+        this.FillOperand(subject, color, clip: true);
+    }
+
+    /// <summary>A polygon with holes, offsets measured from <paramref name="polyOrigin"/>: filled, outlined, and cut to
+    /// the arena when zones are clipped.</summary>
+    private void FillComplex(RelSimplifiedComplexPolygon poly, WPos polyOrigin, uint color)
+    {
+        var subject = new PolygonClipper.Operand();
+        var delta = polyOrigin - this.Center;
+        var ring = new List<WDir>();
+        foreach (var part in poly.Parts)
+        {
+            AddRing(part.Exterior);
+            for (var h = 0; h < part.HoleStarts.Count; ++h)
+                AddRing(part.Interior(h));
+        }
+        this.FillOperand(subject, color, this.ClipZones);
+
+        void AddRing(ReadOnlySpan<WDir> vertices)
+        {
+            if (vertices.Length < 3)
+                return;
+            ring.Clear();
+            foreach (var v in vertices)
+                ring.Add(v + delta);
+            subject.AddContour(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(ring));
+        }
+    }
+
+    /// <summary>Fill and outline a polygon given relative to the arena centre, cut to the arena or not.</summary>
+    private void FillOperand(PolygonClipper.Operand subject, uint color, bool clip)
+    {
+        var clipped = clip ? this.clipper.Intersect(subject, this.BoundsOperand()) : this.clipper.Simplify(subject);
         if (clipped.Parts.Count == 0)
             return;
 
@@ -428,19 +481,19 @@ public sealed class ImGuiArena : Arena
         }
     }
 
-    private void PolylineRel(ReadOnlySpan<WDir> ring, uint color)
+    private void PolylineRel(ReadOnlySpan<WDir> ring, uint color, WDir delta = default, float thickness = 1.5f)
     {
         if (ring.Length < 2)
             return;
-        var first = this.W2S(this.Center + ring[0]);
+        var first = this.W2S(this.Center + delta + ring[0]);
         var prev = first;
         for (var i = 1; i < ring.Length; ++i)
         {
-            var next = this.W2S(this.Center + ring[i]);
-            this.draw.AddLine(prev, next, color, 1.5f);
+            var next = this.W2S(this.Center + delta + ring[i]);
+            this.draw.AddLine(prev, next, color, thickness);
             prev = next;
         }
-        this.draw.AddLine(prev, first, color, 1.5f);
+        this.draw.AddLine(prev, first, color, thickness);
     }
 
     /// <summary>

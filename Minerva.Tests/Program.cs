@@ -55,7 +55,8 @@ t.Section("Arena bounds shapes");
     t.True("polygon excludes the cut-out quadrant", !poly.Contains(c, new WPos(105, 95))); // top-right, removed
     t.True("polygon contains the bottom-right", poly.Contains(c, new WPos(105, 105)));    // inside
     t.True("polygon excludes a point outside the hull", !poly.Contains(c, new WPos(130, 100)));
-    t.Near("polygon radius is the farthest vertex", poly.Radius, MathF.Sqrt(200f));
+    t.Near("polygon extent is the farthest vertex", poly.Extent, MathF.Sqrt(200f));
+    t.Near("and its radius, as BossmodReborn measures it, the furthest along either axis", poly.Radius, 10f);
     t.Eq("polygon contour has one point per vertex", poly.Contour(c).Count, 6);
     t.True("solid arena has no inner loop", new ArenaBoundsCircle(20f).InnerContour(c) == null);
     t.Eq("solid arena has no obstacles", new ArenaBoundsCircle(20f).Obstacles(c).Count, 0);
@@ -66,10 +67,22 @@ t.Section("Arena bounds shapes");
         [new Square(c, 19.5f)],
         [new Polygon(new(90f, 100f), 2f, 16), new Polygon(new(110f, 100f), 2.5f, 16), new Polygon(new(100f, 112f), 1.5f, 16)]);
     t.Eq("custom bounds expose every cut-out", boulders.Obstacles(c).Count, 3);
-    // Radius drives the radar's zoom, so it must be the true circumradius, not the bounding-box diagonal:
+    // Extent drives the radar's zoom, so it must be the true circumradius, not the bounding-box diagonal:
     // a round field must not claim to be sqrt(2) bigger than it is, while a square's corner is genuinely farthest.
-    t.Near("round custom bounds report their own radius", new ArenaBoundsCustom([new Polygon(c, 19.5f, 64)]).Radius, 19.5f, 0.1f);
-    t.Near("square custom bounds reach to the corner", new ArenaBoundsCustom([new Square(c, 19.5f)]).Radius, 19.5f * MathF.Sqrt(2f), 0.1f);
+    t.Near("round custom bounds report their own extent", new ArenaBoundsCustom([new Polygon(c, 19.5f, 64)]).Extent, 19.5f, 0.1f);
+    t.Near("square custom bounds reach to the corner", new ArenaBoundsCustom([new Square(c, 19.5f)]).Extent, 19.5f * MathF.Sqrt(2f), 0.1f);
+    // Radius is what ported modules compare, so it is BossmodReborn's: a square's half-side, not its half-diagonal.
+    // Moko the Restless, 2026-10-18: "is the arena still the big one" read 28.3 for a 20y square and was always yes.
+    t.Near("a square's radius is its half-side, as BossmodReborn's", new ArenaBoundsSquare(20f).Radius, 20f);
+    t.Near("and its extent the corner", new ArenaBoundsSquare(20f).Extent, 20f * MathF.Sqrt(2f), 0.01f);
+    t.Near("a rectangle's radius is its longer half-side", new ArenaBoundsRect(10f, 25f).Radius, 25f);
+    t.Near("a square custom floor's radius is its half-side too", new ArenaBoundsCustom([new Square(c, 19.5f)]).Radius, 19.5f, 0.1f);
+    // the radar draws a custom zone from its combined polygon, so a band keeps its hole: Moko's edge band, a 24.5y square
+    // less a 20y one, was painted as the whole square
+    var band = new AOEShapeCustom(c, [new Square(c, 24.5f)], [new Square(c, 20f)]);
+    t.True("a band's combined polygon is one piece with one hole, anchored where it was built",
+        band.Polygon.Parts.Count == 1 && band.Polygon.Parts[0].HoleStarts.Count == 1 && band.PolygonOrigin == c);
+    t.True("and inside the hole is not in the zone", !band.Check(c + new WDir(5f, 5f), c, default) && band.Check(c + new WDir(22f, 0f), c, default));
     t.True("custom bounds exclude the third boulder", !boulders.Contains(c, new WPos(100f, 112f)));
     t.True("custom bounds contain open floor", boulders.Contains(c, new WPos(100f, 90f)));
 }

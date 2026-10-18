@@ -696,7 +696,7 @@ public sealed class ReplayValidator
                 // an environment object appeared mid-fight near the arena (likely an arena change); the exit
                 // portal and the lore memo a hundred yalms off are not one (Acrolith, 2026-09-06)
                 if (op is ActorState.OpCreate created && created.Type == ActorType.EventObj
-                    && (new WPos(created.PosRot.X, created.PosRot.Z) - module.Center).LengthSq() <= (module.Bounds.Radius + 15f) * (module.Bounds.Radius + 15f))
+                    && (new WPos(created.PosRot.X, created.PosRot.Z) - module.Center).LengthSq() <= (module.Bounds.Extent + 15f) * (module.Bounds.Extent + 15f))
                     arenaMarkerSpawned = true;
             }
 

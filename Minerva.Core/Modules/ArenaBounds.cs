@@ -2,13 +2,24 @@ namespace Minerva;
 
 /// <summary>
 /// The playable extent of an arena, centered at the module's arena center. Drives the radar's
-/// world→screen scale (via <see cref="Radius"/>), draws the boundary, and answers whether a point
+/// world→screen scale (via <see cref="Extent"/>), draws the boundary, and answers whether a point
 /// is inside the field.
 /// </summary>
-public abstract class ArenaBounds(float radius)
+public abstract class ArenaBounds(float radius, float extent = -1f)
 {
-    /// <summary>Half-extent used to scale the radar; the circumscribing radius of the shape.</summary>
+    /// <summary>
+    /// BossmodReborn's radius, which ported modules compare: a circle's radius, the longer half-side of a square or
+    /// rectangle, the furthest a polygon reaches along either axis.
+    /// <para>It used to be the corner distance (a square's half-diagonal), and a port that asks "is the arena still
+    /// the big one" got the wrong answer on every square. Moko the Restless, 2026-10-18: its arena-change band is
+    /// drawn while <c>Bounds.Radius &gt; 21</c>; after the floor shrank to a 20y square that read 28.3, so every later
+    /// Kenki Release drew the band again, and the floor change that clears it never came twice.</para>
+    /// </summary>
     public readonly float Radius = radius;
+
+    /// <summary>How far the floor reaches from its centre at most, corners included: what the radar fits on screen
+    /// and the solver searches. A circle's radius, a square's half-diagonal.</summary>
+    public readonly float Extent = extent >= 0f ? extent : radius;
 
     /// <summary>
     /// Cell size of the pathfinding grid over this arena, in yalms. Modules read it to size a target cell
@@ -140,7 +151,7 @@ public abstract class ArenaBounds(float radius)
     {
         if (!this.Contains(center, origin))
             return 0f;
-        var far = this.Radius * 2f + 1f;
+        var far = this.Extent * 2f + 1f;
         var lo = 0f;
         var hi = far;
         // if even the far sample is inside (shouldn't happen for sane bounds), report the far distance
@@ -196,7 +207,7 @@ public sealed class ArenaBoundsCircle(float radius) : ArenaBounds(radius)
 /// with BossmodReborn and are not acted on — Minerva has no obstacle-map layer, and it rasterises the
 /// pathfinding grid at a cell size the solver chooses rather than one baked into the bounds.
 /// </remarks>
-public sealed class ArenaBoundsSquare(float halfWidth, Angle rotation = default, float mapResolution = 0.5f, bool allowObstacleMap = false) : ArenaBounds(halfWidth * 1.41421356f)
+public sealed class ArenaBoundsSquare(float halfWidth, Angle rotation = default, float mapResolution = 0.5f, bool allowObstacleMap = false) : ArenaBounds(halfWidth, halfWidth * 1.41421356f)
 {
     public readonly float HalfWidth = halfWidth;
 
@@ -219,7 +230,7 @@ public sealed class ArenaBoundsSquare(float halfWidth, Angle rotation = default,
 }
 
 public sealed class ArenaBoundsRect(float halfWidth, float halfHeight)
-    : ArenaBounds(MathF.Sqrt(halfWidth * halfWidth + halfHeight * halfHeight))
+    : ArenaBounds(MathF.Max(halfWidth, halfHeight), MathF.Sqrt(halfWidth * halfWidth + halfHeight * halfHeight))
 {
     public readonly float HalfWidth = halfWidth;
     public readonly float HalfHeight = halfHeight;
@@ -260,7 +271,7 @@ public sealed class ArenaBoundsDonut(float innerRadius, float outerRadius) : Are
 /// "relative bounds" model BMR uses, so a boss's real arena outline can be pasted in). Handles convex
 /// and concave shapes; <see cref="Contains"/> is an even-odd ray cast.
 /// </summary>
-public sealed class ArenaBoundsPolygon(params WDir[] offsets) : ArenaBounds(MaxRadiusOf(offsets))
+public sealed class ArenaBoundsPolygon(params WDir[] offsets) : ArenaBounds(MaxAxisOf(offsets), MaxRadiusOf(offsets))
 {
     public readonly WDir[] Offsets = offsets;
 
@@ -293,6 +304,14 @@ public sealed class ArenaBoundsPolygon(params WDir[] offsets) : ArenaBounds(MaxR
         var max = 0f;
         foreach (var o in offsets)
             max = MathF.Max(max, o.Length());
+        return max;
+    }
+
+    private static float MaxAxisOf(WDir[] offsets)
+    {
+        var max = 0f;
+        foreach (var o in offsets)
+            max = MathF.Max(max, MathF.Max(MathF.Abs(o.X), MathF.Abs(o.Z)));
         return max;
     }
 }
@@ -333,7 +352,7 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     public bool IsCircle { get; init; }
 
     public ArenaBoundsCustom(Shape[] UnionShapes, Shape[]? DifferenceShapes = null, Shape[]? AdditionalShapes = null, float MapResolution = 0.5f, float ScaleFactor = 1f, bool AllowObstacleMap = false, float Offset = default, bool AdjustForHitboxInwards = false, bool AdjustForHitboxOutwards = false)
-        : base(ComputeRadius(UnionShapes))
+        : base(ComputeAxisExtent(UnionShapes), ComputeRadius(UnionShapes))
     {
         this.UnionShapes = UnionShapes;
         this.DifferenceShapes = DifferenceShapes ?? [];
@@ -419,6 +438,20 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     /// shrinking it to 71% of the canvas. A square is unaffected either way, since its farthest boundary
     /// point is the corner.
     /// </summary>
+    // BossmodReborn's radius for a custom floor: the furthest its outline reaches along either axis from the centre
+    private static float ComputeAxisExtent(Shape[] shapes)
+    {
+        var center = ComputeCenter(shapes);
+        var extent = 0f;
+        foreach (var s in shapes)
+        {
+            var contour = s.ContourWorld();
+            for (var i = 0; i < contour.Count; ++i)
+                extent = MathF.Max(extent, MathF.Max(MathF.Abs(contour[i].X - center.X), MathF.Abs(contour[i].Z - center.Z)));
+        }
+        return extent;
+    }
+
     private static float ComputeRadius(Shape[] shapes)
     {
         var center = ComputeCenter(shapes);

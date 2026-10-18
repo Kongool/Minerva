@@ -613,7 +613,7 @@ public static class ArenaPathfinder
             var reach = moveSpeed * MathF.Max((float)(soon - now).TotalSeconds - DoorwaySlackSeconds, 0f);
             var best = player;
             var bestScore = hints.InImminentDanger(player, soon, m) ? float.MaxValue : NearestOf(exits, player);
-            var r = hints.Bounds.Radius;
+            var r = hints.Bounds.Extent;
             for (var x = -r; x <= r; x += cellSize)
             {
                 for (var z = -r; z <= r; z += cellSize)
@@ -828,7 +828,7 @@ public static class ArenaPathfinder
     private static List<WPos> ExitsAfter(AIHints hints, DateTime soon, DateTime next, DateTime now, float margin, float cellSize)
     {
         var exits = new List<WPos>();
-        var r = hints.Bounds.Radius;
+        var r = hints.Bounds.Extent;
         for (var x = -r; x <= r; x += cellSize)
         {
             for (var z = -r; z <= r; z += cellSize)
@@ -935,7 +935,7 @@ public static class ArenaPathfinder
     private static SafeSpot? Nearest(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, UptimeGoal g, SideRule rule)
     {
         var center = hints.Center;
-        var reach = hints.Bounds.Radius;
+        var reach = hints.Bounds.Extent;
         var best = player;
         var bestCost = float.MaxValue;
         var found = false;

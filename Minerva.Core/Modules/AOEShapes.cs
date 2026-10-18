@@ -432,6 +432,16 @@ public sealed class AOEShapeCustom : AOEShape
     /// switch is the point of the call, and it is why replacement is tracked separately from the lazy
     /// build above — an untouched shape keeps Minerva's direct evaluation.</para>
     /// </summary>
+    /// <summary>Where <see cref="Polygon"/>'s offsets are measured from.</summary>
+    public WPos PolygonOrigin
+    {
+        get
+        {
+            _ = this.Polygon;
+            return this.polygonOrigin;
+        }
+    }
+
     public void ReplacePolygon(RelSimplifiedComplexPolygon poly, WPos newOrigin)
     {
         this.polygon = poly;
