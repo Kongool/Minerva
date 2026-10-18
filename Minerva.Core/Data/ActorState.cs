@@ -348,10 +348,17 @@ public sealed class ActorState : IEnumerable<Actor>
                 ws.Actors.CastFinished.Fire(actor, prev);
         }
 
+        // How far a re-report's progress may trail the progress already reckoned for the cast and still be the same
+        // cast. The world advances a cast's elapsed time every frame; a client that hitched reports it from behind.
+        // Moko the Restless, 2026-10-18: an Iai-kasumi-giri re-reported 0.29s behind counted as a second cast at the
+        // old 0.2, its 270-degree cone was added twice and removed once, and the stale one stayed for the rest of the
+        // fight. A genuine re-cast starts again from nothing, seconds behind.
+        private const float ReportLag = 1f;
+
         private static bool SameCast(ActorCastInfo before, ActorCastInfo now)
             => before.Action == now.Action && before.TargetID == now.TargetID
             && Math.Abs(before.TotalTime - now.TotalTime) < 0.01f
-            && now.ElapsedTime >= before.ElapsedTime - 0.2f;
+            && now.ElapsedTime >= before.ElapsedTime - ReportLag;
         public override void Write(OperationOutput o)
         {
             if (this.Value is { } c)

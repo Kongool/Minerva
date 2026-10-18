@@ -63,6 +63,10 @@ sealed class Giri(ModuleBase module) : Components.GenericAOEs(module)
             var finishTime = count ? initialRotation.Item3.AddSeconds(3.5d) : initialRotation.Item3;
 
             _aoes.Add(new(cone, initialRotation.Item1, rotation, finishTime));
+            // Each direction status places one cone. Kept, it placed another on any further cast start and on the next
+            // mechanic's cast before that mechanic's own status came: Moko the Restless, 2026-10-18, one cone too many
+            // became six by the end of the fight, and only the first -- stale -- was ever drawn.
+            nextDirection = NextSafeDirection.None;
         }
     }
 

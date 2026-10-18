@@ -143,6 +143,11 @@ t.Section("WorldState op stream");
     t.Eq("a jumped elapsed time is the same cast, not a new one", castStarted, 1);
     t.Near("the jump is taken", bossActor.CastInfo!.ElapsedTime, 3.6f, 0.001f);
 
+    // and one reported from behind, by a client that hitched, is the same cast too. Moko the Restless, 2026-10-18: a
+    // re-report 0.29s behind counted as a second cast, and a 270-degree cone stayed on the arena for the whole fight.
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(36158u), TargetID = player, TotalTime = 5f, ElapsedTime = 3.1f, Rotation = bossActor.Rotation }));
+    t.Eq("a re-report half a second behind is the same cast", castStarted, 1);
+
     // the same action starting over does announce itself: the progress goes back to the beginning
     ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(36158u), TargetID = player, TotalTime = 5f, ElapsedTime = 0f, Rotation = bossActor.Rotation }));
     t.Eq("a restarted cast is a new cast", castStarted, 2);
