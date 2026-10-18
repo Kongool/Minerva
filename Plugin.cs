@@ -45,6 +45,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly EncounterSettingsWindow encounterSettingsWindow;
     private readonly EncounterConfigStore encounterConfig;
     private readonly DtrStatus dtr;
+    private readonly DockLayoutShare dockLayout;
+    private readonly EdgeDockWindow radarDock;
+    private readonly EdgeDockWindow mainDock;
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -84,6 +87,29 @@ public sealed class Plugin : IDalamudPlugin
         this.windowSystem.AddWindow(this.arenaWindow);
         this.windowSystem.AddWindow(this.encounterSettingsWindow);
 
+        // The edge tabs draw the radar's and the main window's own bodies in their pop-outs, so a tab and its window
+        // cannot drift apart. Two docks, so each can take its own edge -- the radar on one side, the settings on the
+        // other. The layout is shared with Daedalus's and Charon's docks so docks on one edge stack instead of
+        // overlapping; Minerva's sit below theirs (radar 30, main window 31; Daedalus 10, Charon 20).
+        this.dockLayout = new DockLayoutShare(Service.PluginInterface);
+        this.radarDock = new EdgeDockWindow("Minerva Radar", 30,
+        [
+            new EdgeDockWindow.Tab("radar", "Radar", () => this.Config.RadarEnabled, () => this.arenaWindow.Draw(), new System.Numerics.Vector2(400f, 460f),
+                () =>
+                {
+                    var theme = AegisTheme.Push();
+                    Dalamud.Bindings.ImGui.ImGui.PushStyleColor(Dalamud.Bindings.ImGui.ImGuiCol.WindowBg, RadarView.BackgroundVec(this.Config.RadarOpacity));
+                    return new ThemeScope(theme, 1);
+                }),
+        ], () => this.Config.RadarDockRightSide, this.dockLayout);
+        this.mainDock = new EdgeDockWindow("Minerva", 31,
+        [
+            new EdgeDockWindow.Tab("main", "Minerva", () => true, () => this.mainWindow.Draw(), new System.Numerics.Vector2(700f, 520f),
+                () => new ThemeScope(AegisTheme.Push())),
+        ], () => this.Config.EdgeDockRightSide, this.dockLayout);
+        this.windowSystem.AddWindow(this.radarDock);
+        this.windowSystem.AddWindow(this.mainDock);
+
         Service.CommandManager.AddHandler(CommandName, new CommandInfo(this.OnCommand)
         {
             HelpMessage = "Minerva settings. Also: radar, modules, record, strats, debug, sandbox, face <dir>.",
@@ -96,7 +122,7 @@ public sealed class Plugin : IDalamudPlugin
         this.dtr = new DtrStatus(this.modules, this.replay, this.Config, this.OpenMain);
 
         Service.Framework.Update += this.OnUpdate;
-        Service.PluginInterface.UiBuilder.Draw += this.windowSystem.Draw;
+        Service.PluginInterface.UiBuilder.Draw += this.DrawUi;
         Service.PluginInterface.UiBuilder.OpenMainUi += this.OpenMain;
         Service.PluginInterface.UiBuilder.OpenConfigUi += this.OpenMain;
 
@@ -109,6 +135,15 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.RecastQuery = GameData.RecastRemaining;
 
         Service.Log.Information("Minerva loaded.");
+    }
+
+    private void DrawUi()
+    {
+        // the edge tabs are up whenever they are switched on and one applies; the windows they stand for need not be
+        var docks = this.Config.EdgeDockEnabled && Service.ClientState.IsLoggedIn;
+        this.radarDock.IsOpen = docks && this.radarDock.AnyTab();
+        this.mainDock.IsOpen = docks && this.mainDock.AnyTab();
+        this.windowSystem.Draw();
     }
 
     private void OnUpdate(IFramework framework)
@@ -324,7 +359,7 @@ public sealed class Plugin : IDalamudPlugin
         Minerva.QuestBattle.QuestBattle.LogSink = null;
         ClientState.RecastQuery = null;
         Service.Framework.Update -= this.OnUpdate;
-        Service.PluginInterface.UiBuilder.Draw -= this.windowSystem.Draw;
+        Service.PluginInterface.UiBuilder.Draw -= this.DrawUi;
         Service.PluginInterface.UiBuilder.OpenMainUi -= this.OpenMain;
         Service.PluginInterface.UiBuilder.OpenConfigUi -= this.OpenMain;
         this.windowSystem.RemoveAllWindows();
@@ -333,6 +368,7 @@ public sealed class Plugin : IDalamudPlugin
         this.sandboxWindow.Dispose();
         this.arenaWindow.Dispose();
         this.encounterConfig.Dispose();
+        this.dockLayout.Dispose();
         this.dtr.Dispose();
         this.ipc.Dispose();
         this.replay.Dispose();

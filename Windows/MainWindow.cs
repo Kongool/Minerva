@@ -166,7 +166,10 @@ public sealed class MainWindow : Window, IDisposable
                 ("Close after the fight", cfg.AutoHideRadar, v => cfg.AutoHideRadar = v, "Off leaves it up for post-pull review, as BossmodReborn does."),
                 ("Confine AOEs", cfg.ClipToArena, v => cfg.ClipToArena = v, "Mask AOE fills past the arena edge."),
                 ("Show party", cfg.ShowPartyMembers, v => cfg.ShowPartyMembers = v, "You are always drawn on top, in your own colour."),
-                ("Server info bar", cfg.ShowDtrBar, v => cfg.ShowDtrBar = v, "Mine: state, and a Mine AI toggle — click either."));
+                ("Server info bar", cfg.ShowDtrBar, v => cfg.ShowDtrBar = v, "Mine: state, and a Mine AI toggle — click either."),
+                ("Edge tabs", cfg.EdgeDockEnabled, v => cfg.EdgeDockEnabled = v, "Radar and Minerva tabs on the screen edge: point at one and it pops out beside it, click it to keep it out, click again to let it go."),
+                ("Radar tab on the right", cfg.RadarDockRightSide, v => cfg.RadarDockRightSide = v, "Put the Radar tab on the right edge of the screen instead of the left."),
+                ("Minerva tab on the right", cfg.EdgeDockRightSide, v => cfg.EdgeDockRightSide = v, "Put the Minerva tab (this window) on the right edge of the screen instead of the left."));
             UiKit.EndCard();
 
             ImGui.TableNextColumn();

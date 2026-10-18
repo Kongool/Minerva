@@ -76,6 +76,17 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Draw the rest of the party on the radar, not just yourself.</summary>
     public bool ShowPartyMembers { get; set; } = true;
 
+    /// <summary>Tabs on the screen edge for the radar and the main window: point at one and its window pops out beside
+    /// it, click to keep it out (<see cref="Windows.EdgeDockWindow"/>).</summary>
+    public bool EdgeDockEnabled { get; set; } = true;
+
+    /// <summary>The Minerva (main window) edge tab on the right edge of the screen instead of the left.</summary>
+    public bool EdgeDockRightSide { get; set; }
+
+    /// <summary>The Radar edge tab on the right edge of the screen instead of the left: apart from the main window's,
+    /// so the radar can sit on one side and the settings on the other.</summary>
+    public bool RadarDockRightSide { get; set; }
+
     /// <summary>How party markers are coloured — see <see cref="PartyColoring"/>.</summary>
     public PartyColoring PartyColorBy { get; set; } = PartyColoring.Role;
 

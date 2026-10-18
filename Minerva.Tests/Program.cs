@@ -1584,6 +1584,78 @@ t.Section("Auto-dodge pathfinding");
         more.AddForbiddenZones(new AIHints());
         t.Eq("a timed follow-up is gone after its seconds", more.Count, 0);
     }
+
+    // The edge tabs, ported from Daedalus's dock with its tests: which panel is out and when it closes, what a click
+    // pins, the sideways label's geometry, and the layout shared with Daedalus's and Charon's docks on one edge.
+    {
+        var dockTabs = new[] { "main" };
+        var delay = TimeSpan.FromMilliseconds(450);
+        var dockT0 = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);
+
+        var hover = new Minerva.Ui.DockHover();
+        hover.Update("main", false, dockT0, delay, dockTabs);
+        t.Eq("pointing at a tab opens it", hover.Open, "main");
+        hover.Update(null, false, dockT0.AddMilliseconds(200), delay, dockTabs);
+        t.Eq("leaving it keeps it open for the delay", hover.Open, "main");
+        hover.Update(null, false, dockT0.AddMilliseconds(500), delay, dockTabs);
+        t.True("and then closes it", hover.Open == null);
+
+        var busy = new Minerva.Ui.DockHover();
+        busy.Update("main", false, dockT0, delay, dockTabs);
+        busy.Update(null, true, dockT0.AddSeconds(5), delay, dockTabs);
+        busy.Update(null, false, dockT0.AddSeconds(5.2), delay, dockTabs);
+        t.Eq("a panel in use stays out", busy.Open, "main");
+
+        var pin = new Minerva.Ui.DockHover();
+        pin.Click("main");
+        pin.Update(null, false, dockT0.AddMinutes(5), delay, dockTabs);
+        t.True("a click pins the panel open", pin.Open == "main" && pin.Pinned == "main");
+        pin.Click("main");
+        pin.Update(null, false, dockT0.AddMinutes(10), delay, dockTabs);
+        t.True("and a second click lets it go", pin.Open == null && pin.Pinned == null);
+
+        var hidden = new Minerva.Ui.DockHover();
+        hidden.Click("main");
+        hidden.Update(null, false, dockT0, delay, Array.Empty<string>());
+        t.True("a tab no longer shown takes its panel and its pin with it", hidden.Open == null && hidden.Pinned == null);
+
+        var pivot = new Vector2(100f, 100f);
+        t.True("a label turns a quarter anticlockwise, right becoming up",
+            Minerva.Ui.DockMath.TurnUp(new Vector2(110f, 100f), pivot) == new Vector2(100f, 90f)
+            && Minerva.Ui.DockMath.TurnUp(new Vector2(100f, 110f), pivot) == new Vector2(110f, 100f));
+        var textSize = new Vector2(80f, 16f);
+        var corner = Minerva.Ui.DockMath.PivotFor(new Vector2(10f, 20f), textSize);
+        var drawnAt = new Vector2(8f, 8f);
+        t.True("and lands in the box asked, reading bottom to top",
+            Minerva.Ui.DockMath.TurnUpAndPlace(drawnAt, drawnAt, corner) == new Vector2(10f, 100f)
+            && Minerva.Ui.DockMath.TurnUpAndPlace(drawnAt + textSize, drawnAt, corner) == new Vector2(26f, 20f));
+
+        const long dockNow = 100_000;
+        static Minerva.Ui.DockSlot Slot(string owner, float height, int order, int edge = 0, long seen = 100_000) => new(owner, edge, height, order, seen);
+        t.Near("a dock alone is centred", Minerva.Ui.DockLayout.TopFor("Minerva", 0, 100f, [Slot("Minerva", 100f, 30)], dockNow, 0f, 1000f), 450f);
+        var three = new[] { Slot("Minerva", 300f, 30), Slot("Charon", 200f, 20), Slot("Daedalus", 100f, 10) };
+        var groupTop = (1000f - (100f + 200f + 300f + 2f * Minerva.Ui.DockLayout.GroupGap)) / 2f;
+        t.Near("Minerva's tabs stack under Daedalus's and Charon's on one edge, not over them",
+            Minerva.Ui.DockLayout.TopFor("Minerva", 0, 300f, three, dockNow, 0f, 1000f), groupTop + 100f + 200f + 2f * Minerva.Ui.DockLayout.GroupGap);
+        t.Near("Daedalus's still starts the group", Minerva.Ui.DockLayout.TopFor("Daedalus", 0, 100f, three, dockNow, 0f, 1000f), groupTop);
+        t.Near("a dock on the other edge does not push it",
+            Minerva.Ui.DockLayout.TopFor("Minerva", 1, 300f, [Slot("Daedalus", 100f, 10), Slot("Minerva", 300f, 30, edge: 1)], dockNow, 0f, 1000f), 350f);
+        t.Near("a dock that stopped publishing drops out",
+            Minerva.Ui.DockLayout.TopFor("Minerva", 0, 300f, [Slot("Daedalus", 100f, 10, seen: dockNow - Minerva.Ui.DockLayout.StaleMs - 1), Slot("Minerva", 300f, 30)], dockNow, 0f, 1000f), 350f);
+        t.Near("a group taller than the screen starts at its top",
+            Minerva.Ui.DockLayout.TopFor("Daedalus", 0, 800f, [Slot("Daedalus", 800f, 10), Slot("Minerva", 800f, 30)], dockNow, 0f, 1000f), 0f);
+        t.Eq("the share tag is the one Daedalus and Charon use", Minerva.Ui.DockLayout.ShareTag, "EdgeDock.Layout.v1");
+
+        // the radar and the main window are two docks, so each can take its own edge, and on one edge they stack
+        var apart = new[] { Slot("Minerva Radar", 100f, 30, edge: 1), Slot("Minerva", 100f, 31, edge: 0) };
+        t.True("the radar on one edge and the main window on the other are each centred on their own",
+            Minerva.Ui.DockLayout.TopFor("Minerva Radar", 1, 100f, apart, dockNow, 0f, 1000f) == 450f
+            && Minerva.Ui.DockLayout.TopFor("Minerva", 0, 100f, apart, dockNow, 0f, 1000f) == 450f);
+        var together = new[] { Slot("Minerva", 100f, 31), Slot("Minerva Radar", 100f, 30) };
+        t.True("on one edge they stack, the radar on top",
+            Minerva.Ui.DockLayout.TopFor("Minerva Radar", 0, 100f, together, dockNow, 0f, 1000f)
+            < Minerva.Ui.DockLayout.TopFor("Minerva", 0, 100f, together, dockNow, 0f, 1000f));
+    }
     t.True("guesser skips single-target and unknown", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.SingleTarget)) && !Minerva.Automation.AutoHints.Draws(Minerva.Generation.ShapeHint.Unknown));
 
     // a big circle AOE lands right on the player -> must dodge out of it
