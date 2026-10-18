@@ -162,8 +162,8 @@ public sealed class MainWindow : Window, IDisposable
             UiKit.BeginCard("Radar", cfg.RadarEnabled ? "on" : "off");
             changed |= Grid2(
                 ("Enabled", cfg.RadarEnabled, v => cfg.RadarEnabled = v, null),
-                ("Open on pull", cfg.AutoShowRadar, v => cfg.AutoShowRadar = v, "Pops the radar when a known boss module activates."),
-                ("Close after the fight", cfg.AutoHideRadar, v => cfg.AutoHideRadar = v, "Off leaves it up for post-pull review, as BossmodReborn does."),
+                ("Open on pull", cfg.AutoShowRadar, v => cfg.AutoShowRadar = v, "Pops the radar when a known boss module activates. With edge tabs on, the Radar tab pops out instead, and goes back to its tab when the module ends."),
+                ("Close after the fight", cfg.AutoHideRadar, v => cfg.AutoHideRadar = v, "The floating radar window. Off leaves it up for post-pull review, as BossmodReborn does. The Radar edge tab always goes back after the fight."),
                 ("Confine AOEs", cfg.ClipToArena, v => cfg.ClipToArena = v, "Mask AOE fills past the arena edge."),
                 ("Show party", cfg.ShowPartyMembers, v => cfg.ShowPartyMembers = v, "You are always drawn on top, in your own colour."),
                 ("Server info bar", cfg.ShowDtrBar, v => cfg.ShowDtrBar = v, "Mine: state, and a Mine AI toggle — click either."),

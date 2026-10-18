@@ -1619,6 +1619,32 @@ t.Section("Auto-dodge pathfinding");
         hidden.Update(null, false, dockT0, delay, Array.Empty<string>());
         t.True("a tab no longer shown takes its panel and its pin with it", hidden.Open == null && hidden.Pinned == null);
 
+        // the radar's tab held out while a module is loaded: it stays past the delay, comes back after another tab is
+        // looked at, and goes back to its tab after the release, not under the pointer; a pin of the user's outlasts it
+        var radar = new[] { "radar", "main" };
+        var held = new Minerva.Ui.DockHover();
+        held.Hold("radar");
+        held.Update(null, false, dockT0.AddMinutes(5), delay, radar);
+        t.Eq("a held panel stays out with nobody pointing at it", held.Open, "radar");
+        held.Update("main", false, dockT0.AddMinutes(6), delay, radar);
+        held.Update(null, false, dockT0.AddMinutes(7), delay, radar);
+        t.Eq("and comes back after another tab is looked at", held.Open, "radar");
+        held.Release("radar");
+        held.Update(null, true, dockT0.AddMinutes(8), delay, radar);
+        t.Eq("released, it does not shut under the pointer", held.Open, "radar");
+        held.Update(null, false, dockT0.AddMinutes(9), delay, radar);
+        t.True("and then goes back to its tab", held.Open == null && held.Held == null);
+        var pinnedHold = new Minerva.Ui.DockHover();
+        pinnedHold.Hold("radar");
+        pinnedHold.Click("radar");
+        pinnedHold.Release("radar");
+        pinnedHold.Update(null, false, dockT0.AddMinutes(5), delay, radar);
+        t.Eq("a panel the user pinned stays after the release", pinnedHold.Open, "radar");
+        var hiddenHold = new Minerva.Ui.DockHover();
+        hiddenHold.Hold("radar");
+        hiddenHold.Update(null, false, dockT0, delay, new[] { "main" });
+        t.True("a held tab that stops being shown lets its hold go", hiddenHold.Held == null && hiddenHold.Open == null);
+
         var pivot = new Vector2(100f, 100f);
         t.True("a label turns a quarter anticlockwise, right becoming up",
             Minerva.Ui.DockMath.TurnUp(new Vector2(110f, 100f), pivot) == new Vector2(100f, 90f)

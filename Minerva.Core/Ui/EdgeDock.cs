@@ -19,13 +19,19 @@ public sealed class DockHover
     public string? Open { get; private set; }
     public string? Pinned { get; private set; }
 
+    /// <summary>The panel held out by the plugin rather than by a click — the radar while a fight is on — until
+    /// <see cref="Release"/>. Like a pin, but the user's own pin outlasts it.</summary>
+    public string? Held { get; private set; }
+
     /// <param name="hoveredTab">The tab under the pointer this frame, if any.</param>
     /// <param name="panelBusy">The pointer is on the open panel, or the panel is mid-interaction (a combo open, a slider held).</param>
     public void Update(string? hoveredTab, bool panelBusy, DateTime nowUtc, TimeSpan closeDelay, IReadOnlyList<string> visible)
     {
-        // a tab that is no longer shown takes its panel (and its pin) with it
+        // a tab that is no longer shown takes its panel (and its pin, and its hold) with it
         if (this.Pinned is { } pinned && !visible.Contains(pinned))
             this.Pinned = null;
+        if (this.Held is { } held && !visible.Contains(held))
+            this.Held = null;
         if (this.Open is { } open && !visible.Contains(open))
             this.Open = null;
 
@@ -43,7 +49,23 @@ public sealed class DockHover
         }
 
         if (this.Open != null && nowUtc - this.lastTouchedUtc > closeDelay)
-            this.Open = this.Pinned; // back to the pinned panel, or to nothing
+            this.Open = this.Pinned ?? this.Held; // back to the pinned or held panel, or to nothing
+    }
+
+    /// <summary>Hold a panel out until <see cref="Release"/>: open now, and what the panel returns to when the pointer
+    /// leaves another tab.</summary>
+    public void Hold(string tab)
+    {
+        this.Held = tab;
+        this.Open = tab;
+    }
+
+    /// <summary>Let a held panel go. It closes the ordinary way, after the delay and not under the pointer; a panel the
+    /// user pinned stays.</summary>
+    public void Release(string tab)
+    {
+        if (this.Held == tab)
+            this.Held = null;
     }
 
     /// <summary>A click on a tab: pin it, or unpin it if it already was.</summary>

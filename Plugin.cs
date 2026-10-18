@@ -186,17 +186,27 @@ public sealed class Plugin : IDalamudPlugin
         if (ReferenceEquals(current, this.lastModule))
             return;
 
-        // The overlay is what pops for a fight -- it is only the arena, so it can appear without covering
+        // The radar is what pops for a fight -- it is only the arena, so it can appear without covering
         // anything you were reading. The main window is left alone: it holds settings and tooling and has
         // no business opening itself because a pull started.
+        // With the edge tabs on, the radar's tab pops out instead of the floating window, and goes back to its tab
+        // when the module ends, whatever "Close after the fight" says: the tab is where it lives.
+        var docked = this.Config.EdgeDockEnabled && this.Config.RadarEnabled;
         if (current != null)
         {
             if (this.Config.AutoShowRadar)
-                this.arenaWindow.IsOpen = true;
+            {
+                if (docked)
+                    this.radarDock.Hold("radar");
+                else
+                    this.arenaWindow.IsOpen = true;
+            }
         }
-        else if (this.Config.AutoHideRadar)
+        else
         {
-            this.arenaWindow.IsOpen = false;
+            this.radarDock.Release("radar");
+            if (this.Config.AutoHideRadar)
+                this.arenaWindow.IsOpen = false;
         }
 
         this.lastModule = current;

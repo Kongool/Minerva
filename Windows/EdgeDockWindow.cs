@@ -69,6 +69,12 @@ public sealed unsafe class EdgeDockWindow : Window
         this.IsOpen = false;
     }
 
+    /// <summary>Hold a tab's panel out until <see cref="Release"/> (see <see cref="DockHover.Hold"/>).</summary>
+    public void Hold(string tabId) => this.hover.Hold(tabId);
+
+    /// <summary>Let a held panel go back to its tab.</summary>
+    public void Release(string tabId) => this.hover.Release(tabId);
+
     /// <summary>Whether any tab applies right now — the caller opens the window only then.</summary>
     public bool AnyTab()
     {
