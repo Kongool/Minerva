@@ -136,6 +136,22 @@ public class Exaflare(ModuleBase module, AOEShape shape, uint aid = default) : G
         return CollectionsMarshal.AsSpan(this.active);
     }
 
+    /// <summary>
+    /// Every step drawn, not only the next, as danger at its own time.
+    /// <para>The previews are drawn "not risky" so the radar does not paint the whole lane red, and the generic hint
+    /// path skips anything not risky -- so the dodge saw only the next step. A line that marches faster than a player
+    /// walks cannot be outrun along it: the way out is sideways, which only shows once the steps behind the next one
+    /// are danger too. Moko the Restless, 2026-10-18: Spearman's Orders lines step 3.5y every 0.6s; with the next step
+    /// alone forbidden the dodge stepped forward along the lane, into the step after it, twice. Each step keeps its own
+    /// activation, so a later one is no reason to move until it is near.</para>
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (ref readonly var aoe in this.ActiveAOEs(slot, actor))
+            if (this.OnViewersFloor(actor, aoe))
+                hints.AddForbiddenZone(aoe);
+    }
+
     /// <summary>Step <paramref name="line"/> one explosion forward from an observed position, rather
     /// than from its own bookkeeping — use this when the game tells you where the step actually landed.
     /// Ported from BossmodReborn (BSD-3; see THIRD-PARTY-NOTICES.txt).</summary>

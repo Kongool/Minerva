@@ -5509,6 +5509,27 @@ t.Section("Pending effects");
         tlM.StateMachine.NextTransitionWithFlag(StateMachine.StateHint.Raidwide) < tlWide);
 }
 
+// ---- Exaflare: the steps behind the next one are danger too ----
+// Moko the Restless, 2026-10-18: Spearman's Orders lines step 3.5y every 0.6s. With only the next step forbidden the
+// dodge stepped forward along the lane and was caught by the step after.
+{
+    var exWs = new WorldState(1000UL, "test");
+    exWs.Execute(new WorldState.OpFrameStart(Frame(exWs, 0), TimeSpan.Zero));
+    exWs.Execute(new ActorState.OpCreate(0x1300UL, 0x9300u, 1, "boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    exWs.Execute(new ActorState.OpCreate(0x1301UL, 0u, 0, "me", 0, ActorType.Player, new Vector4(0, 0, 7, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    var exM = new TestModule(exWs, exWs.Actors.Find(0x1300UL)!) { Arena = new NullArena() };
+    var spears = new Minerva.Components.Exaflare(exM, new AOEShapeRect(3f, 2f, 0.474f));
+    spears.Lines.Add(new(new WPos(0f, 0f), new WDir(0f, 3.474f), exWs.FutureTime(0.6), 0.6, 12, 4));
+    var exH = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(30f) };
+    spears.AddAIHints(0, exWs.Actors.Find(0x1301UL)!, default, exH);
+    t.Eq("every step shown reaches the dodge, not only the next", exH.ForbiddenZones.Count, 4);
+    var twoAhead = new WPos(0f, 7.5f);
+    t.True("two steps along the lane is danger, at that step's own time",
+        exH.ForbiddenZones.Exists(z => z.ShapeDistance.Distance(twoAhead) <= 0f && Math.Abs((z.Activation - exWs.FutureTime(1.8)).TotalSeconds) < 0.01));
+    t.True("and beside the lane is not", !exH.ForbiddenZones.Exists(z => z.ShapeDistance.Distance(new WPos(3f, 7.5f)) <= 0f));
+    exM.Dispose();
+}
+
 // ---- State machine: states switch components on and off, phases clear them ----
 //
 // Another Mount Rokkon against Splatoon's presets, 2026-10-17: everything a state activated used to be on for the
