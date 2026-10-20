@@ -167,9 +167,12 @@ public sealed class MainWindow : Window, IDisposable
                 ("Confine AOEs", cfg.ClipToArena, v => cfg.ClipToArena = v, "Mask AOE fills past the arena edge."),
                 ("Show party", cfg.ShowPartyMembers, v => cfg.ShowPartyMembers = v, "You are always drawn on top, in your own colour."),
                 ("Server info bar", cfg.ShowDtrBar, v => cfg.ShowDtrBar = v, "Mine: state, and a Mine AI toggle — click either."),
-                ("Edge tabs", cfg.EdgeDockEnabled, v => cfg.EdgeDockEnabled = v, "Radar and Minerva tabs on the screen edge: point at one and it pops out beside it, click it to keep it out, click again to let it go."),
-                ("Radar tab on the right", cfg.RadarDockRightSide, v => cfg.RadarDockRightSide = v, "Put the Radar tab on the right edge of the screen instead of the left."),
-                ("Minerva tab on the right", cfg.EdgeDockRightSide, v => cfg.EdgeDockRightSide = v, "Put the Minerva tab (this window) on the right edge of the screen instead of the left."));
+                ("Edge tabs", cfg.EdgeDockEnabled, v => cfg.EdgeDockEnabled = v, "Radar and Minerva tabs on the screen edge: point at one and it pops out beside it, click it to keep it out, click again to let it go. Drag a tab and let go near any edge, anywhere along it, and it stays there."));
+            if (cfg.EdgeDockEnabled && ImGui.SmallButton("Reset tab positions##edgedock"))
+            {
+                cfg.ResetEdgeDockPlacement();
+                changed = true;
+            }
             UiKit.EndCard();
 
             ImGui.TableNextColumn();

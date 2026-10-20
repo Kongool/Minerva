@@ -46,8 +46,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly EncounterConfigStore encounterConfig;
     private readonly DtrStatus dtr;
     private readonly DockLayoutShare dockLayout;
-    private readonly EdgeDockWindow radarDock;
-    private readonly EdgeDockWindow mainDock;
+    private readonly EdgeDockWindow dock;
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
@@ -88,11 +87,13 @@ public sealed class Plugin : IDalamudPlugin
         this.windowSystem.AddWindow(this.encounterSettingsWindow);
 
         // The edge tabs draw the radar's and the main window's own bodies in their pop-outs, so a tab and its window
-        // cannot drift apart. Two docks, so each can take its own edge -- the radar on one side, the settings on the
-        // other. The layout is shared with Daedalus's and Charon's docks so docks on one edge stack instead of
-        // overlapping; Minerva's sit below theirs (radar 30, main window 31; Daedalus 10, Charon 20).
-        this.dockLayout = new DockLayoutShare(Service.PluginInterface);
-        this.radarDock = new EdgeDockWindow("Minerva Radar", 30,
+        // cannot drift apart. Each tab has its own edge and spot along it, and dragging a tab and letting go moves it
+        // there, as Daedalus's do. The layout is shared with Daedalus's and Charon's tabs so tabs on one edge are kept
+        // apart; where several want the same spot Minerva's come after theirs (Daedalus 10, Charon 20, Minerva 30).
+        if (this.Config.MigrateEdgeDock())
+            this.Config.Save();
+        this.dockLayout = new DockLayoutShare(Service.PluginInterface, "Minerva", order: 30);
+        this.dock = new EdgeDockWindow(
         [
             new EdgeDockWindow.Tab("radar", "Radar", () => this.Config.RadarEnabled, () => this.arenaWindow.Draw(), new System.Numerics.Vector2(400f, 460f),
                 () =>
@@ -101,14 +102,20 @@ public sealed class Plugin : IDalamudPlugin
                     Dalamud.Bindings.ImGui.ImGui.PushStyleColor(Dalamud.Bindings.ImGui.ImGuiCol.WindowBg, RadarView.BackgroundVec(this.Config.RadarOpacity));
                     return new ThemeScope(theme, 1);
                 }),
-        ], () => this.Config.RadarDockRightSide, this.dockLayout);
-        this.mainDock = new EdgeDockWindow("Minerva", 31,
-        [
             new EdgeDockWindow.Tab("main", "Minerva", () => true, () => this.mainWindow.Draw(), new System.Numerics.Vector2(700f, 520f),
                 () => new ThemeScope(AegisTheme.Push())),
-        ], () => this.Config.EdgeDockRightSide, this.dockLayout);
-        this.windowSystem.AddWindow(this.radarDock);
-        this.windowSystem.AddWindow(this.mainDock);
+        ],
+        id => id == "radar" ? (this.Config.RadarDockEdge, this.Config.RadarDockAlong) : (this.Config.MainDockEdge, this.Config.MainDockAlong),
+        (id, edge, along) =>
+        {
+            if (id == "radar")
+                (this.Config.RadarDockEdge, this.Config.RadarDockAlong) = (edge, along);
+            else
+                (this.Config.MainDockEdge, this.Config.MainDockAlong) = (edge, along);
+            this.Config.Save();
+        },
+        this.dockLayout);
+        this.windowSystem.AddWindow(this.dock);
 
         Service.CommandManager.AddHandler(CommandName, new CommandInfo(this.OnCommand)
         {
@@ -140,9 +147,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawUi()
     {
         // the edge tabs are up whenever they are switched on and one applies; the windows they stand for need not be
-        var docks = this.Config.EdgeDockEnabled && Service.ClientState.IsLoggedIn;
-        this.radarDock.IsOpen = docks && this.radarDock.AnyTab();
-        this.mainDock.IsOpen = docks && this.mainDock.AnyTab();
+        this.dock.IsOpen = this.Config.EdgeDockEnabled && Service.ClientState.IsLoggedIn && this.dock.AnyTab();
         var started = Stopwatch.GetTimestamp();
         this.windowSystem.Draw();
         if (this.modules.ActiveModule != null)
@@ -225,14 +230,14 @@ public sealed class Plugin : IDalamudPlugin
             if (this.Config.AutoShowRadar)
             {
                 if (docked)
-                    this.radarDock.Hold("radar");
+                    this.dock.Hold("radar");
                 else
                     this.arenaWindow.IsOpen = true;
             }
         }
         else
         {
-            this.radarDock.Release("radar");
+            this.dock.Release("radar");
             if (this.Config.AutoHideRadar)
                 this.arenaWindow.IsOpen = false;
         }

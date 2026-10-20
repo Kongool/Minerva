@@ -1731,31 +1731,72 @@ t.Section("Auto-dodge pathfinding");
             Minerva.Ui.DockMath.TurnUpAndPlace(drawnAt, drawnAt, corner) == new Vector2(10f, 100f)
             && Minerva.Ui.DockMath.TurnUpAndPlace(drawnAt + textSize, drawnAt, corner) == new Vector2(26f, 20f));
 
+        // Where tabs go: every plugin's publish to one shared list (Daedalus's and Charon's rules, ported with their
+        // tests), each where it was put, nudged apart only when they would overlap.
         const long dockNow = 100_000;
-        static Minerva.Ui.DockSlot Slot(string owner, float height, int order, int edge = 0, long seen = 100_000) => new(owner, edge, height, order, seen);
-        t.Near("a dock alone is centred", Minerva.Ui.DockLayout.TopFor("Minerva", 0, 100f, [Slot("Minerva", 100f, 30)], dockNow, 0f, 1000f), 450f);
-        var three = new[] { Slot("Minerva", 300f, 30), Slot("Charon", 200f, 20), Slot("Daedalus", 100f, 10) };
-        var groupTop = (1000f - (100f + 200f + 300f + 2f * Minerva.Ui.DockLayout.GroupGap)) / 2f;
-        t.Near("Minerva's tabs stack under Daedalus's and Charon's on one edge, not over them",
-            Minerva.Ui.DockLayout.TopFor("Minerva", 0, 300f, three, dockNow, 0f, 1000f), groupTop + 100f + 200f + 2f * Minerva.Ui.DockLayout.GroupGap);
-        t.Near("Daedalus's still starts the group", Minerva.Ui.DockLayout.TopFor("Daedalus", 0, 100f, three, dockNow, 0f, 1000f), groupTop);
-        t.Near("a dock on the other edge does not push it",
-            Minerva.Ui.DockLayout.TopFor("Minerva", 1, 300f, [Slot("Daedalus", 100f, 10), Slot("Minerva", 300f, 30, edge: 1)], dockNow, 0f, 1000f), 350f);
-        t.Near("a dock that stopped publishing drops out",
-            Minerva.Ui.DockLayout.TopFor("Minerva", 0, 300f, [Slot("Daedalus", 100f, 10, seen: dockNow - Minerva.Ui.DockLayout.StaleMs - 1), Slot("Minerva", 300f, 30)], dockNow, 0f, 1000f), 350f);
-        t.Near("a group taller than the screen starts at its top",
-            Minerva.Ui.DockLayout.TopFor("Daedalus", 0, 800f, [Slot("Daedalus", 800f, 10), Slot("Minerva", 800f, 30)], dockNow, 0f, 1000f), 0f);
-        t.Eq("the share tag is the one Daedalus and Charon use", Minerva.Ui.DockLayout.ShareTag, "EdgeDock.Layout.v1");
+        static Minerva.Ui.DockSlot Slot(string key, float length, int order, float along = 0.5f, int edge = 0, long seen = 100_000)
+            => new(key, edge, along, length, order, seen);
+        static Dictionary<string, float> Lay(params Minerva.Ui.DockSlot[] slots) => Minerva.Ui.DockLayout.Resolve(0, slots, dockNow, 0f, 1000f);
 
-        // the radar and the main window are two docks, so each can take its own edge, and on one edge they stack
-        var apart = new[] { Slot("Minerva Radar", 100f, 30, edge: 1), Slot("Minerva", 100f, 31, edge: 0) };
-        t.True("the radar on one edge and the main window on the other are each centred on their own",
-            Minerva.Ui.DockLayout.TopFor("Minerva Radar", 1, 100f, apart, dockNow, 0f, 1000f) == 450f
-            && Minerva.Ui.DockLayout.TopFor("Minerva", 0, 100f, apart, dockNow, 0f, 1000f) == 450f);
-        var together = new[] { Slot("Minerva", 100f, 31), Slot("Minerva Radar", 100f, 30) };
-        t.True("on one edge they stack, the radar on top",
-            Minerva.Ui.DockLayout.TopFor("Minerva Radar", 0, 100f, together, dockNow, 0f, 1000f)
-            < Minerva.Ui.DockLayout.TopFor("Minerva", 0, 100f, together, dockNow, 0f, 1000f));
+        t.Near("a tab alone is centred", Lay(Slot("Minerva/main", 100f, 3001))["Minerva/main"], 450f);
+        var shared = Lay(Slot("Minerva/radar", 200f, 3000), Slot("Daedalus/main", 100f, 1000));
+        var sharedTop = (1000f - (100f + Minerva.Ui.DockLayout.GroupGap + 200f)) / 2f;
+        t.True("tabs wanting the same spot stack centred, Daedalus's first",
+            shared["Daedalus/main"] == sharedTop && shared["Minerva/radar"] == sharedTop + 100f + Minerva.Ui.DockLayout.GroupGap);
+        var own = Lay(Slot("Minerva/radar", 100f, 3000), Slot("Minerva/main", 100f, 3001));
+        t.Near("one plugin's own tabs sit closer than two plugins'", own["Minerva/main"], own["Minerva/radar"] + 100f + Minerva.Ui.DockLayout.TabGap);
+        t.Near("a tab put somewhere stays there", Lay(Slot("Minerva/main", 100f, 3001, along: 0.2f))["Minerva/main"], 150f);
+        var apart = Lay(Slot("Minerva/radar", 100f, 3000, along: 0.1f), Slot("Charon/Floor", 100f, 2001, along: 0.9f));
+        t.True("tabs put far apart stay put", apart["Minerva/radar"] == 50f && apart["Charon/Floor"] == 850f);
+        var dropped = Lay(Slot("Daedalus/main", 100f, 1000, along: 0.30f), Slot("Minerva/radar", 100f, 3000, along: 0.32f));
+        t.True("a tab dropped on another nudges both apart, end to end, centred on both wishes",
+            dropped["Minerva/radar"] == dropped["Daedalus/main"] + 100f + Minerva.Ui.DockLayout.GroupGap
+            && MathF.Abs((dropped["Daedalus/main"] + dropped["Minerva/radar"] + 100f) / 2f - 310f) < 0.01f);
+        t.True("a tab at either end stays on screen",
+            Lay(Slot("Minerva/main", 100f, 3001, along: 1f))["Minerva/main"] == 900f && Lay(Slot("Minerva/main", 100f, 3001, along: 0f))["Minerva/main"] == 0f);
+        Minerva.Ui.DockSlot[] twoEdges = [Slot("Minerva/radar", 100f, 3000, edge: 0), Slot("Minerva/main", 200f, 3001, edge: 1)];
+        t.True("tabs on other edges do not push each other",
+            Minerva.Ui.DockLayout.Resolve(0, twoEdges, dockNow, 0f, 1000f)["Minerva/radar"] == 450f
+            && Minerva.Ui.DockLayout.Resolve(1, twoEdges, dockNow, 0f, 1000f)["Minerva/main"] == 400f);
+        var stale = Lay(Slot("Daedalus/main", 100f, 1000, seen: dockNow - Minerva.Ui.DockLayout.StaleMs - 1), Slot("Minerva/main", 200f, 3001));
+        t.True("a tab that stopped publishing drops out and the rest close up", !stale.ContainsKey("Daedalus/main") && stale["Minerva/main"] == 400f);
+        var ties = Lay(Slot("Zeta/a", 100f, 1000), Slot("Alpha/a", 100f, 1000));
+        t.True("full ties are settled by key, so every plugin computes the same layout", ties["Alpha/a"] < ties["Zeta/a"]);
+        t.Near("a run longer than the screen starts at its top", Lay(Slot("Daedalus/main", 800f, 1000), Slot("Minerva/main", 800f, 3001))["Daedalus/main"], 0f);
+        t.Eq("the owner is the key before the slash", Slot("Charon/Floor", 1f, 0).Owner, "Charon");
+        t.Eq("the share tag is the one Daedalus and Charon use now", Minerva.Ui.DockLayout.ShareTag, "EdgeDock.Layout.v2");
+
+        // Where a dragged tab lands and how a tab and its panel sit on each edge, on a 1920x1080 screen.
+        var workPos = Vector2.Zero;
+        var workSize = new Vector2(1920f, 1080f);
+        t.True("a dropped tab lands on the nearest edge",
+            Minerva.Ui.DockMath.NearestEdge(new Vector2(20f, 540f), workPos, workSize) == Minerva.Ui.DockEdge.Left
+            && Minerva.Ui.DockMath.NearestEdge(new Vector2(1900f, 540f), workPos, workSize) == Minerva.Ui.DockEdge.Right
+            && Minerva.Ui.DockMath.NearestEdge(new Vector2(960f, 15f), workPos, workSize) == Minerva.Ui.DockEdge.Top
+            && Minerva.Ui.DockMath.NearestEdge(new Vector2(960f, 1070f), workPos, workSize) == Minerva.Ui.DockEdge.Bottom
+            && Minerva.Ui.DockMath.NearestEdge(new Vector2(300f, 900f), workPos, workSize) == Minerva.Ui.DockEdge.Bottom);
+        t.True("top and bottom run along the edge, left and right stand up it",
+            Minerva.Ui.DockMath.IsHorizontal(Minerva.Ui.DockEdge.Top) && Minerva.Ui.DockMath.IsHorizontal(Minerva.Ui.DockEdge.Bottom)
+            && !Minerva.Ui.DockMath.IsHorizontal(Minerva.Ui.DockEdge.Left) && !Minerva.Ui.DockMath.IsHorizontal(Minerva.Ui.DockEdge.Right));
+        var dropAt = new Vector2(480f, 270f);
+        t.True("the drop spot is measured down the sides and across the top and bottom",
+            MathF.Abs(Minerva.Ui.DockMath.AlongFraction(Minerva.Ui.DockEdge.Left, dropAt, workPos, workSize) - 0.25f) < 0.001f
+            && MathF.Abs(Minerva.Ui.DockMath.AlongFraction(Minerva.Ui.DockEdge.Top, dropAt, workPos, workSize) - 0.25f) < 0.001f
+            && Minerva.Ui.DockMath.AlongFraction(Minerva.Ui.DockEdge.Bottom, new Vector2(5000f, 0f), workPos, workSize) == 1f);
+        t.True("each tab hugs its edge",
+            Minerva.Ui.DockMath.TabRect(Minerva.Ui.DockEdge.Left, 300f, 90f, 34f, workPos, workSize) == (new Vector2(0f, 300f), new Vector2(34f, 90f))
+            && Minerva.Ui.DockMath.TabRect(Minerva.Ui.DockEdge.Right, 300f, 90f, 34f, workPos, workSize) == (new Vector2(1886f, 300f), new Vector2(34f, 90f))
+            && Minerva.Ui.DockMath.TabRect(Minerva.Ui.DockEdge.Top, 300f, 90f, 34f, workPos, workSize) == (new Vector2(300f, 0f), new Vector2(90f, 34f))
+            && Minerva.Ui.DockMath.TabRect(Minerva.Ui.DockEdge.Bottom, 300f, 90f, 34f, workPos, workSize) == (new Vector2(300f, 1046f), new Vector2(90f, 34f)));
+        var panel = new Vector2(400f, 460f);
+        t.True("the panel opens on the screen side of its tab",
+            Minerva.Ui.DockMath.PanelPlacement(Minerva.Ui.DockEdge.Left, new Vector2(0f, 400f), new Vector2(34f, 90f), panel, workPos, workSize, 6f) == (new Vector2(40f, 400f), Vector2.Zero)
+            && Minerva.Ui.DockMath.PanelPlacement(Minerva.Ui.DockEdge.Right, new Vector2(1886f, 400f), new Vector2(34f, 90f), panel, workPos, workSize, 6f) == (new Vector2(1880f, 400f), new Vector2(1f, 0f))
+            && Minerva.Ui.DockMath.PanelPlacement(Minerva.Ui.DockEdge.Top, new Vector2(800f, 0f), new Vector2(90f, 34f), panel, workPos, workSize, 6f) == (new Vector2(800f, 40f), Vector2.Zero)
+            && Minerva.Ui.DockMath.PanelPlacement(Minerva.Ui.DockEdge.Bottom, new Vector2(800f, 1046f), new Vector2(90f, 34f), panel, workPos, workSize, 6f) == (new Vector2(800f, 1040f), new Vector2(0f, 1f)));
+        t.True("a panel near the end of its edge slides back on screen",
+            Minerva.Ui.DockMath.PanelPlacement(Minerva.Ui.DockEdge.Top, new Vector2(1800f, 0f), new Vector2(90f, 34f), panel, workPos, workSize, 6f).Pos.X == 1920f - 400f - 4f
+            && Minerva.Ui.DockMath.PanelPlacement(Minerva.Ui.DockEdge.Left, new Vector2(0f, 1000f), new Vector2(34f, 90f), panel, workPos, workSize, 6f).Pos.Y == 1080f - 460f - 4f);
     }
     t.True("guesser skips single-target and unknown", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.SingleTarget)) && !Minerva.Automation.AutoHints.Draws(Minerva.Generation.ShapeHint.Unknown));
 

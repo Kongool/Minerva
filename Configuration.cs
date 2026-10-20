@@ -80,12 +80,54 @@ public sealed class Configuration : IPluginConfiguration
     /// it, click to keep it out (<see cref="Windows.EdgeDockWindow"/>).</summary>
     public bool EdgeDockEnabled { get; set; } = true;
 
-    /// <summary>The Minerva (main window) edge tab on the right edge of the screen instead of the left.</summary>
+    /// <summary>The old "Minerva tab on the right" switch, replaced by <see cref="MainDockEdge"/>. Kept only so a saved
+    /// true is carried over once at load (<see cref="MigrateEdgeDock"/>), then cleared.</summary>
     public bool EdgeDockRightSide { get; set; }
 
-    /// <summary>The Radar edge tab on the right edge of the screen instead of the left: apart from the main window's,
-    /// so the radar can sit on one side and the settings on the other.</summary>
+    /// <summary>The old "Radar tab on the right" switch, replaced by <see cref="RadarDockEdge"/>; carried over the same way.</summary>
     public bool RadarDockRightSide { get; set; }
+
+    /// <summary>Which screen edge the Minerva (main window) tab is pinned to. Dragging the tab changes it.</summary>
+    public Minerva.Ui.DockEdge MainDockEdge { get; set; } = Minerva.Ui.DockEdge.Left;
+
+    /// <summary>Where along its edge the Minerva tab sits: its centre as a fraction of the edge (0.5 = the middle).</summary>
+    public float MainDockAlong { get; set; } = 0.5f;
+
+    /// <summary>Which screen edge the Radar tab is pinned to. Dragging the tab changes it.</summary>
+    public Minerva.Ui.DockEdge RadarDockEdge { get; set; } = Minerva.Ui.DockEdge.Left;
+
+    /// <summary>Where along its edge the Radar tab sits: its centre as a fraction of the edge (0.5 = the middle).</summary>
+    public float RadarDockAlong { get; set; } = 0.5f;
+
+    /// <summary>Carries the old right-edge switches over to the tabs' edges. True if it changed anything.</summary>
+    public bool MigrateEdgeDock()
+    {
+        var changed = false;
+        if (this.EdgeDockRightSide)
+        {
+            this.MainDockEdge = Minerva.Ui.DockEdge.Right;
+            this.EdgeDockRightSide = false;
+            changed = true;
+        }
+
+        if (this.RadarDockRightSide)
+        {
+            this.RadarDockEdge = Minerva.Ui.DockEdge.Right;
+            this.RadarDockRightSide = false;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    /// <summary>Both tabs back to the middle of the left edge.</summary>
+    public void ResetEdgeDockPlacement()
+    {
+        this.MainDockEdge = Minerva.Ui.DockEdge.Left;
+        this.RadarDockEdge = Minerva.Ui.DockEdge.Left;
+        this.MainDockAlong = 0.5f;
+        this.RadarDockAlong = 0.5f;
+    }
 
     /// <summary>How party markers are coloured — see <see cref="PartyColoring"/>.</summary>
     public PartyColoring PartyColorBy { get; set; } = PartyColoring.Role;
