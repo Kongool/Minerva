@@ -61,6 +61,13 @@ public sealed class RouteGrid
     private readonly ulong pending;   // zones that have not fired yet: telegraphs, as against ground already live
     private readonly AIHints hints;
 
+    // what it was built for, so a solve can hand the same grid to every attempt asking the same question
+    private readonly ArenaBounds builtBounds;
+    private readonly int builtObstacles;
+    private readonly DateTime builtDeadline, builtNow, builtLiveBy;
+    private readonly WPos builtPlayer;
+    private readonly float builtMargin;
+
     public int Width => this.w;
     public int Height => this.h;
 
@@ -80,6 +87,13 @@ public sealed class RouteGrid
         this.cell = cellSize;
         this.speed = moveSpeed;
         this.hints = hints;
+        this.builtBounds = hints.Bounds;
+        this.builtObstacles = hints.TemporaryObstacles.Count;
+        this.builtDeadline = deadline;
+        this.builtNow = now;
+        this.builtLiveBy = liveBy;
+        this.builtPlayer = player;
+        this.builtMargin = margin;
         var center = hints.Center;
         // wide enough to hold a character who is a little way outside the arena, so there is a route back in
         var reach = MathF.Max(hints.Bounds.Extent, MathF.Min((player - center).Length() + cellSize, hints.Bounds.Extent + MaxOutsideReach));
@@ -146,6 +160,13 @@ public sealed class RouteGrid
     }
 
     public WPos Center(int x, int z) => new(this.origin.X + (x * this.cell), this.origin.Z + (z * this.cell));
+
+    /// <summary>Would a grid built now with these arguments be this one? Within one solve only the floor (a retry on the
+    /// spare bounds) and the obstacles could have changed besides the arguments themselves.</summary>
+    internal bool BuiltFor(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, DateTime now, float moveSpeed, DateTime liveBy)
+        => ReferenceEquals(this.hints, hints) && ReferenceEquals(this.builtBounds, hints.Bounds) && this.builtObstacles == hints.TemporaryObstacles.Count
+            && this.builtDeadline == deadline && this.builtPlayer == player && this.cell == cellSize && this.builtMargin == margin
+            && this.builtNow == now && this.speed == moveSpeed && this.builtLiveBy == liveBy;
 
     /// <summary>For each cell outside the floor, how many steps it is from the nearest cell that is not; zero for
     /// those. A breadth-first flood inward from the floor's own edge.</summary>

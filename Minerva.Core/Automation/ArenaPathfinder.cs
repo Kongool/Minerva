@@ -340,6 +340,41 @@ public static class ArenaPathfinder
 
     public static SafeSpot Solve(AIHints hints, DateTime now, float horizonSeconds = 3f, float cellSize = 1f, float safetyMargin = 0f, UptimeGoal? goal = null, float moveSpeed = DefaultMoveSpeed, float clearanceLead = 0f)
     {
+        // One solve asks the same grid question several times over -- the same deadline and margin with another walking
+        // budget, the stages again at the fallback -- so the grids it builds are kept for as long as it runs (see GridFor),
+        // and no longer: between solves the zones, the obstacles and the player all move. Elm Gigas, 2026-10-19: 25 grids
+        // for one answer, 20-27ms a solve, and a dodge re-solves every 0.08s.
+        if (hints.SolveGrids != null)
+            return SolveOnce(hints, now, horizonSeconds, cellSize, safetyMargin, goal, moveSpeed, clearanceLead);   // a retry inside a solve
+        hints.SolveGrids = [];
+        try
+        {
+            return SolveOnce(hints, now, horizonSeconds, cellSize, safetyMargin, goal, moveSpeed, clearanceLead);
+        }
+        finally
+        {
+            hints.SolveGrids = null;
+        }
+    }
+
+    /// <summary>The route grid for this question, built once per solve however many times it is asked.</summary>
+    private static RouteGrid GridFor(AIHints hints, DateTime deadline, WPos player, float cellSize, float margin, DateTime now, float moveSpeed, DateTime liveBy)
+    {
+        var kept = hints.SolveGrids;
+        if (kept != null)
+        {
+            foreach (var known in kept)
+                if (known.BuiltFor(hints, deadline, player, cellSize, margin, now, moveSpeed, liveBy))
+                    return known;
+        }
+
+        var grid = new RouteGrid(hints, deadline, player, cellSize, margin, now, moveSpeed, liveBy);
+        kept?.Add(grid);
+        return grid;
+    }
+
+    private static SafeSpot SolveOnce(AIHints hints, DateTime now, float horizonSeconds, float cellSize, float safetyMargin, UptimeGoal? goal, float moveSpeed, float clearanceLead)
+    {
         // Solve as though it were already clearanceLead seconds later. One shift buys both halves of being
         // early: a zone becomes imminent that much sooner (the deadline moves with it), and the budget to
         // escape one shrinks by the same amount, so a cell that can only just be reached in time no longer
@@ -522,7 +557,7 @@ public static class ArenaPathfinder
     /// whether or not it can be reached in time: the last resort when every clean route has been ruled out.</summary>
     private static bool NearestClearGround(AIHints hints, DateTime deadline, DateTime solveNow, DateTime now, WPos player, float cellSize, float moveSpeed, out WPos best)
     {
-        var grid = new RouteGrid(hints, deadline, player, cellSize, 0f, solveNow, moveSpeed, now);
+        var grid = GridFor(hints, deadline, player, cellSize, 0f, solveNow, moveSpeed, now);
         best = player;
         var bestDistance = float.MaxValue;
         for (var gz = 0; gz < grid.Height; ++gz)
@@ -1115,7 +1150,7 @@ public static class ArenaPathfinder
         // Cost by route, not by displacement. Everything below scores a cell on what it takes to GET there,
         // so a safe wedge behind a rock is priced with the walk around the rock included, and an unreachable
         // one is not considered at all.
-        var grid = new RouteGrid(hints, deadline, player, cellSize, margin, now, moveSpeed, realNow);
+        var grid = GridFor(hints, deadline, player, cellSize, margin, now, moveSpeed, realNow);
 
         for (var gz = 0; gz < grid.Height; ++gz)
         {

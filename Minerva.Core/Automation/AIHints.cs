@@ -2,13 +2,52 @@ namespace Minerva;
 
 /// <summary>A danger area the AI should keep out of, resolving at <see cref="Activation"/>. Backed by a
 /// <see cref="ShapeDistance"/> so any shape (analytic or boolean) and any boolean combination works.</summary>
-public readonly struct ForbiddenZone(ShapeDistance shapeDistance, DateTime activation, ulong source = default)
+public readonly struct ForbiddenZone
 {
-    public readonly ShapeDistance ShapeDistance = shapeDistance;
-    public readonly DateTime Activation = activation;
-    public readonly ulong Source = source;
+    public readonly ShapeDistance ShapeDistance;
+    public readonly DateTime Activation;
+    public readonly ulong Source;
+
+    // The shape's bounding circle (ShapeDistance.Bounds), asked once here rather than per point; an infinite radius when
+    // it has none, so nothing is ever beyond it.
+    private readonly WPos boundCenter;
+    private readonly float boundRadius;
+
+    public ForbiddenZone(ShapeDistance shapeDistance, DateTime activation, ulong source = default)
+    {
+        this.ShapeDistance = shapeDistance;
+        this.Activation = activation;
+        this.Source = source;
+        (this.boundCenter, this.boundRadius) = shapeDistance.Bounds() ?? (default, float.PositiveInfinity);
+    }
 
     public bool Contains(WPos p) => this.ShapeDistance.Distance(p) <= 0f;
+
+    /// <summary>Is the point certainly further than <paramref name="reach"/> from everything this zone forbids? Only from
+    /// its bounding circle, so false says nothing. A hundredth of a yalm of slack leaves the exact boundary to the shape.</summary>
+    internal bool Beyond(WPos p, float reach)
+    {
+        var r = this.boundRadius + reach + 0.01f;
+        return r < 0f || (p - this.boundCenter).LengthSq() > r * r;
+    }
+
+    /// <summary>The cells of a grid that the zone could reach within <paramref name="reach"/>: all of them when it cannot say.</summary>
+    internal void CellRange(WPos origin, float cell, int width, int height, float reach, out int x0, out int x1, out int z0, out int z1)
+    {
+        (x0, x1, z0, z1) = (0, width - 1, 0, height - 1);
+        if (float.IsPositiveInfinity(this.boundRadius))
+            return;
+        var r = this.boundRadius + reach + 0.01f;
+        if (r < 0f)
+        {
+            (x0, x1) = (0, -1);
+            return;
+        }
+        x0 = Math.Max(x0, (int)MathF.Floor((this.boundCenter.X - r - origin.X) / cell));
+        x1 = Math.Min(x1, (int)MathF.Ceiling((this.boundCenter.X + r - origin.X) / cell));
+        z0 = Math.Max(z0, (int)MathF.Floor((this.boundCenter.Z - r - origin.Z) / cell));
+        z1 = Math.Min(z1, (int)MathF.Ceiling((this.boundCenter.Z + r - origin.Z) / cell));
+    }
 }
 
 /// <summary>
@@ -186,7 +225,7 @@ public sealed class AIHints
         this.LandingSpread = 0f;
         this.LandingSeed = 0ul;
         this.touchZones = [];
-        this.touchValid = false;
+        this.touchTables[0].Valid = this.touchTables[1].Valid = false;
         this.ForbiddenZones.Clear();
         this.PotentialTargets.Clear();
         this.TemporaryObstacles = [];
@@ -893,6 +932,8 @@ public sealed class AIHints
     /// </summary>
     internal static bool Touches(in ForbiddenZone z, WPos at, float margin)
     {
+        if (z.Beyond(at, margin))
+            return false;
         if (z.ShapeDistance is not SDShapeCheck)
             return z.ShapeDistance.Distance(at) <= margin;
         if (z.Contains(at))
@@ -956,7 +997,7 @@ public sealed class AIHints
         var room = cap;
         foreach (var z in this.ForbiddenZones)
         {
-            if (z.Activation > deadline || z.ShapeDistance is SDShapeCheck)
+            if (z.Activation > deadline || z.ShapeDistance is SDShapeCheck || z.Beyond(p, room))
                 continue;
             var d = z.ShapeDistance.Distance(p);
             if (d < room)
@@ -1153,19 +1194,31 @@ public sealed class AIHints
         return new CellDanger(risky, mask, soonest);
     }
 
-    // Which zones touch each cell of the last grid asked about; see ZoneTouches.
-    private ulong[]? touchCells;
+    // Which zones touch each cell of the grids last asked about; see ZoneTouches. Two, because a solve asks at its safety
+    // margin and again at none, and with one the two kept replacing each other: four measurings of the same zones on one
+    // Elm Gigas frame, 2026-10-19.
+    private sealed class TouchTable
+    {
+        public ulong[] Cells = [];
+        public bool Valid;
+        public WPos Origin;
+        public float Cell;
+        public float Margin;
+        public int Width;
+        public int Height;
+    }
 
-    // The answers above belong to this frame's zones. Clear drops them without dropping the array, which is reused:
+    private readonly TouchTable[] touchTables = [new(), new()];
+    private int touchNewest;
+
+    /// <summary>The route grids of the solve under way, shared by every attempt in it that asks the same question; null
+    /// between solves. See <see cref="ArenaPathfinder.Solve"/>.</summary>
+    internal List<RouteGrid>? SolveGrids;
+
+    // The answers above belong to this frame's zones. Clear drops them without dropping the arrays, which are reused:
     // emptying the zone list alone was not enough, since a frame with no zones then "matched" it, and the last
     // frame's answers came back naming zones that no longer existed (ArgumentOutOfRangeException, 2026-09-27).
-    private bool touchValid;
     private ForbiddenZone[] touchZones = [];
-    private WPos touchOrigin;
-    private float touchCell;
-    private float touchMargin;
-    private int touchWidth;
-    private int touchHeight;
 
     /// <summary>
     /// For every cell of a grid, one bit per forbidden zone that touches it (within <paramref name="margin"/>) --
@@ -1185,36 +1238,55 @@ public sealed class AIHints
         var zones = this.ForbiddenZones;
         if (zones.Count > 64)
             return null;
-        if (this.touchValid && this.touchCells != null && this.touchOrigin == origin && this.touchCell == cell && this.touchWidth == width
-            && this.touchHeight == height && this.touchMargin == margin && this.SameZonesAsTouches())
-            return this.touchCells;
-
-        var cells = this.touchCells != null && this.touchCells.Length == width * height ? this.touchCells : new ulong[width * height];
-        for (var z = 0; z < height; ++z)
+        if (!this.SameZonesAsTouches())
         {
-            for (var x = 0; x < width; ++x)
+            this.touchTables[0].Valid = this.touchTables[1].Valid = false;
+            this.touchZones = [.. zones];
+        }
+        for (var t = 0; t < this.touchTables.Length; ++t)
+        {
+            var known = this.touchTables[t];
+            if (known.Valid && known.Origin == origin && known.Cell == cell && known.Width == width && known.Height == height && known.Margin == margin)
             {
-                // the same expression RouteGrid.Center uses, so the point measured is the point the grid means
-                var p = new WPos(origin.X + (x * cell), origin.Z + (z * cell));
-                var mask = 0ul;
-                for (var k = 0; k < zones.Count; ++k)
-                {
-                    if (Touches(zones[k], p, margin))
-                        mask |= 1ul << k;
-                }
-
-                cells[(z * width) + x] = mask;
+                this.touchNewest = t;
+                return known.Cells;
             }
         }
 
-        this.touchCells = cells;
-        this.touchValid = true;
-        this.touchZones = [.. zones];
-        this.touchOrigin = origin;
-        this.touchCell = cell;
-        this.touchMargin = margin;
-        this.touchWidth = width;
-        this.touchHeight = height;
+        // the older of the two goes
+        this.touchNewest = 1 - this.touchNewest;
+        var table = this.touchTables[this.touchNewest];
+        if (table.Cells.Length == width * height)
+            Array.Clear(table.Cells);
+        else
+            table.Cells = new ulong[width * height];
+        var cells = table.Cells;
+
+        // Zone by zone, over only the cells its bounding circle reaches; everything else stays untouched, which is what
+        // measuring it would have said.
+        for (var k = 0; k < zones.Count; ++k)
+        {
+            var zone = zones[k];
+            var bit = 1ul << k;
+            zone.CellRange(origin, cell, width, height, margin, out var x0, out var x1, out var z0, out var z1);
+            for (var z = z0; z <= z1; ++z)
+            {
+                for (var x = x0; x <= x1; ++x)
+                {
+                    // the same expression RouteGrid.Center uses, so the point measured is the point the grid means
+                    var p = new WPos(origin.X + (x * cell), origin.Z + (z * cell));
+                    if (Touches(zone, p, margin))
+                        cells[(z * width) + x] |= bit;
+                }
+            }
+        }
+
+        table.Valid = true;
+        table.Origin = origin;
+        table.Cell = cell;
+        table.Margin = margin;
+        table.Width = width;
+        table.Height = height;
         return cells;
     }
 

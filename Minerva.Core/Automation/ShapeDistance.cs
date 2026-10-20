@@ -12,6 +12,29 @@ public abstract class ShapeDistance
 
     /// <summary>True when the point is inside/forbidden (distance ≤ 0).</summary>
     public bool Contains(WPos p) => this.Distance(p) <= 0f;
+
+    /// <summary>
+    /// A circle holding everything this shape forbids, for a shape whose <see cref="Distance"/> outside it is at least
+    /// the distance to that circle; null when the shape cannot promise both (anything inverted, the boolean checks, the
+    /// half-plane forms that underestimate past a corner).
+    /// <para>The solver measures every zone against every cell of its grid, and most zones are small: Elm Gigas,
+    /// 2026-10-19, eight rolling puddles each publishing three swept capsules, 36 zones over a 60-by-60 grid, and
+    /// nearly all of those 130,000 measurements were of ground a puddle could not reach. Skipping a cell outside the
+    /// circle gives the same answer, because the distance there cannot be smaller.</para>
+    /// </summary>
+    public virtual (WPos Center, float Radius)? Bounds() => null;
+
+    /// <summary>A circle holding both of these: the larger one alone when it already holds the other.</summary>
+    internal static (WPos Center, float Radius) Enclose((WPos Center, float Radius) a, (WPos Center, float Radius) b)
+    {
+        var d = (b.Center - a.Center).Length();
+        if (d + b.Radius <= a.Radius)
+            return a;
+        if (d + a.Radius <= b.Radius)
+            return b;
+        var radius = (d + a.Radius + b.Radius) * 0.5f;
+        return (a.Center + ((b.Center - a.Center) * ((radius - a.Radius) / d)), radius);
+    }
 }
 
 /// <summary>
@@ -60,6 +83,7 @@ public sealed class SDShapeSet : ShapeDistance
 public sealed class SDCircle(WPos origin, float radius) : ShapeDistance
 {
     public override float Distance(WPos p) => (p - origin).Length() - radius;
+    public override (WPos Center, float Radius)? Bounds() => (origin, radius);
 }
 
 public sealed class SDInvertedCircle(WPos origin, float radius) : ShapeDistance
@@ -85,6 +109,8 @@ public sealed class SDDonut(WPos origin, float innerRadius, float outerRadius) :
         var d = (p - origin).Length();
         return MathF.Max(innerRadius - d, d - outerRadius); // ≤0 within the ring
     }
+
+    public override (WPos Center, float Radius)? Bounds() => outerRadius >= 0f ? (origin, outerRadius) : null;
 }
 
 /// <summary>Inverse of <see cref="SDDonut"/>: safe inside the ring, forbidden everywhere else.</summary>
@@ -135,6 +161,15 @@ public sealed class SDRect : ShapeDistance
         if (dFwd <= 0f || dSide <= 0f)
             return MathF.Max(dFwd, dSide);
         return MathF.Sqrt((dFwd * dFwd) + (dSide * dSide));
+    }
+
+    // only for a unit direction: a longer one scales every projection above, and the rectangle with it
+    public override (WPos Center, float Radius)? Bounds()
+    {
+        if (MathF.Abs(this.dir.LengthSq() - 1f) > 1e-3f || this.lenFront + this.lenBack < 0f || this.halfWidth < 0f)
+            return null;
+        var halfLength = (this.lenFront + this.lenBack) * 0.5f;
+        return (this.origin + (this.dir * ((this.lenFront - this.lenBack) * 0.5f)), MathF.Sqrt((halfLength * halfLength) + (this.halfWidth * this.halfWidth)));
     }
 }
 
@@ -231,6 +266,18 @@ public sealed class SDArcCapsule : ShapeDistance
 
         return toCenterline - this.tube;
     }
+
+    // Round the middle of the arc: no point of an arc spanning s is further from its middle than the chord 2R sin(s/4).
+    public override (WPos Center, float Radius)? Bounds()
+    {
+        if (this.tube < 0f)
+            return null;
+        var span = (this.to - this.from).Rad;
+        if (span >= 2f * MathF.PI)
+            return (this.orbitCenter, this.orbitRadius + this.tube);
+        var middle = this.orbitCenter + (((this.from + this.to) * 0.5f).ToDirection() * this.orbitRadius);
+        return (middle, (2f * this.orbitRadius * MathF.Sin(span * 0.25f)) + this.tube);
+    }
 }
 
 /// <summary>Two perpendicular bars crossing at <paramref name="origin"/> — the plus/cross AOE.</summary>
@@ -240,6 +287,7 @@ public sealed class SDCross(WPos origin, Angle rotation, float length, float hal
     private readonly SDRect arm2 = new(origin, rotation + 90f.Degrees(), length, length, halfWidth);
 
     public override float Distance(WPos p) => MathF.Min(this.arm1.Distance(p), this.arm2.Distance(p));
+    public override (WPos Center, float Radius)? Bounds() => length >= 0f && halfWidth >= 0f ? (origin, MathF.Sqrt((length * length) + (halfWidth * halfWidth))) : null;
 }
 
 /// <summary>Forbids everything outside the cross — the safe ground is the cross itself.</summary>
@@ -311,12 +359,14 @@ public sealed class SDInvertedRect(WPos origin, WDir direction, float lenFront, 
 public sealed class SDCone(WPos origin, float radius, Angle centerDir, Angle halfAngle) : ShapeDistance
 {
     public override float Distance(WPos p) => SectorDistance.Signed(p, origin, 0f, radius, centerDir, halfAngle);
+    public override (WPos Center, float Radius)? Bounds() => radius >= 0f ? (origin, radius) : null;
 }
 
 /// <summary>Distance to an annular sector: between two radii and within ±halfAngle of a direction.</summary>
 public sealed class SDDonutSector(WPos origin, float innerRadius, float outerRadius, Angle centerDir, Angle halfAngle) : ShapeDistance
 {
     public override float Distance(WPos p) => SectorDistance.Signed(p, origin, innerRadius, outerRadius, centerDir, halfAngle);
+    public override (WPos Center, float Radius)? Bounds() => innerRadius >= 0f && outerRadius >= 0f ? (origin, MathF.Max(innerRadius, outerRadius)) : null;
 }
 
 /// <summary>Shared exact geometry for sectors and annular sectors.</summary>
@@ -389,6 +439,8 @@ public sealed class SDCapsule : ShapeDistance
         var t = ab.LengthSq() > 0f ? Math.Clamp((p - this.a).Dot(ab) / ab.LengthSq(), 0f, 1f) : 0f;
         return (p - (this.a + ab * t)).Length() - this.radius;
     }
+
+    public override (WPos Center, float Radius)? Bounds() => (this.a + ((this.b - this.a) * 0.5f), ((this.b - this.a).Length() * 0.5f) + this.radius);
 }
 
 /// <summary>Intersection: the point is inside only when inside every zone (max of the distances).</summary>
@@ -401,6 +453,16 @@ public sealed class SDIntersection(ShapeDistance[] zones) : ShapeDistance
             d = MathF.Max(d, z.Distance(p));
         return d;
     }
+
+    // inside all of them, so inside the tightest one any of them can name
+    public override (WPos Center, float Radius)? Bounds()
+    {
+        (WPos Center, float Radius)? best = null;
+        foreach (var z in zones)
+            if (z.Bounds() is { } b && (best == null || b.Radius < best.Value.Radius))
+                best = b;
+        return best;
+    }
 }
 
 /// <summary>Union: the point is inside when inside any zone (min of the distances).</summary>
@@ -412,6 +474,19 @@ public sealed class SDUnion(ShapeDistance[] zones) : ShapeDistance
         foreach (var z in zones)
             d = MathF.Min(d, z.Distance(p));
         return d;
+    }
+
+    // inside one of them, so inside a circle round all of them -- and only if every one of them can say
+    public override (WPos Center, float Radius)? Bounds()
+    {
+        (WPos Center, float Radius)? all = null;
+        foreach (var z in zones)
+        {
+            if (z.Bounds() is not { } b)
+                return null;
+            all = all is { } a ? Enclose(a, b) : b;
+        }
+        return all;
     }
 }
 

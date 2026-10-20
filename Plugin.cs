@@ -143,16 +143,26 @@ public sealed class Plugin : IDalamudPlugin
         var docks = this.Config.EdgeDockEnabled && Service.ClientState.IsLoggedIn;
         this.radarDock.IsOpen = docks && this.radarDock.AnyTab();
         this.mainDock.IsOpen = docks && this.mainDock.AnyTab();
+        var started = Stopwatch.GetTimestamp();
         this.windowSystem.Draw();
+        if (this.modules.ActiveModule != null)
+            this.frameCost.AddDraw(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
     }
+
+    // What each tick costs while a fight is up, logged when it ends (see FrameCost).
+    private readonly FrameCost frameCost = new();
 
     private void OnUpdate(IFramework framework)
     {
         try
         {
+            var started = Stopwatch.GetTimestamp();
             this.sync.Update(framework.UpdateDelta);
+            started = this.Timed(FrameCost.Stage.Sync, started);
             this.modules.Update();
+            started = this.Timed(FrameCost.Stage.Modules, started);
             this.ai.Update();
+            started = this.Timed(FrameCost.Stage.Dodge, started);
             this.ipc.Update();
             this.roster.Update(DateTime.Now);
             var recordingResult = this.replay.UpdateRecording(framework.UpdateDelta);
@@ -167,11 +177,29 @@ public sealed class Plugin : IDalamudPlugin
             this.SyncRadarVisibility();
             this.dtr.Update();
             this.encounterConfig.Flush();
+            this.Timed(FrameCost.Stage.Rest, started);
+            if (this.modules.ActiveModule != null)
+            {
+                this.frameCost.EndTick(framework.UpdateDelta.TotalSeconds);
+            }
+            else
+            {
+                this.frameCost.DiscardTick();
+                if (this.frameCost.Summarise() is { } cost)
+                    Service.Log.Information(cost);
+            }
         }
         catch (Exception ex)
         {
             Service.Log.Error(ex, "Minerva sync tick failed.");
         }
+    }
+
+    private long Timed(FrameCost.Stage stage, long started)
+    {
+        var now = Stopwatch.GetTimestamp();
+        this.frameCost.Add(stage, Stopwatch.GetElapsedTime(started, now).TotalMilliseconds);
+        return now;
     }
 
     /// <summary>

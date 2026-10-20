@@ -5535,6 +5535,138 @@ t.Section("Pending effects");
     t.True("landing in the tornado is forbidden too", sd.Distance(new WPos(10f, -8f)) <= 0f);
 }
 
+// ---- A zone's bounding circle holds the whole shape, and nothing outside it is nearer than the circle ----
+// Elm Gigas, 2026-10-19: the solver measured 36 zones against every cell of its grid, most of them small capsules a
+// long way off. The circle lets it skip those, which is only sound if both of these hold for every shape that names one.
+{
+    var bndOrigin = new WPos(3f, -2f);
+    (string Name, ShapeDistance Shape)[] bndShapes =
+    [
+        ("circle", new SDCircle(bndOrigin, 6f)),
+        ("capsule", new SDCapsule(bndOrigin, 30f.Degrees(), 12f, 4.2f)),
+        ("capsule of no length", new SDCapsule(bndOrigin, 0f.Degrees(), 0f, 4.2f)),
+        ("short arc capsule", new SDArcCapsule(new WPos(20f, 0f), new WPos(0f, 0f), 0.6f.Radians(), 4.2f)),
+        ("arc capsule the other way", new SDArcCapsule(new WPos(0f, 25f), new WPos(0f, 0f), (-1.1f).Radians(), 4.2f)),
+        ("arc capsule past half a turn", new SDArcCapsule(new WPos(15f, 5f), new WPos(0f, 0f), 4.5f.Radians(), 3f)),
+        ("arc capsule past a full turn", new SDArcCapsule(new WPos(10f, 0f), new WPos(0f, 0f), 7f.Radians(), 2f)),
+        ("rect", new SDRect(bndOrigin, 70f.Degrees(), 30f, 0f, 3f)),
+        ("rect reaching back", new SDRect(bndOrigin, (-140f).Degrees(), 12f, 8f, 5f)),
+        ("cone", new SDCone(bndOrigin, 40f, 120f.Degrees(), 60f.Degrees())),
+        ("donut sector", new SDDonutSector(bndOrigin, 8f, 20f, 45f.Degrees(), 30f.Degrees())),
+        ("donut", new SDDonut(bndOrigin, 6f, 15f)),
+        ("cross", new SDCross(bndOrigin, 15f.Degrees(), 30f, 4f)),
+        ("union", new SDUnion([new SDCircle(new WPos(-10f, 0f), 3f), new SDRect(new WPos(8f, 8f), 0f.Degrees(), 6f, 0f, 2f)])),
+        ("intersection", new SDIntersection([new SDCircle(bndOrigin, 10f), new SDInvertedCircle(bndOrigin, 4f)])),
+    ];
+    foreach (var (bndName, bndShape) in bndShapes)
+    {
+        if (bndShape.Bounds() is not { } bound)
+        {
+            t.True($"{bndName}: names a bounding circle", false);
+            continue;
+        }
+        var inside = 0;
+        var escapesCircle = 0;
+        var nearerThanCircle = 0;
+        for (var bx = -60f; bx <= 60f; bx += 0.5f)
+        {
+            for (var bz = -60f; bz <= 60f; bz += 0.5f)
+            {
+                var p = new WPos(bx, bz);
+                var d = bndShape.Distance(p);
+                var toCircle = (p - bound.Center).Length() - bound.Radius;
+                if (d <= 0f)
+                {
+                    ++inside;
+                    if (toCircle > 1e-3f)
+                        ++escapesCircle;
+                }
+                if (toCircle > 0f && d < toCircle - 1e-3f)
+                    ++nearerThanCircle;
+            }
+        }
+        t.True($"{bndName}: everything it forbids is inside its circle ({escapesCircle} of {inside} points outside)", inside > 0 && escapesCircle == 0);
+        t.True($"{bndName}: nothing outside the circle measures nearer than the circle ({nearerThanCircle} points)", nearerThanCircle == 0);
+    }
+    t.True("an inverted shape names no circle", new SDInvertedCircle(bndOrigin, 6f).Bounds() == null);
+    t.True("nor a union with one in it", new SDUnion([new SDCircle(bndOrigin, 3f), new SDInvertedCircle(bndOrigin, 6f)]).Bounds() == null);
+    t.True("nor a triangle, whose distance runs short past a corner",
+        new SDTri(bndOrigin, new RelTriangle(new WDir(0f, 0f), new WDir(5f, 0f), new WDir(0f, 5f))).Bounds() == null);
+}
+
+// ---- The solver answers the same whether or not the zones name their circles ----
+// The circles, the touch tables kept per margin and the grids shared within a solve are all meant to change only the
+// cost. A floor full of rolling capsules, lines and a cone, solved with the shapes as they are and again with every one
+// hiding its circle, must come out the same at the margin and at none.
+{
+    var bndNow = new DateTime(2026, 10, 19, 18, 23, 0, DateTimeKind.Utc);
+    AIHints Scene(bool hideBounds, WPos player)
+    {
+        var h = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(29.5f), PlayerPosition = player };
+        void Add(ShapeDistance sd, double seconds) => h.AddForbiddenZone(hideBounds ? new HiddenBounds(sd) : sd, bndNow.AddSeconds(seconds));
+        for (var i = 0; i < 8; ++i)
+        {
+            var at = new WPos(18f * MathF.Sin(i * 0.785f), 18f * MathF.Cos(i * 0.785f));
+            Add(new SDArcCapsule(at, new WPos(0f, 0f), 0.3f.Radians(), 4.2f), 0d);
+            foreach (var ahead in new[] { 1.5, 2.3, 3.1 })
+                Add(new SDArcCapsule(at, new WPos(0f, 0f), (0.23f * (float)ahead).Radians(), 4.2f), ahead);
+        }
+        Add(new SDRect(new WPos(28f, -10f), (-56f).Degrees(), 70f, 0f, 3f), 0.7d);
+        Add(new SDRect(new WPos(28f, 12f), (-140f).Degrees(), 70f, 0f, 3f), 1.7d);
+        Add(new SDCone(new WPos(0f, 0f), 40f, 120f.Degrees(), 60f.Degrees()), 3.4d);
+        Add(new SDCross(new WPos(-6f, 4f), 0f.Degrees(), 60f, 4f), 4.6d);
+        return h;
+    }
+    var differ = 0;
+    var cases = 0;
+    foreach (var bndMargin in new[] { 1f, 0f })
+    {
+        for (var px = -24f; px <= 24f; px += 8f)
+        {
+            for (var pz = -24f; pz <= 24f; pz += 8f)
+            {
+                var start = new WPos(px, pz);
+                if (start.ToVec2().Length() > 27f)
+                    continue;
+                var a = ArenaPathfinder.Solve(Scene(false, start), bndNow, horizonSeconds: 5f, safetyMargin: bndMargin, clearanceLead: 1f);
+                var b = ArenaPathfinder.Solve(Scene(true, start), bndNow, horizonSeconds: 5f, safetyMargin: bndMargin, clearanceLead: 1f);
+                ++cases;
+                if (a.NeedToMove != b.NeedToMove || a.Found != b.Found || a.Target != b.Target || a.Waypoint != b.Waypoint || (a.Route?.Count ?? -1) != (b.Route?.Count ?? -1))
+                    ++differ;
+            }
+        }
+    }
+    t.True($"the same answers with the circles as without, at margin 1 and 0 ({differ} of {cases} starts differ)", cases > 40 && differ == 0);
+
+    // A grid kept for one solve is not the next one's: the dodge adds an obstacle over a floorless target and solves
+    // again (AIManager's floor probe), and that second solve must route round it.
+    var probe = Scene(false, new WPos(0f, 18f));
+    var before = ArenaPathfinder.Solve(probe, bndNow, horizonSeconds: 5f, safetyMargin: 1f, clearanceLead: 1f);
+    probe.TemporaryObstacles.Add(new SDCircle(before.Target, 2f));
+    var after = ArenaPathfinder.Solve(probe, bndNow, horizonSeconds: 5f, safetyMargin: 1f, clearanceLead: 1f);
+    t.True($"an obstacle added between solves moves the answer off it ({(after.Target - before.Target).Length():0.0}y away)",
+        before.Found && after.Found && (after.Target - before.Target).Length() >= 2f);
+}
+
+// ---- The frame cost line ----
+{
+    var cost = new FrameCost();
+    t.True("nothing timed, nothing to say", cost.Summarise() == null);
+    for (var i = 0; i < 100; ++i)
+    {
+        cost.Add(FrameCost.Stage.Sync, 0.2);
+        cost.Add(FrameCost.Stage.Dodge, i == 70 ? 25.0 : 1.0);
+        cost.EndTick(1d / 30d);
+        cost.AddDraw(0.5);
+    }
+    cost.Add(FrameCost.Stage.Dodge, 99.0);
+    cost.DiscardTick();
+    var costLine = cost.Summarise() ?? "";
+    t.True($"the line counts the fight's frames and names the slowest and its stage: {costLine}",
+        costLine.Contains("100 frames") && costLine.Contains("max 25.2ms") && costLine.Contains("dodge 25.0") && costLine.Contains("0:02"));
+    t.True("and starts afresh for the next fight", cost.Summarise() == null && cost.Frames == 0);
+}
+
 // ---- Exaflare: the steps behind the next one are danger too ----
 // Moko the Restless, 2026-10-18: Spearman's Orders lines step 3.5y every 0.6s. With only the next step forbidden the
 // dodge stepped forward along the lane and was caught by the step after.
@@ -6965,6 +7097,12 @@ sealed class TestQuest(WorldState ws) : Minerva.QuestBattle.QuestBattle(ws)
             .CompleteOnKilled(0x77u),
         Minerva.QuestBattle.QuestObjective.StandardInteract(ws, 0x1EA000u, new Vector3(29, 0, 10)),
     ];
+}
+
+// The same shape with its bounding circle withheld, so the solver measures it everywhere.
+sealed class HiddenBounds(ShapeDistance inner) : ShapeDistance
+{
+    public override float Distance(WPos p) => inner.Distance(p);
 }
 
 // A mesh that bends every leg through one corner at height 1.
