@@ -165,6 +165,20 @@ t.Section("WorldState op stream");
     ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(36158u), TargetID = player, TotalTime = 5f, ElapsedTime = 0f, Rotation = bossActor.Rotation }));
     t.Eq("a restarted cast is a new cast", castStarted, 2);
 
+    // The next cast of a sequence can arrive before the last is cleared. Phantom Hydra, 2026-10-19: six 0.7s breath
+    // visuals back to back from one helper, each at a new angle; one read as the last re-reported, and every cone after
+    // it was drawn one out.
+    var visual = new ActorCastInfo { Action = ActionID.MakeSpell(47212u), TotalTime = 0.7f, ElapsedTime = 0.7f, Rotation = (-60f).Degrees() };
+    ws.Execute(new ActorState.OpCastInfo(boss, visual));
+    t.Eq("a visual starts", castStarted, 3);
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(47212u), TotalTime = 0.7f, ElapsedTime = 0.04f, Rotation = 60f.Degrees() }));
+    t.Eq("the next one, aimed elsewhere, is a new cast though nothing cleared the last", castStarted, 4);
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(47212u), TotalTime = 0.7f, ElapsedTime = 0.7f, Rotation = 60f.Degrees() }));
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(47212u), TotalTime = 0.7f, ElapsedTime = 0.03f, Rotation = 60f.Degrees() }));
+    t.Eq("and one aimed the same way, started over on a short cast, is new too", castStarted, 5);
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(47212u), TotalTime = 0.7f, ElapsedTime = 0.25f, Rotation = 60f.Degrees() }));
+    t.Eq("while a re-report a little ahead of that is not", castStarted, 5);
+
     // cast resolves: fire snapshot event, then clear cast
     ws.Execute(new ActorState.OpCastEvent(boss, new ActorCastEvent(ActionID.MakeSpell(36158u), player, bossActor.Rotation, new Vector3(100, 0, 100), 42)));
     ws.Execute(new ActorState.OpCastInfo(boss, null));

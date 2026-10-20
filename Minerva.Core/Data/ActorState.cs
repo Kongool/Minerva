@@ -352,13 +352,26 @@ public sealed class ActorState : IEnumerable<Actor>
         // cast. The world advances a cast's elapsed time every frame; a client that hitched reports it from behind.
         // Moko the Restless, 2026-10-18: an Iai-kasumi-giri re-reported 0.29s behind counted as a second cast at the
         // old 0.2, its 270-degree cone was added twice and removed once, and the stale one stayed for the rest of the
-        // fight. A genuine re-cast starts again from nothing, seconds behind.
+        // fight. A genuine re-cast starts again from nothing -- but a short cast is not seconds long, so the allowance
+        // is at most half the cast.
         private const float ReportLag = 1f;
 
+        // A re-report keeps the cast's aim; within a degree, and a tenth of a yalm for where it is placed.
+        private const float SameAimRad = 0.0175f;
+
+        /// <summary>
+        /// Is this cast-info the cast already in flight, re-reported, rather than the next one?
+        /// <para>The aim decides most of it. Phantom Hydra, 2026-10-19: a helper casts its six 0.7s breath visuals back to
+        /// back, each at a new angle, and the next often arrives before the last is cleared. With only the progress to go
+        /// on, the 60-degree one, 0.04s in against 0.7s, read as the -60 re-reported from behind; the queue of breaths lost
+        /// it, every cone after it was one out, and the breath that gave Korha a vulnerability stack was drawn behind him.</para>
+        /// </summary>
         private static bool SameCast(ActorCastInfo before, ActorCastInfo now)
             => before.Action == now.Action && before.TargetID == now.TargetID
             && Math.Abs(before.TotalTime - now.TotalTime) < 0.01f
-            && now.ElapsedTime >= before.ElapsedTime - ReportLag;
+            && before.Rotation.AlmostEqual(now.Rotation, SameAimRad)
+            && System.Numerics.Vector3.DistanceSquared(before.Location, now.Location) < 0.01f
+            && now.ElapsedTime >= before.ElapsedTime - MathF.Min(ReportLag, before.TotalTime * 0.5f);
         public override void Write(OperationOutput o)
         {
             if (this.Value is { } c)
