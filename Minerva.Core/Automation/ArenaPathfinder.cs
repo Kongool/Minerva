@@ -637,9 +637,10 @@ public static class ArenaPathfinder
         if (next == DateTime.MaxValue)
             return null;
 
+        var floor = hints.Bounds.LatticeInside(hints.Center, cellSize, out var steps);
         foreach (var m in margin > 0f ? [margin, 0f] : new[] { margin })
         {
-            var exits = ExitsAfter(hints, soon, next, now, m, cellSize);
+            var exits = ExitsAfter(hints, soon, next, now, m, cellSize, floor, steps);
             if (exits.Count == 0)
                 continue;
 
@@ -647,17 +648,22 @@ public static class ArenaPathfinder
             // with the lead, the last second before the wave left no time to take even a step towards it
             var reach = moveSpeed * MathF.Max((float)(soon - now).TotalSeconds - DoorwaySlackSeconds, 0f);
             var best = player;
-            var bestScore = hints.InImminentDanger(player, soon, m) ? float.MaxValue : NearestOf(exits, player);
+            var bestScore = hints.InImminentDanger(player, soon, m) ? float.MaxValue : exits.NearestTo(player);
             var r = hints.Bounds.Extent;
-            for (var x = -r; x <= r; x += cellSize)
+            var i = 0;
+            for (var x = -r; x <= r; x += cellSize, ++i)
             {
-                for (var z = -r; z <= r; z += cellSize)
+                var j = 0;
+                for (var z = -r; z <= r; z += cellSize, ++j)
                 {
                     var door = hints.Center + new WDir(x, z);
                     var walk = (door - player).Length();
-                    if (walk > reach || !hints.Bounds.Contains(hints.Center, door) || hints.InObstacle(door) || hints.InImminentDanger(door, soon, m))
+                    if (walk > reach || !floor[(i * steps) + j] || hints.InObstacle(door) || hints.InImminentDanger(door, soon, m))
                         continue;
-                    var score = NearestOf(exits, door) + DoorwayWalkWeight * walk;
+                    // even standing on an exit, a door this far away cannot beat the best one
+                    if (DoorwayWalkWeight * walk >= bestScore)
+                        continue;
+                    var score = exits.NearestTo(i, j, door, bestScore - (DoorwayWalkWeight * walk)) + DoorwayWalkWeight * walk;
                     if (score < bestScore)
                     {
                         bestScore = score;
@@ -860,28 +866,90 @@ public static class ArenaPathfinder
     }
 
     /// <summary>Cells of the floor clear of the next wave once <paramref name="soon"/> has fired (<see cref="ClearOfNextWave"/>).</summary>
-    private static List<WPos> ExitsAfter(AIHints hints, DateTime soon, DateTime next, DateTime now, float margin, float cellSize)
+    private static ExitLattice ExitsAfter(AIHints hints, DateTime soon, DateTime next, DateTime now, float margin, float cellSize, bool[] floor, int steps)
     {
-        var exits = new List<WPos>();
         var r = hints.Bounds.Extent;
-        for (var x = -r; x <= r; x += cellSize)
+        var exits = new ExitLattice(steps, cellSize);
+        var i = 0;
+        for (var x = -r; x <= r; x += cellSize, ++i)
         {
-            for (var z = -r; z <= r; z += cellSize)
+            var j = 0;
+            for (var z = -r; z <= r; z += cellSize, ++j)
             {
                 var p = hints.Center + new WDir(x, z);
-                if (hints.Bounds.Contains(hints.Center, p) && !hints.InObstacle(p) && ClearOfNextWave(hints, p, soon, next, now, margin))
-                    exits.Add(p);
+                exits.Set(i, j, p, floor[(i * steps) + j] && !hints.InObstacle(p) && ClearOfNextWave(hints, p, soon, next, now, margin));
             }
         }
         return exits;
     }
 
-    private static float NearestOf(List<WPos> points, WPos from)
+    /// <summary>
+    /// The ground clear of the next wave, kept on the lattice <see cref="Doorway"/> walks: the point at steps (i, j) is
+    /// the same <see cref="WPos"/> as the door at (i, j), because both come from the same additions.
+    /// <para>Every door used to be measured against every exit. Arbatel, 2026-10-19, Blot's six 15y circles: thousands
+    /// of each, 10-12ms of a 25ms solve, the slowest frame of Saar's pull. The nearest exit is now looked for ring by
+    /// ring outward from the door, and the look stops once no exit further out can be nearer, or, given how far the
+    /// door is to walk, could still make it the best door; either way the door the search picks is the same.</para>
+    /// </summary>
+    private sealed class ExitLattice(int size, float cell)
     {
-        var bestSq = float.MaxValue;
-        foreach (var p in points)
-            bestSq = MathF.Min(bestSq, (p - from).LengthSq());
-        return bestSq == float.MaxValue ? float.MaxValue : MathF.Sqrt(bestSq);
+        private readonly WPos[] at = new WPos[size * size];
+        private readonly bool[] exit = new bool[size * size];
+
+        public int Count { get; private set; }
+
+        public void Set(int i, int j, WPos p, bool isExit)
+        {
+            var c = (i * size) + j;
+            this.at[c] = p;
+            this.exit[c] = isExit;
+            if (isExit)
+                ++this.Count;
+        }
+
+        /// <summary>How far the nearest exit is from any point, measured against all of them.</summary>
+        public float NearestTo(WPos from)
+        {
+            var bestSq = float.MaxValue;
+            for (var c = 0; c < this.at.Length; ++c)
+                if (this.exit[c])
+                    bestSq = MathF.Min(bestSq, (this.at[c] - from).LengthSq());
+            return bestSq == float.MaxValue ? float.MaxValue : MathF.Sqrt(bestSq);
+        }
+
+        /// <summary>
+        /// How far the nearest exit is from the lattice point (i, j), which is <paramref name="from"/>: exactly, whenever
+        /// that is within <paramref name="worth"/>; otherwise some number beyond it.
+        /// </summary>
+        public float NearestTo(int i, int j, WPos from, float worth)
+        {
+            var bestSq = float.MaxValue;
+            for (var k = 0; k < size; ++k)
+            {
+                // nothing on ring k is nearer than k cells along one axis; a whole cell is kept spare for rounding
+                var nearest = (k - 1) * cell;
+                if (nearest > 0f && (nearest * nearest > bestSq || nearest > worth + 0.01f))
+                    break;
+                for (var di = -k; di <= k; ++di)
+                {
+                    var ii = i + di;
+                    if (ii < 0 || ii >= size)
+                        continue;
+                    // the ring's top and bottom rows whole, its sides only at their two ends
+                    var step = di == -k || di == k ? 1 : 2 * k;
+                    for (var dj = -k; dj <= k; dj += step)
+                    {
+                        var jj = j + dj;
+                        if (jj < 0 || jj >= size)
+                            continue;
+                        var c = (ii * size) + jj;
+                        if (this.exit[c])
+                            bestSq = MathF.Min(bestSq, (this.at[c] - from).LengthSq());
+                    }
+                }
+            }
+            return bestSq == float.MaxValue ? float.MaxValue : MathF.Sqrt(bestSq);
+        }
     }
 
     /// <summary>

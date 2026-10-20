@@ -108,6 +108,48 @@ public abstract class ArenaBounds(float radius, float extent = -1f)
         Array.Copy(this.outsideMask, into, Math.Min(this.outsideMask.Length, into.Length));
     }
 
+    // The floor on the lattice ArenaPathfinder.Doorway walks; see LatticeInside.
+    private bool[]? latticeInside;
+    private WPos latticeCenter;
+    private float latticeCell;
+    private int latticeSteps;
+
+    /// <summary>
+    /// Which points of the lattice from -<see cref="Extent"/> to +<see cref="Extent"/> round <paramref name="center"/>,
+    /// <paramref name="cell"/> apart, are on the floor: index (i * steps) + j for the i-th x and j-th z. The points are
+    /// made by the same repeated addition as the loops that read them, so each answer is <see cref="Contains"/> of the
+    /// very point asked about.
+    /// <para>Kept on the bounds like <see cref="CopyOutsideMask"/>. The last-resort search asked it of every point,
+    /// for each of two margins and again for each door: on Forbidden Folios' polygon floor, 2026-10-19, that was half
+    /// of a 25ms solve.</para>
+    /// </summary>
+    internal bool[] LatticeInside(WPos center, float cell, out int steps)
+    {
+        if (this.latticeInside == null || this.latticeCenter != center || this.latticeCell != cell)
+        {
+            var r = this.Extent;
+            var n = 0;
+            for (var x = -r; x <= r; x += cell)
+                ++n;
+            var inside = new bool[n * n];
+            var i = 0;
+            for (var x = -r; x <= r; x += cell, ++i)
+            {
+                var j = 0;
+                for (var z = -r; z <= r; z += cell, ++j)
+                    inside[(i * n) + j] = this.Contains(center, center + new WDir(x, z));
+            }
+
+            this.latticeInside = inside;
+            this.latticeCenter = center;
+            this.latticeCell = cell;
+            this.latticeSteps = n;
+        }
+
+        steps = this.latticeSteps;
+        return this.latticeInside;
+    }
+
     public abstract bool Contains(WPos center, WPos point);
 
     /// <summary>
