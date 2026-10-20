@@ -312,6 +312,31 @@ t.Section("A zone kept after its cast on purpose is not swept as stale");
     module.Dispose();
 }
 
+// A component activated after the world is up is told the world as it is, as BossmodReborn does it. Iambe, 2026-10-19:
+// Burst learnt its seeds from OnActorCreated, four of them were up before the module, and live it drew nothing for them.
+t.Section("A component activated late is told what is already there");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x40000000B, seed = 0x40000000C, player = 0x10000000D;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(seed, 0x4C43, 0, "seed", 0, ActorType.Enemy, new Vector4(105, 0, 100, 0), 0.5f, new ActorHPMP(10, 10, 0, 0, 0), false, false, 0));
+    ws.Execute(new ActorState.OpCreate(player, 0, 0, "me", 0, ActorType.Player, new Vector4(95, 0, 100, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    ws.Execute(new ActorState.OpCastInfo(seed, new ActorCastInfo { Action = ActionID.MakeSpell(48033u), TotalTime = 2f, Location = new Vector3(105, 0, 100) }));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<WorldProbe>();
+    var probe = module.FindComponent<WorldProbe>()!;
+    t.True("an actor up before the component is one it knows", probe.Created.Contains(seed));
+    t.True("and the cast it is part-way through", probe.Casts.Contains(48033u));
+    t.True("and that it cannot be targeted", probe.Untargetable.Contains(seed));
+    t.True("but players are not announced as created, as BossmodReborn has it", !probe.Created.Contains(player));
+    const ulong later = 0x40000000E;
+    ws.Execute(new ActorState.OpCreate(later, 0x4C43, 0, "seed", 0, ActorType.Enemy, new Vector4(110, 0, 100, 0), 0.5f, new ActorHPMP(10, 10, 0, 0, 0), true, false, 0));
+    t.True("one that arrives afterwards is heard of as before, and nothing twice",
+        probe.Created.Count(id => id == later) == 1 && probe.Created.Count(id => id == seed) == 1);
+    module.Dispose();
+}
+
 // ---------------------------------------------------------------------------
 // 4. Reflection registry: discovers [ModuleInfo] modules and instantiates them
 // ---------------------------------------------------------------------------
@@ -7121,6 +7146,17 @@ sealed class TestQuest(WorldState ws) : Minerva.QuestBattle.QuestBattle(ws)
 sealed class HiddenBounds(ShapeDistance inner) : ShapeDistance
 {
     public override float Distance(WPos p) => inner.Distance(p);
+}
+
+// What a component is told, and when.
+sealed class WorldProbe(ModuleBase module) : ModuleComponent(module)
+{
+    public readonly List<ulong> Created = [];
+    public readonly List<uint> Casts = [];
+    public readonly List<ulong> Untargetable = [];
+    public override void OnActorCreated(Actor actor) => this.Created.Add(actor.InstanceID);
+    public override void OnCastStarted(Actor caster, ActorCastInfo cast) => this.Casts.Add(cast.Action.ID);
+    public override void OnActorUntargetable(Actor actor) => this.Untargetable.Add(actor.InstanceID);
 }
 
 // A mesh that bends every leg through one corner at height 1.

@@ -331,7 +331,50 @@ public abstract class ModuleBase : IDisposable
             return existing;
         var comp = (ModuleComponent)Activator.CreateInstance(componentType, this)!;
         this.components.Add(comp);
+        this.IntroduceWorld(comp);
         return comp;
+    }
+
+    /// <summary>
+    /// Tell a component just activated about the world as it already is, as BossmodReborn's <c>ActivateComponent</c>
+    /// does: every actor that is not a player, pet, chocobo or buddy as created, its cast in progress, whether it can
+    /// be targeted, whether it is dead, its render flags and event state, its tether and its statuses. A component
+    /// only ever hears about changes, so without this anything already there when it starts is not there for it.
+    /// <para>Iambe, 2026-10-19: Burst learns its Winsome Seeds from <c>OnActorCreated</c>. Four of the eight were up
+    /// before the module was, and live the component never knew them; it drew nothing for their Bursts, and Korha and
+    /// Saar stood in two of them, Saar casting. A replay hid it, because the replay builds the module partway through
+    /// the opening snapshot of actors, and the rest of the snapshot then arrives as new.</para>
+    /// </summary>
+    private void IntroduceWorld(ModuleComponent comp)
+    {
+        try
+        {
+            foreach (var actor in this.World.Actors)
+            {
+                if (actor.Type is ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Buddy)
+                    continue;
+                comp.OnActorCreated(actor);
+                if (actor.CastInfo is { } cast && cast.IsSpell())
+                    comp.OnCastStarted(actor, cast);
+                if (actor.IsTargetable)
+                    comp.OnActorTargetable(actor);
+                else
+                    comp.OnActorUntargetable(actor);
+                if (actor.IsDead)
+                    comp.OnActorDeath(actor);
+                comp.OnActorRenderflagsChange(actor, actor.Renderflags);
+                comp.OnActorEventStateChange(actor, actor.EventState);
+                if (actor.Tether.ID != default)
+                    comp.OnTethered(actor, actor.Tether);
+                for (var i = 0; i < actor.Statuses.Length; ++i)
+                    if (actor.Statuses[i].ID != default)
+                        comp.OnStatusGain(actor, ref actor.Statuses[i]);
+            }
+        }
+        catch (Exception ex)
+        {
+            this.ReportError(comp, $"threw being told the world as it is: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     public void DeactivateComponent<T>() where T : ModuleComponent => this.DeactivateComponent(typeof(T));
