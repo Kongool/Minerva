@@ -157,34 +157,102 @@ public sealed class ReplayService : IDisposable
         this.LastPath = this.currentPath;
         Service.Log.Information($"Minerva: recorded {opCount} ops to {this.currentPath}.");
 
+        // Prefer the encounter name where there is one: Occult content is known by its critical encounter, not by
+        // whichever enemy happens to be biggest, and that is also how the modules for it are filed. Every
+        // auto-recording has one, so it is named here; one started by hand waits for the analysis to name its boss.
+        var path = this.currentPath!;
+        var encounter = this.recordingEncounterName;
+        if (!string.IsNullOrWhiteSpace(encounter))
+            path = this.currentPath = this.LastPath = this.RenameWithBoss(path, encounter);
+
+        // The fact sheet replays the whole log, and loading it for playback parses it again. On the game's thread
+        // that was one long frame at the end of every pull, longer the longer the fight: Atlas Carbuncle, 2026-10-19,
+        // 212ms on both clients at once. Both run off it now, and the next update picks the result up (Collect).
+        var recorded = path;
+        this.finishing = System.Threading.Tasks.Task.Run(() => this.Finish(recorded, nameFromAnalysis: string.IsNullOrWhiteSpace(encounter)));
+        return opCount;
+    }
+
+    // The analysis and playback load of the recording just stopped, running off the game's thread; see Stop.
+    private System.Threading.Tasks.Task<Finished>? finishing;
+
+    private sealed record Finished(string RecordedPath, string Path, string Sheet, GenerationInput? Input, ReplayTimeline? Timeline);
+
+    // Off the game's thread: nothing here may touch this service's state but the file just written.
+    private Finished Finish(string path, bool nameFromAnalysis)
+    {
+        var recorded = path;
+        string sheet;
+        GenerationInput? input = null;
         try
         {
-            this.LastFactSheet = this.Analyze(this.currentPath!);
-            Service.Log.Information("Minerva fact sheet:\n" + this.LastFactSheet);
+            (sheet, input) = AnalyzeFile(path);
+            Service.Log.Information("Minerva fact sheet:\n" + sheet);
         }
         catch (Exception ex)
         {
             Service.Log.Error(ex, "Minerva: failed to analyze recording.");
-            this.LastFactSheet = "Analysis failed: " + ex.Message;
+            sheet = "Analysis failed: " + ex.Message;
         }
 
-        // rename the log to include the boss name now that analysis knows it — the recording picker shows
-        // filenames, and a timestamp alone is unreadable. Kept the timestamp prefix so sorting stays intact.
+        if (nameFromAnalysis && !string.IsNullOrWhiteSpace(input?.BossName))
+            path = this.RenameWithBoss(path, input.BossName);
+
+        ReplayTimeline? timeline = null;
         try
         {
-            // Prefer the encounter name where there is one: Occult content is known by its critical
-            // encounter, not by whichever enemy happens to be biggest, and that is also how the modules for
-            // it are filed. Falls back to the boss the analysis identified everywhere else.
-            var boss = this.recordingEncounterName ?? this.LastInput?.BossName;
-            if (!string.IsNullOrWhiteSpace(boss) && this.currentPath != null)
+            using var reader = new StreamReader(path);
+            timeline = ReplayParser.ParseTimeline(reader);
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Error(ex, "Minerva: failed to load recording for playback.");
+        }
+
+        return new(recorded, path, sheet, input, timeline);
+    }
+
+    /// <summary>On the game's thread, once the recording just stopped has been analysed: its fact sheet, its name, the
+    /// fight loaded for playback, and the retention sweep, after the rename and the load so it is kept as the newest.</summary>
+    private void Collect()
+    {
+        if (this.finishing is not { IsCompleted: true } done)
+            return;
+        this.finishing = null;
+        if (!done.IsCompletedSuccessfully)
+        {
+            Service.Log.Error(done.Exception, "Minerva: finishing the recording failed.");
+            return;
+        }
+
+        var f = done.Result;
+        this.LastFactSheet = f.Sheet;
+        this.LastInput = f.Input;
+        if (this.LastPath == f.RecordedPath)
+            this.LastPath = f.Path;
+        if (f.Timeline != null)
+        {
+            this.Player?.Dispose();
+            this.Player = new ReplayPlayer(f.Timeline, this.Registry, this.config);
+            this.PlaybackPath = f.Path;
+        }
+
+        this.Purge();
+    }
+
+    /// <summary>
+    /// The log renamed to carry the boss's name -- the recording picker shows filenames, and a timestamp alone is
+    /// unreadable -- keeping the timestamp first so sorting stays intact. The same path when it cannot be.
+    /// </summary>
+    private string RenameWithBoss(string path, string boss)
+    {
+        try
+        {
+            var renamed = Path.Combine(this.directory, $"{Path.GetFileNameWithoutExtension(path)}-{Sanitize(boss)}.log");
+            if (!string.Equals(renamed, path, StringComparison.OrdinalIgnoreCase) && !File.Exists(renamed))
             {
-                var renamed = Path.Combine(this.directory, $"{Path.GetFileNameWithoutExtension(this.currentPath)}-{Sanitize(boss)}.log");
-                if (!string.Equals(renamed, this.currentPath, StringComparison.OrdinalIgnoreCase) && !File.Exists(renamed))
-                {
-                    File.Move(this.currentPath, renamed);
-                    this.currentPath = renamed;
-                    this.LastPath = renamed;
-                }
+                File.Move(path, renamed);
+                return renamed;
             }
         }
         catch (Exception ex)
@@ -192,18 +260,7 @@ public sealed class ReplayService : IDisposable
             Service.Log.Warning(ex, "Minerva: could not rename recording with the boss name.");
         }
 
-        // load the just-recorded fight for interactive playback
-        try
-        {
-            this.LoadPlayback(this.currentPath!);
-        }
-        catch (Exception ex)
-        {
-            Service.Log.Error(ex, "Minerva: failed to load recording for playback.");
-        }
-
-        this.Purge(); // after the rename and the load, so the fight just recorded is the newest and is kept
-        return opCount;
+        return path;
     }
 
     /// <summary>
@@ -600,11 +657,17 @@ public sealed class ReplayService : IDisposable
     /// <summary>Replay a saved log offline and render its fact sheet; also caches structured facts for generation.</summary>
     public string Analyze(string path)
     {
+        var (sheet, input) = AnalyzeFile(path);
+        this.LastInput = input;
+        return sheet;
+    }
+
+    private static (string Sheet, GenerationInput? Input) AnalyzeFile(string path)
+    {
         using var reader = new StreamReader(path);
         ReplayAnalysis? analysis = null;
         ReplayParser.Replay(reader, ws => analysis = ReplayAnalysis.Attach(ws));
-        this.LastInput = analysis?.BuildGenerationInput();
-        return analysis?.Render() ?? "(no data)";
+        return (analysis?.Render() ?? "(no data)", analysis?.BuildGenerationInput());
     }
 
     /// <summary>Generate a module draft from the last analyzed recording, using game-data shape inference.</summary>
@@ -650,7 +713,11 @@ public sealed class ReplayService : IDisposable
     }
 
     /// <summary>Advance the loaded playback (called each frame by the plugin).</summary>
-    public void UpdatePlayback(TimeSpan realDt) => this.Player?.Update(realDt);
+    public void UpdatePlayback(TimeSpan realDt)
+    {
+        this.Collect();
+        this.Player?.Update(realDt);
+    }
 
     public void Dispose()
     {
