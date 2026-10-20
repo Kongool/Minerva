@@ -162,6 +162,9 @@ sealed class Buffet(ModuleBase module) : Components.GenericKnockback(module)
     private readonly BitingWind _aoe = module.FindComponent<BitingWind>()!;
     public bool Active;
 
+    /// <summary>The death wall is at 24; a tornado's shove after landing is about 5 yalms, and a yalm to spare.</summary>
+    private const float SafeLanding = 18f;
+
     public override void OnActorEAnim(Actor actor, uint state)
     {
         if (actor.OID == (uint)OID.BuffetWind)
@@ -221,7 +224,12 @@ sealed class Buffet(ModuleBase module) : Components.GenericKnockback(module)
                 }
             }
 
-            hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOriginMixedAOEs(Center, k.Origin, 24f, 23f, circleArcs, circleArcsCount), activation);
+            // Along the wind's facing, as the knockback itself is recorded (DirForward), not away from where it stands: the
+            // two agree only for a wind facing the centre. And landing no further out than a tornado's shove can be
+            // survived: Biting Wind throws a player about 5 yalms (once 7.5) away from itself, and the outer tornadoes
+            // orbit at 20. Abductor, 2026-10-19: Korha, landed at 19.2 from the centre, was shoved to 24.2 and, shoved
+            // again from 21.8, to 26.8 and into the death wall. BossmodReborn's 23 left room for neither.
+            hints.AddForbiddenZone(new SDKnockbackInCircleFixedDirectionMixedAOEs(Center, k.Distance * k.Direction.ToDirection(), SafeLanding, circleArcs, circleArcsCount), activation);
         }
     }
 
@@ -300,7 +308,10 @@ sealed class BitingWind : Components.GenericAOEs
         }
         var forbiddenNearFuture = World.FutureTime(1.1d);
         var forbiddenSoon = World.FutureTime(3d);
-        var forbiddenFarFuture = DateTime.MaxValue;
+        // A bounded zone at MaxValue is scenery to Minerva's solver (see AIHints.PositioningZones), so the longest look
+        // ahead was never danger and the dodge saw a tornado only 3s out. Abductor, 2026-10-19: Korha was parked where
+        // the next tornado reached, and its shove put Korha into the death wall.
+        var forbiddenFarFuture = World.FutureTime(5d);
         var center = arenaCenter;
         var a15 = 15f.Degrees();
         var a25 = 25f.Degrees();

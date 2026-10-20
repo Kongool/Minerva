@@ -5522,6 +5522,19 @@ t.Section("Pending effects");
         tlM.StateMachine.NextTransitionWithFlag(StateMachine.StateHint.Raidwide) < tlWide);
 }
 
+// ---- A push along a facing must land inside the floor and clear of the AOEs ----
+// Abductor, 2026-10-19: Buffet pushes 24 yalms along the wind's facing, and its landing guard projected the push away
+// from the wind instead.
+{
+    var kbCenter = new WPos(0f, 0f);
+    var north = new WDir(0f, 24f);
+    var tornado = new AOEInstance(new AOEShapeCircle(4f), new WPos(10f, 16f));
+    var sd = new SDKnockbackInCircleFixedDirectionMixedAOEs(kbCenter, north, 18f, [tornado], 1);
+    t.True("standing 20 behind the centre lands 4 past it: allowed", sd.Distance(new WPos(0f, -20f)) > 0f);
+    t.True("standing at the centre lands at 24, past 18: forbidden", sd.Distance(new WPos(0f, 0f)) <= 0f);
+    t.True("landing in the tornado is forbidden too", sd.Distance(new WPos(10f, -8f)) <= 0f);
+}
+
 // ---- Exaflare: the steps behind the next one are danger too ----
 // Moko the Restless, 2026-10-18: Spearman's Orders lines step 3.5y every 0.6s. With only the next step forbidden the
 // dodge stepped forward along the lane and was caught by the step after.

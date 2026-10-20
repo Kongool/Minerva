@@ -120,6 +120,37 @@ public sealed class SDKnockbackInCircleFixedDirection(WPos Center, WDir Directio
 
 }
 
+/// <summary>
+/// A push in one fixed direction (<paramref name="Direction"/>, its length the distance) that must land inside the
+/// circle and outside every one of the AOEs. Minerva's: the fixed-direction sibling of
+/// <see cref="SDKnockbackInCircleAwayFromOriginMixedAOEs"/>, for a knockback that pushes along a facing rather than away
+/// from where it comes from.
+/// </summary>
+[SkipLocalsInit]
+public sealed class SDKnockbackInCircleFixedDirectionMixedAOEs(WPos Center, WDir Direction, float Radius, AOEInstance[] AOEs, int Length) : ShapeDistance
+{
+    private readonly WPos center = Center;
+    private readonly WDir direction = Direction;
+    private readonly float radius = Radius;
+    private readonly AOEInstance[] aoes = AOEs;
+    private readonly int len = Length;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool Inside(WPos p)
+    {
+        var projected = p + this.direction;
+        if (!projected.InCircle(this.center, this.radius))
+            return true;
+        for (var i = 0; i < this.len; ++i)
+            if (this.aoes[i].Check(projected))
+                return true;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override float Distance(WPos p) => this.Inside(p) ? 0f : 1f;
+}
+
 [SkipLocalsInit]
 public sealed class SDKnockbackInCircleAwayFromOriginPlusMixedAOEsPlusSingleCircleIntersection(WPos Center, WPos Origin, float Radius, float Distance, SDUnion AOEs, WPos CircleOrigin, float CircleRadius, bool Pull) : ShapeDistance
 {
