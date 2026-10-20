@@ -846,6 +846,24 @@ t.Section("Auto-dodge pathfinding");
         var passiveOnly = new AIHints();
         passiveOnly.SeedPotentialTargets([Mob(10, 2f, 2f, combat: false)]);
         t.True("a mob minding its own business is never walked to", passiveOnly.BestEngagedTarget(me, 0ul, 0ul) == null);
+
+        // Out in the open, in combat is not in combat with us. Rosa, Occult Crescent, 2026-10-19: with no module loaded
+        // she ran from one stranger's mob to the next. Trash asks whose the mob's target is.
+        const ulong usId = 0x1001ul, strangerId = 0x2002ul;
+        var onStranger = Mob(11, 2f, 0f);
+        onStranger.TargetID = strangerId;
+        var onUs = Mob(12, 12f, 0f);
+        onUs.TargetID = usId;
+        var field = new AIHints();
+        field.SeedPotentialTargets([onStranger, onUs], id => id == usId);
+        t.Eq("a mob fighting a stranger is passive", field.PotentialTargets[0].Priority, AIHints.Enemy.PriorityUndesirable);
+        t.Eq("so the walk goes to the one fighting us, though it is further", field.BestEngagedTarget(me, 0ul, 0ul)!.InstanceID, onUs.InstanceID);
+        var strangersOnly = new AIHints();
+        strangersOnly.SeedPotentialTargets([onStranger], id => id == usId);
+        t.True("and with only strangers' fights about, nothing is walked to", strangersOnly.BestEngagedTarget(me, 0ul, 0ul) == null);
+        var inModule = new AIHints();
+        inModule.SeedPotentialTargets([onStranger]);
+        t.Eq("a module fight keeps plain in-combat: a public boss is often on a stranger", inModule.PotentialTargets[0].Priority, 0);
     }
 
     // Invincibility read off the statuses, for the fights whose module never flagged the phase. The walk back to

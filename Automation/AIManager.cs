@@ -1517,8 +1517,9 @@ public sealed class AIManager
 
         // Who there is to fight. Nothing else fills this without a module, so the walk back to uptime had only the
         // character's own game target to work from and modules' priority calls had nothing to act on. Enemies out of
-        // combat come in as undesirable, so this can never read as "go and pull that".
-        this.hints.SeedPotentialTargets(this.world.Actors);
+        // combat come in as undesirable, so this can never read as "go and pull that" -- and so do those fighting
+        // someone outside the party, which in the open world is most of what is in combat.
+        this.hints.SeedPotentialTargets(this.world.Actors, id => this.world.Party.FindSlot(id) >= 0);
 
         if (guess != null && (guess.Count != 0 || guess.GazeCount != 0))
         {

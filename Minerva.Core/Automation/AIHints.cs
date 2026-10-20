@@ -1014,19 +1014,25 @@ public sealed class AIHints
     /// <summary>
     /// Every enemy worth considering this frame: targetable, hostile and alive, at ordinary priority while it is in
     /// combat and <see cref="Enemy.PriorityUndesirable"/> while it is not, so nothing here ever reads as "go and pull
-    /// that". BossmodReborn scores its own list the same way (aggro table or attacking the party, else passive).
+    /// that".
+    /// <para>With <paramref name="ours"/>, "in combat" means in combat with us: its target is one of ours. That is half
+    /// of BossmodReborn's rule (aggro table, or attacking the party, else passive); the aggro table is not synced, so a
+    /// module fight keeps plain "in combat", where the boss of a public fight is often on a stranger. Trash passes it.
+    /// Out in the open everything is in combat with someone: Rosa, Occult Crescent, 2026-10-19, with no module loaded,
+    /// ran from one stranger's mob to the next until the AI was switched off.</para>
     /// <para>Modules seed this so their priority calls have something to act on; trash seeds it so the walk back to
     /// uptime has a target at all.</para>
     /// <para>A boss's part counts. The Decaying Gourmand, 2026-10-11: the Voracious Maw is one, it was never in this
     /// list, and so no module could have said "kill that first" while Korha sat inside it for 12.8s.</para>
     /// </summary>
-    public void SeedPotentialTargets(IEnumerable<Actor> actors)
+    public void SeedPotentialTargets(IEnumerable<Actor> actors, Func<ulong, bool>? ours = null)
     {
         foreach (var a in actors)
         {
             if (a.Type is not (ActorType.Enemy or ActorType.Part) || a.IsAlly || a.IsDeadOrDestroyed || !a.IsTargetable)
                 continue;
-            this.PotentialTargets.Add(new Enemy(a, a.InCombat ? 0 : Enemy.PriorityUndesirable));
+            var engaged = a.InCombat && (ours == null || ours(a.TargetID));
+            this.PotentialTargets.Add(new Enemy(a, engaged ? 0 : Enemy.PriorityUndesirable));
         }
     }
 
