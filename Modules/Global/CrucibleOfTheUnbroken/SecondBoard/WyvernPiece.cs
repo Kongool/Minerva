@@ -26,6 +26,7 @@ public enum AID : uint
     TheStormsGrip = 48166, // WyvernPiece->self, 4.0s cast, range 60 circle
     Buffet = 48167, // WindSprite->self, 6.0s cast, range 40 width 10 rect
     Typhoon = 48168, // WyvernPiece->self, 3.0s cast, range 40 circle
+    StrongWind = 48169, // WhirlwindSmall->player, no cast: a whirlwind's touch, drawn by Whirlwind (Korha, 2026-10-24)
     LiquidHellBoss = 48171, // WyvernPiece->self, 3.0s cast, single-target
     LiquidHell = 48172, // Helper->self, 6.0s cast, range 6 circle
     BlazingTrailBoss = 48174, // WyvernPiece->self, 7.0+1.0s cast, single-target
@@ -45,7 +46,21 @@ public enum SID : uint
 sealed class Buffet(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Buffet, new AOEShapeRect(40.0f, 5.0f));
 sealed class Typhoon(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.Typhoon, 10.0f); // TODO add AI
 sealed class LiquidHell(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.LiquidHell, 6.0f);
-sealed class BlazingTrail(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.BlazingTrail, new AOEShapeCone(60.0f, 90.0f.Degrees()));
+// Behind the boss is the only ground Blazing Trail spares, and in a squeeze the way there runs round a wall of Liquid
+// Hell pools: 24-36y, four to six seconds of walking, against a 7.7s cast. The dodge only starts once the cone is inside
+// its horizon, a second in, and by then the way round may no longer fit: Korha, 2026-10-25 00:58, the north way round
+// (35.6y) was planned and flipped to straight through two pools within half a second. A person goes at the teleport
+// (2026-10-24 19:47, hand-steered, clean twice). So, for as long as the cast runs, stand behind the boss: a positioning
+// instruction (forbidden for ever, without limit), which the dodge answers at once.
+sealed class BlazingTrail(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.BlazingTrail, new AOEShapeCone(60.0f, 90.0f.Degrees()))
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (ref readonly var aoe in this.ActiveAOEs(slot, actor))
+            hints.AddForbiddenZone(new SDHalfPlane(aoe.Origin, aoe.Rotation.ToDirection()), DateTime.MaxValue);
+    }
+}
 sealed class StormTrail(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.StormTrail, new AOEShapeCone(25.0f, 30.0f.Degrees()));
 sealed class LiquidHellPuddle(ModuleBase module) : Components.Voidzone(module, 5.0f,
     module => module.Enemies((uint)OID.LiquidHellPuddle).Where(z => z.EventState != 7));
