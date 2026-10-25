@@ -163,11 +163,20 @@ public class GenericForcedMarch(ModuleBase module, float activationLimit = float
         var gone = starts == default ? default : starts.AddSeconds(-0.5d);
         foreach (var component in this.Module.Components)
         {
-            if (component is not GenericAOEs aoes)
-                continue;
-            foreach (ref readonly var aoe in aoes.ActiveAOEs(slot, actor))
-                if ((aoe.Activation == default || aoe.Activation >= gone) && aoe.Check(end))
-                    return true;
+            if (component is GenericAOEs aoes)
+            {
+                foreach (ref readonly var aoe in aoes.ActiveAOEs(slot, actor))
+                    if ((aoe.Activation == default || aoe.Activation >= gone) && aoe.Check(end))
+                        return true;
+            }
+            else if (component is Voidzone puddles)
+            {
+                // Ground already live, so its activation is now, before any walk: still there when the walk ends.
+                // Not a GenericAOEs here, as it is in BossmodReborn, and it went unseen (Voidmancer's Maladies).
+                foreach (ref readonly var aoe in puddles.ActiveAOEs(slot, actor))
+                    if (aoe.Check(end))
+                        return true;
+            }
         }
 
         return false;

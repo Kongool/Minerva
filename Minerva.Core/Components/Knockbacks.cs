@@ -208,21 +208,34 @@ public abstract class GenericKnockback(ModuleBase module, uint aid = default, in
         }
     }
 
+    /// <summary>Ground already out, as against a telegraph a moment past its time: one carries no time, is stamped with the
+    /// frame it is read in (a puddle), or has been out a second or more; a telegraph stays listed a few tenths past its
+    /// moment, until its cast lands, and by the shove it is gone (Wyvern Piece's Buffet lines under Typhoon, replayed).</summary>
+    private static bool LiveGround(DateTime activation, DateTime now)
+        => activation == default || activation == now || (now - activation).TotalSeconds >= 1d;
+
     /// <summary>The module's risky zones going off within <see cref="LandingWindowSeconds"/> after a shove at
-    /// <paramref name="shove"/>.</summary>
+    /// <paramref name="shove"/>, and ground already live, which is still there when you land. Wyvern Piece, Korha
+    /// 2026-10-24: Typhoon threw her 10y into a Liquid Hell pool that had been on the floor for two seconds, and she
+    /// took Burns. A puddle's activation is the moment it is read, before any shove, so it never counted.</summary>
     private ShapeDistance[] ZonesAfter(int slot, Actor actor, DateTime shove)
     {
         List<ShapeDistance>? zones = null;
+        var now = this.World.CurrentTime;
         var components = this.Module.Components;
         for (var i = 0; i < components.Count; ++i)
         {
-            if (components[i] is not GenericAOEs aoes)
+            ReadOnlySpan<AOEInstance> active;
+            if (components[i] is GenericAOEs aoes)
+                active = aoes.ActiveAOEs(slot, actor);
+            else if (components[i] is Voidzone puddles)   // not a GenericAOEs here, as it is in BossmodReborn
+                active = puddles.ActiveAOEs(slot, actor);
+            else
                 continue;
-            var active = aoes.ActiveAOEs(slot, actor);
             foreach (ref readonly var aoe in active)
             {
                 var after = (aoe.Activation - shove).TotalSeconds;
-                if (aoe.Risky && after >= SameMomentSeconds && after <= LandingWindowSeconds
+                if (aoe.Risky && (LiveGround(aoe.Activation, now) || (after >= SameMomentSeconds && after <= LandingWindowSeconds))
                     && this.Module.MechanicAppliesToArenaProjectionLayer(actor, aoe.ArenaProjectionLayer, aoe.RestrictToArenaProjectionLayer))
                     (zones ??= []).Add(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation));
             }
