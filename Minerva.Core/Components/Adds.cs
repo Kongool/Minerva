@@ -1,9 +1,12 @@
 namespace Minerva.Components;
 
 /// <summary>
-/// Draws the adds of a given OID and exposes them via <see cref="ActiveActors"/>. Ported from
-/// BossmodReborn's Adds (BSD-3; see THIRD-PARTY-NOTICES.txt); Minerva omits BMR's AI target-priority
-/// weighting (its auto-dodge does not pick targets), keeping just the radar drawing.
+/// Draws the adds of a given OID, exposes them via <see cref="ActiveActors"/>, and ranks them for targeting. Ported from
+/// BossmodReborn's Adds (BSD-3; see THIRD-PARTY-NOTICES.txt).
+/// <para>The ranking was left out when the auto-dodge picked no targets, and stayed out after Minerva began publishing
+/// <c>Minerva.Hints.PriorityTargets</c> for the rotation plugin: every module's "kill these first" written as
+/// <c>Adds(…, priority)</c> or <c>AddsMulti(…, priority)</c> did nothing. Ogre's Wisps, 2026-10-25: two or three a wave
+/// reached the boss, a Vulnerability Up stack each, while the Great Wisp was being hit.</para>
 /// </summary>
 public class Adds(ModuleBase module, uint oid, int priority = 0, bool forbidDots = false) : ModuleComponent(module)
 {
@@ -31,6 +34,9 @@ public class Adds(ModuleBase module, uint oid, int priority = 0, bool forbidDots
         }
     }
 
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+        => hints.PrioritizeTargetsByOIDAndForbidDOTs(this.AddOID, this.Priority, this.ForbidDots);
+
     public override void DrawArenaForeground(int pcSlot, Actor pc)
     {
         foreach (var a in this.Module.Enemies(this.AddOID))
@@ -40,7 +46,14 @@ public class Adds(ModuleBase module, uint oid, int priority = 0, bool forbidDots
 }
 
 /// <summary>Adds that shouldn't be targeted but should still be drawn.</summary>
-public class AddsPointless(ModuleBase module, uint oid) : Adds(module, oid);
+public class AddsPointless(ModuleBase module, uint oid) : Adds(module, oid)
+{
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var a in this.Actors)
+            hints.SetPriority(a, AIHints.Enemy.PriorityPointless);
+    }
+}
 
 /// <summary>Draws adds of several OIDs when distinguishing them isn't useful. Ported from BossmodReborn (BSD-3).</summary>
 public class AddsMulti(ModuleBase module, uint[] oids, int priority = 0) : ModuleComponent(module)
@@ -59,6 +72,12 @@ public class AddsMulti(ModuleBase module, uint[] oids, int priority = 0) : Modul
                         result.Add(a);
             return result;
         }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (this.Priority != 0)
+            hints.PrioritizeTargetsByOID(this.OIDs, this.Priority);
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)

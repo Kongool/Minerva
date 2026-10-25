@@ -326,6 +326,32 @@ t.Section("A zone kept after its cast on purpose is not swept as stale");
     module.Dispose();
 }
 
+// Adds components rank their adds for targeting, as BossmodReborn's do. They drew them and nothing else, so a module's
+// "kill these first" never reached Minerva.Hints.PriorityTargets (Ogre's Wisps, 2026-10-25).
+t.Section("Adds components rank their adds");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x400000010, add = 0x400000011, multi = 0x400000012, pointless = 0x400000013, player = 0x100000014;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(add, 0x5001, 0, "add", 0, ActorType.Enemy, new Vector4(105, 0, 100, 0), 1f, new ActorHPMP(100, 100, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(multi, 0x5002, 0, "multi", 0, ActorType.Enemy, new Vector4(95, 0, 100, 0), 1f, new ActorHPMP(100, 100, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(pointless, 0x5003, 0, "pointless", 0, ActorType.Enemy, new Vector4(100, 0, 105, 0), 1f, new ActorHPMP(100, 100, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(player, 0, 0, "me", 0, ActorType.Player, new Vector4(100, 0, 95, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<TestRankedAdd>();
+    module.ActivateComponent<TestRankedMulti>();
+    module.ActivateComponent<TestPointlessAdd>();
+    var hints = new AIHints();
+    module.BuildAIHints(0, ws.Actors.Find(player)!, hints);
+    int Prio(ulong id) => hints.PotentialTargets.First(e => e.Actor.InstanceID == id).Priority;
+    t.Eq("Adds gives its OID its priority", Prio(add), 2);
+    t.True("and forbids DoTs when asked", hints.PotentialTargets.First(e => e.Actor.InstanceID == add).ForbidDOTs);
+    t.Eq("AddsMulti gives its OIDs theirs", Prio(multi), 1);
+    t.Eq("AddsPointless marks its adds pointless", Prio(pointless), AIHints.Enemy.PriorityPointless);
+    module.Dispose();
+}
+
 // A component activated after the world is up is told the world as it is, as BossmodReborn does it. Iambe, 2026-10-19:
 // Burst learnt its seeds from OnActorCreated, four of them were up before the module, and live it drew nothing for them.
 t.Section("A component activated late is told what is already there");
@@ -7111,6 +7137,10 @@ sealed class EndsOnFlagModuleStates : StateMachineBuilder
     public EndsOnFlagModuleStates(ModuleBase module) : base(module)
         => this.TrivialPhase().Raw.Update = () => Over;
 }
+
+sealed class TestRankedAdd(ModuleBase module) : Minerva.Components.Adds(module, 0x5001u, 2, forbidDots: true);
+sealed class TestRankedMulti(ModuleBase module) : Minerva.Components.AddsMulti(module, [0x5002u], 1);
+sealed class TestPointlessAdd(ModuleBase module) : Minerva.Components.AddsPointless(module, 0x5003u);
 
 sealed class TestModuleStates : StateMachineBuilder
 {

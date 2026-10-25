@@ -376,7 +376,17 @@ public sealed class AIHints
                 e.Priority = priority;
     }
 
-    public void PrioritizeTargetsByOIDAndForbidDOTs(uint oid, int priority = 0, bool forbidDots = false) => this.PrioritizeTargetsByOID(oid, priority);
+    public void PrioritizeTargetsByOIDAndForbidDOTs(uint oid, int priority = 0, bool forbidDots = false)
+    {
+        foreach (var e in this.PotentialTargets)
+        {
+            if (e.Actor.OID == oid)
+            {
+                e.Priority = priority;
+                e.ForbidDOTs = forbidDots;
+            }
+        }
+    }
 
     /// <summary>Everything attackable is fair game: enemies held back as not yet fighting (undesirable) come up to 0, so
     /// the AI goes and pulls them. Forbidden and invincible ones stay where they are. BossmodReborn's quest scripts use

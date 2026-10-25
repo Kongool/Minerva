@@ -555,11 +555,17 @@ public sealed class AIManager
         {
             if (!this.HasSolution)
                 return [];
-            var live = new List<(ulong id, int prio)>();
+            // Among equals: the player's own target first, then the nearest. A consumer takes the first it can reach, so a
+            // tie went to whichever came first in the list, and staying on the add already being hit was the consumer's
+            // guess. Ogre's Wisps (2026-10-25): three equal adds racing to the boss, the nearest is the one to kill first.
+            var pc = this.world.Party.Player();
+            var at = pc?.Position ?? this.hints.PlayerPosition;
+            var own = pc?.TargetID ?? 0ul;
+            var live = new List<(ulong id, int prio, bool own, float distance)>();
             foreach (var e in this.hints.PotentialTargets)
                 if (e.Priority > 0)
-                    live.Add((e.Actor.InstanceID, e.Priority));
-            live.Sort(static (a, b) => b.prio.CompareTo(a.prio));
+                    live.Add((e.Actor.InstanceID, e.Priority, e.Actor.InstanceID == own, (e.Actor.Position - at).Length() - e.Actor.HitboxRadius));
+            live.Sort(static (a, b) => a.prio != b.prio ? b.prio.CompareTo(a.prio) : a.own != b.own ? b.own.CompareTo(a.own) : a.distance.CompareTo(b.distance));
             var result = new ulong[live.Count];
             for (var i = 0; i < live.Count; ++i)
                 result[i] = live[i].id;
