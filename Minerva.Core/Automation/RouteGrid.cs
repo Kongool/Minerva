@@ -31,8 +31,26 @@ public sealed class RouteGrid
     /// hit is worse than a cell under one. Priced flat, they were equal: escaping a breath cone that fires
     /// before the walk ends makes every cell of the escape lethal, and cutting through a standing haze inside
     /// that cone then cost nothing extra (Claret Dragon, 2026-09-14).
+    /// <para>Ground already live counts once however many such zones overlap, and only half where the cell is in its
+    /// safety-margin ring rather than inside it. Wyvern Piece, 2026-10-22: Korha twice took Burns -- a damage over
+    /// time she could not heal through -- crossing a Liquid Hell pool 1.6-2.2y from its centre. Every live zone over
+    /// the cell counted in full, the margin ring included, so the rim of a pool cost what its middle did and two pools
+    /// meeting cost double, and a forced crossing went through the middle of one pool rather than where they meet.</para>
     /// </summary>
-    private float LethalPenalty(int c) => LethalStepPenalty * Math.Max(1, System.Numerics.BitOperations.PopCount(this.zones[c]));
+    private float LethalPenalty(int c)
+    {
+        if (this.insideLive == null)
+            return LethalStepPenalty * Math.Max(1, System.Numerics.BitOperations.PopCount(this.zones[c]));
+        var telegraphs = System.Numerics.BitOperations.PopCount(this.zones[c] & this.pending);
+        var live = this.insideLive[c] ? 1f : (this.zones[c] & ~this.pending) != 0 ? LiveMarginShare : 0f;
+        return MathF.Max(DangerStepPenalty, LethalStepPenalty * (telegraphs + live));
+    }
+
+    /// <summary>What a step in the margin ring of ground already live counts for, against one inside it.</summary>
+    private const float LiveMarginShare = 0.5f;
+
+    /// <summary>How much dearer a step that walks into a hit is than any other lethal step (see <see cref="Flood"/>).</summary>
+    private const float HitMultiplier = 10f;
 
     /// <summary>Slack on the arrival estimate, in seconds: the route is a grid path and the character
     /// accelerates, so a cell is only counted as crossed in time with a little room to spare.</summary>
@@ -59,6 +77,7 @@ public sealed class RouteGrid
     private readonly int[] came;
     private readonly bool[] intoHit;  // the route here steps into something new that fires before it is crossed
     private readonly ulong pending;   // zones that have not fired yet: telegraphs, as against ground already live
+    private readonly bool[]? insideLive;  // inside ground already live, margin not counted; null with more than 64 zones
     private readonly AIHints hints;
 
     // what it was built for, so a solve can hand the same grid to every attempt asking the same question
@@ -126,6 +145,17 @@ public sealed class RouteGrid
         // Which zones touch which cell is the same for every grid of a solve; only the deadline differs. Measured
         // once and shared (see AIHints.ZoneTouches) -- it was most of the cost of a solve with many zones up.
         var touches = hints.ZoneTouches(this.origin, this.cell, this.w, this.h, margin);
+
+        // Which cells are inside ground already live, the margin not counted: what a step into it is priced on
+        // (LethalPenalty).
+        var inside = touches != null ? hints.ZoneTouches(this.origin, this.cell, this.w, this.h, 0f) : null;
+        if (inside != null)
+        {
+            this.insideLive = new bool[n];
+            var live = ~this.pending;
+            for (var k = 0; k < n; ++k)
+                this.insideLive[k] = (inside[k] & live) != 0;
+        }
 
         for (var z = 0; z < this.h; ++z)
         {
@@ -497,6 +527,13 @@ public sealed class RouteGrid
                             // live is ground to cross at a price, and stepping over one to escape something worse is
                             // often the right call (Elm Gigas' capsules, 2026-09-26, held a character inside a cyclone)
                             hit = (this.zones[j] & ~startZones & this.pending) != 0 || this.InsideAny(j, this.zones[j] & beside);
+                            // A route that walks into a hit is no route at all to the search that picks a destination
+                            // (WalksIntoAHit refuses it), so one that crosses live ground instead must win whenever there
+                            // is one. Priced alike, a detour through the edge of a Buffet line that fired before it was
+                            // across beat a yalm of Liquid Hell, the destination was refused, and the dodge held in
+                            // Blazing Trail (Wyvern Piece, 2026-10-22).
+                            if (hit)
+                                penalty *= HitMultiplier;
                         }
                     }
                     var next = baseCost + (step * penalty);
