@@ -33,6 +33,8 @@ public enum AID : uint
 public enum SID : uint
 {
     WitsEnd = 5424, // 4C5D/4C5E->player, extra=0x1/0x2/0x4/0x5/0x6/0x7/0x8 - reaching 12 stacks will cause confuse on the player
+    ForwardMarch = 2161, // VoidmancerPiece->player; Korha 2026-10-24 (BMR has only the two turns)
+    AboutFace = 2162, // VoidmancerPiece->player; Korha 2026-10-22, twice
     LeftFace = 2163, // VoidmancerPiece->player, extra=0x0
     RightFace = 2164, // VoidmancerPiece->player, extra=0x0
     ForcedMarch = 1257, // VoidmancerPiece->player, extra=0x4
@@ -84,9 +86,93 @@ sealed class DeathDriveBait(ModuleBase module) : Components.BaitAwayIcon(module,
 
         hints.Add("Avoid intersecting zombies hitboxes!");
     }
+
+    private readonly List<Actor> zombies = module.Enemies((uint)OID.ZombiePiece);
+
+    /// <summary>
+    /// Drop Death Drive where it raises the fewest zombies. About 4.5s after it lands it raises every corpse its circle
+    /// touches: all eleven Death Drives of Korha's four pulls (2026-10-22, 10-24), not one corpse outside it. With twenty
+    /// corpses on the floor there is often no spot clear of all of them, so: of the floor clear of everything else
+    /// drawn, the spot touching the fewest corpses, nearest the baiter, and every corpse that spot does not touch is
+    /// ground the baiter keeps off until the drop. 2026-10-24: Korha killed three zombies at (134,9), the drop on the
+    /// same spot raised seven, and they confused and killed her.
+    /// </summary>
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        var mine = this.ActiveBaitsOn(actor);
+        if (mine.Count == 0 || mine[0].Shape is not AOEShapeCircle circle)
+            return;
+        var corpses = this.zombies.FindAll(z => z.IsDead);
+        if (corpses.Count == 0 || this.BestDrop(slot, actor, corpses, circle.Radius) is not { } drop)
+            return;
+        foreach (var c in corpses)
+        {
+            var reach = circle.Radius + c.HitboxRadius;
+            if ((c.Position - drop).Length() > reach + DropRoom)
+                hints.AddForbiddenZone(new AOEShapeCircle(reach), c.Position, default, mine[0].Activation);
+        }
+    }
+
+    /// <summary>Room left clear around the chosen drop, in yalms. The dodge keeps its safety margin from every forbidden
+    /// edge and stands on a grid; a spot in a gap between two corpses' circles thinner than that is no spot at all, and
+    /// with none the dodge stood still on the corpses it was meant to leave (replayed, 2026-10-24). A corpse this close is
+    /// counted as raised: wherever in the room the baiter ends up, nothing else is.</summary>
+    private const float DropRoom = 2f;
+
+    private WPos? BestDrop(int slot, Actor actor, List<Actor> corpses, float radius)
+    {
+        WPos? best = null;
+        var bestCount = int.MaxValue;
+        var bestDistance = float.MaxValue;
+        var center = this.Module.Center;
+        var extent = this.Module.Bounds.Extent;
+        for (var x = -extent + 0.5f; x < extent; x += 1f)
+        {
+            for (var z = -extent + 0.5f; z < extent; z += 1f)
+            {
+                var p = new WPos(center.X + x, center.Z + z);
+                if (!this.Module.Bounds.Contains(center, p) || this.InSomethingDrawn(slot, actor, p))
+                    continue;
+                var count = 0;
+                foreach (var c in corpses)
+                    if ((c.Position - p).Length() <= radius + c.HitboxRadius + DropRoom)
+                        ++count;
+                var distance = (p - actor.Position).LengthSq();
+                if (count < bestCount || (count == bestCount && distance < bestDistance))
+                {
+                    best = p;
+                    bestCount = count;
+                    bestDistance = distance;
+                }
+            }
+        }
+        return best;
+    }
+
+    private bool InSomethingDrawn(int slot, Actor actor, WPos p)
+    {
+        foreach (var component in this.Module.Components)
+        {
+            ReadOnlySpan<AOEInstance> active;
+            if (component is Components.GenericAOEs aoes)
+                active = aoes.ActiveAOEs(slot, actor);
+            else if (component is Components.Voidzone puddles)   // the Maladies
+                active = puddles.ActiveAOEs(slot, actor);
+            else
+                continue;
+            foreach (ref readonly var aoe in active)
+                if (aoe.Risky && aoe.Check(p))
+                    return true;
+        }
+        return false;
+    }
 }
 
-sealed class Mindjack(ModuleBase module) : Components.StatusDrivenForcedMarch(module, 3.0f, default, default, (uint)SID.LeftFace, (uint)SID.RightFace);
+// All three Mindjacks recorded so far were Forward March or About Face, which BMR's version (and this one, until
+// 2026-10-24) did not list, so no walk was ever aimed: Korha marched 18.7y off the east edge into the bleeding
+// wall at 211 HP and died five seconds later.
+sealed class Mindjack(ModuleBase module) : Components.StatusDrivenForcedMarch(module, 3.0f, (uint)SID.ForwardMarch, (uint)SID.AboutFace, (uint)SID.LeftFace, (uint)SID.RightFace);
 
 sealed class VoidmancerPieceStates : StateMachineBuilder
 {
@@ -106,6 +192,16 @@ public sealed class VoidmancerPiece(WorldState ws, Actor primary) : ModuleBase(w
 {
 
     public override bool ShouldPrioritizeAllEnemies => true;
+
+    // Living zombies before the boss. Each zombie hit stacks Wits End and twelve stacks confuse; with no healing, their
+    // chip damage is what killed Korha on 2026-10-24. A zombie has 1,344 HP to the boss's 16,010, and its corpse stays
+    // down unless a Death Drive lands on it (see DeathDriveBait).
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var e in hints.PotentialTargets)
+            if (e.Actor.OID == (uint)OID.ZombiePiece && !e.Actor.IsDead)
+                e.Priority = 1;
+    }
 
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {
