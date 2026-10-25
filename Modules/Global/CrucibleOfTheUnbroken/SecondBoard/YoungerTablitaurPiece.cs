@@ -122,10 +122,14 @@ sealed class TonzeStomp10 : Components.SimpleAOEGroups
 }
 
 // TODO change shape to arc cap
-sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module)
+// Ticks about once a second (EndlessSwing1, no cast) around the Elder, and the Elder walks after its target at 2.5-2.9y/s,
+// so a circle where it stands is a yalm or three short by the next tick. Korha, 2026-10-25: parked 8.6-9.0y from the
+// Elder, just past an 8y circle and its margin, she was hit twice, 279 each, and died. Drawn as the circle carried a tick's
+// walk ahead along the Elder's facing; with that, she was inside it at every tick from 103.4s.
+sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module, (uint)AID.EndlessSwing)   // named for the validator; OnEventCast below does the counting
 {
     private readonly List<AOEInstance> aoes = [];
-    private readonly AOEShapeCircle shape = new(8.0f);
+    private readonly AOEShapeCapsule shape = new(8.0f, 3.0f);
     private Actor? spellSource;
     private readonly EndlessSwipes? endlessSwipes = module.FindComponent<EndlessSwipes>();
 
@@ -133,8 +137,14 @@ sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (spell.Action.ID == (uint)AID.EndlessSwingBoss)
         {
+            // A new swing starts its own count, and is drawn even if the swipes' caster died in an earlier one: that flag
+            // was never reset, so after a bull fell mid-swipes every later Endless Swing went undrawn.
+            aoes.Clear();
             aoes.Add(new(shape, spell.LocXZ, spell.Rotation));
             spellSource = caster;
+            NumCasts = 0;
+            if (endlessSwipes != null)
+                endlessSwipes.isCasterDead = false;
         }
     }
 
@@ -169,6 +179,7 @@ sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module)
         var nextAOEs = CollectionsMarshal.AsSpan(aoes);
         ref var aoe = ref nextAOEs[0];
         aoe.Origin = spellSource.Position;
+        aoe.Rotation = spellSource.Rotation;
     }
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(aoes);
@@ -287,6 +298,28 @@ public sealed class YoungerTablitaurPiece : ModuleBase
     public YoungerTablitaurPiece(WorldState ws, Actor primary) : base(ws, primary, new(120f, 0f), new ArenaBoundsRect(20f, 20f))
     {
         ActivateComponent<Hint>();
+    }
+
+    // Kill both together: one falling too early sets the survivor off (Disorienting Groan, then Endless Slashes over the
+    // whole floor). Korha, 2026-10-25 01:36: the Younger died with the Elder on 72% and Disorienting Groan came 0.2s later.
+    // Daedalus keeps to one target, so every pull was lopsided (21/97, 5/59, 0/74 percent). The fuller bull is the priority,
+    // handed over only once the other is BalanceSlack fuller, so the rotation is not flipped on every hit.
+    private Actor? balanceOn;
+    private const float BalanceSlack = 0.02f;
+
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        var elders = this.Enemies((uint)OID.ElderTablitaurPiece);
+        var elder = elders.Count > 0 ? elders[0] : null;
+        var younger = this.PrimaryActor;
+        if (elder == null || younger.IsDeadOrDestroyed || elder.IsDeadOrDestroyed)
+            return;
+        static float Left(Actor a) => a.HPMP.MaxHP > 0 && a.HPMP.CurHP > 0 ? (float)a.HPMP.CurHP / a.HPMP.MaxHP : 1f; // 0 on a live bull: not synced yet
+        var y = Left(younger);
+        var e = Left(elder);
+        if (this.balanceOn == null || (this.balanceOn == younger ? e - y > BalanceSlack : y - e > BalanceSlack))
+            this.balanceOn = y >= e ? younger : elder;
+        hints.SetPriority(this.balanceOn, 1);
     }
 
     protected override void DrawEnemies(int pcSlot, Actor pc)

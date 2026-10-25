@@ -50,6 +50,7 @@ public sealed class ReplayService : IDisposable
     private bool recordingBossSeen;
     private Actor? recordingPrimary;      // the module's boss, kept so its death is still detectable after
     private bool recordingPrimaryEnds;    // ... the module deactivates and takes ActiveModule with it
+    private ModuleBase? recordingModule;  // ... and the module itself, for one whose end is its own (both bosses dead)
     private string? recordingEncounterName; // Occult CE name, when the fight came from the director
 
     // A solo duty is recorded whole (see UpdateRecording): the duty this recording is in, and the one auto-record last
@@ -132,6 +133,7 @@ public sealed class ReplayService : IDisposable
         this.recordingBossSeen = false;
         this.recordingPrimary = null;
         this.recordingPrimaryEnds = false;
+        this.recordingModule = null;
         this.recordingEncounterName = null;
         this.recordingSoloDuty = 0;
     }
@@ -371,7 +373,7 @@ public sealed class ReplayService : IDisposable
     {
         var active = this.modules.ActiveModule;
         if (this.IsRecording && actor.IsDead && active != null && ReferenceEquals(actor, active.PrimaryActor)
-            && this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true)
+            && this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true && !active.HasOwnEnd)
             this.recordingCompletion.SignalCompletion();
     }
 
@@ -396,11 +398,18 @@ public sealed class ReplayService : IDisposable
     /// </summary>
     private void DetectModuleBossDeath()
     {
-        if (this.modules.ActiveModule is { PrimaryActor: { } primary })
+        // A module with an end of its own -- both bosses dead, every add dead -- is over when that comes, not when its first
+        // actor dies, as ModuleLifetime runs it. Younger Tablitaur, 2026-10-25: the recording stopped two seconds after the
+        // Younger died with the Elder on 72%, and the rest of the fight, and the death that ended it, went unrecorded.
+        if (this.modules.ActiveModule is { PrimaryActor: { } primary } active)
         {
             this.recordingPrimary = primary;
-            this.recordingPrimaryEnds = this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true;
+            this.recordingModule = active;
+            this.recordingPrimaryEnds = this.modules.ActiveModuleInfo?.Attr.PrimaryActorDeathEndsEncounter == true && !active.HasOwnEnd;
         }
+
+        if (this.recordingModule is { HasOwnEnd: true, Finished: true })
+            this.recordingCompletion.SignalCompletion();
 
         if (this.recordingPrimaryEnds && this.recordingPrimary is { } boss && (boss.IsDead || boss.HPMP.CurHP == 0))
             this.recordingCompletion.SignalCompletion();
