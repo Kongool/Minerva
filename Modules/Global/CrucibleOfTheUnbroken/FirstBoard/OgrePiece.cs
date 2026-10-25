@@ -76,8 +76,48 @@ sealed class RaidWideFires(ModuleBase module)
 // Ball of Fire will be treated as a moving void zone in order to avoid it blowing up on pc. May need to increase size if it isn't enough room to avoid.
 sealed class BallOfFireVoidZone(ModuleBase module) : Components.Voidzone(module, 6.0f, m => m.Enemies((uint)OID.BallOfFire).Where(z => z.EventState != 7));
 
-// When Ball of Fire explodes it is a large r10 circle.
-sealed class ArmOfPurgatory(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ArmOfPurgatory, 10f);
+// When Ball of Fire explodes it is a large r10 circle -- 11 in effect, the ball's own 1y counting: Korha was hit at
+// 10.0-11.0y and clean at 10.5-10.9y (2026-10-22, 10-25).
+sealed class ArmOfPurgatory(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ArmOfPurgatory, 11f);
+
+// The Ball of Fire trails its tethered player at about 3y/s and, when the tether ends 12.9-14.9s after it appears, casts
+// Arm of Purgatory (0.7s) where it stands. Drawn only from that cast, the circle came too late: the ball keeps 6-7y from
+// her, and she was caught at 10.0-11.0y five times in two days, twice fatally (Korha, 2026-10-22 and 10-25). So from the
+// ball's appearance its blast is ahead, timed from the earliest tether end seen; the dodge keeps her out of it as the ball
+// follows, and a later end only means she was clear early. Carried 3y ahead along the ball's heading (it faces her and
+// closes at 3y/s): from a circle where it stood, the dodge parked her 3.6y away with the ball still coming.
+sealed class ArmOfPurgatoryAhead(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private readonly List<(Actor Ball, DateTime Blast)> balls = [];
+    private readonly List<AOEInstance> aoes = [];
+    private static readonly AOEShapeCapsule Shape = new(11f, 3f);
+
+    /// <summary>Earliest tether end seen (12.9s after the ball appears) plus the cast and its landing.</summary>
+    private const double BlastAfterSeconds = 12.9d + 0.95d;
+
+    public override void OnActorCreated(Actor actor)
+    {
+        if (actor.OID == (uint)OID.BallOfFire)
+            balls.Add((actor, World.FutureTime(BlastAfterSeconds)));
+    }
+
+    public override void OnActorDestroyed(Actor actor) => balls.RemoveAll(b => b.Ball == actor);
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.ArmOfPurgatory)
+            balls.RemoveAll(b => b.Ball == caster);
+    }
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        aoes.Clear();
+        foreach (var (ball, blast) in balls)
+            if (!ball.IsDeadOrDestroyed && ball.EventState != 7)
+                aoes.Add(new(Shape, ball.Position, ball.Rotation, blast));
+        return CollectionsMarshal.AsSpan(aoes);
+    }
+}
 
 sealed class OgrePieceStates : StateMachineBuilder
 {
@@ -93,10 +133,29 @@ sealed class OgrePieceStates : StateMachineBuilder
             .ActivateOnEnter<WispAdds>()
             .ActivateOnEnter<BallOfFireVoidZone>()
             .ActivateOnEnter<ArmOfPurgatory>()
+            .ActivateOnEnter<ArmOfPurgatoryAhead>()
             ;
     }
 }
 
 [ModuleInfo(CFCID = 1088u, NameID = 14538u, PrimaryActorOID = (uint)OID.OgrePiece, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "wen (ported from BMR)")]
 
-public sealed class OgrePiece(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(120f, -420f), new ArenaBoundsCircle(20f));
+public sealed class OgrePiece(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(120f, -420f), new ArenaBoundsCircle(20f))
+{
+    // The Wisps walk to the Ogre and Scorched Earth when they reach it, 19.0-19.3s after they turn targetable however far
+    // they start, and each one that arrives gives the beastmaster and her familiar a Vulnerability Up stack. A wave is
+    // three Wisps (171 HP) and a Great Wisp (1,575). Both were one priority (and AddsMulti applies none), so the Great Wisp
+    // took 11-17s of the 19 and two or three Wisps arrived a wave (Korha, 2026-10-25: 4, 5 and 5 in three pulls). The
+    // Wisps first -- nearest first, which PriorityTargets orders -- then the Great Wisp.
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var e in hints.PotentialTargets)
+            if (!e.Actor.IsDeadOrDestroyed)
+                e.Priority = e.Actor.OID switch
+                {
+                    (uint)OID.WispPiece => 2,
+                    (uint)OID.GreatWispPiece => 1,
+                    _ => e.Priority,
+                };
+    }
+}
