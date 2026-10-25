@@ -252,8 +252,16 @@ sealed class EndlessSwipes(ModuleBase module) : Components.GenericRotatingAOE(mo
     }
 }
 
+// The Elder throws it. Asked when the icon comes, not when the component is built: BossmodReborn's
+// Enemies(...)[0] here threw whenever the module started before the Elder was in the actor table, and the whole module
+// failed to load (2026-10-22: "Index was out of range" from TonzeSlash100's constructor).
 sealed class TonzeSlash100(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeRect(65.0f, 4.0f), (uint)IconID.TankBuster, (uint)AID.TonzeSlash100,
-    9.1d, source: module.Enemies((uint)OID.ElderTablitaurPiece)[0], tankbuster: true);
+    9.1d, tankbuster: true)
+{
+    private readonly List<Actor> elders = module.Enemies((uint)OID.ElderTablitaurPiece);
+
+    public override Actor? BaitSource(Actor target) => this.elders.Count > 0 ? this.elders[0] : null;
+}
 
 sealed class YoungerTablitaurPieceStates : StateMachineBuilder
 {

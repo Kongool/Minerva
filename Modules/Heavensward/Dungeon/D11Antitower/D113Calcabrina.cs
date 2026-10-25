@@ -56,7 +56,14 @@ public enum IconID : uint
     Gaze = 73 // player
 }
 
-class TerrifyingGlanceBait(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeCone(42.25f, 61f.Degrees()), (uint)IconID.Gaze, (uint)AID.TerrifyingGlance, 3.1f, source: module.Enemies((uint)OID.Calcabrina)[0]);
+// Calcabrina looks: asked when the icon comes, not when the component is built, so a module started before she is in
+// the actor table loads instead of throwing (the Younger Tablitaur crash, 2026-10-22, is the same line).
+class TerrifyingGlanceBait(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeCone(42.25f, 61f.Degrees()), (uint)IconID.Gaze, (uint)AID.TerrifyingGlance, 3.1f)
+{
+    private readonly List<Actor> calcabrinas = module.Enemies((uint)OID.Calcabrina);
+
+    public override Actor? BaitSource(Actor target) => this.calcabrinas.Count > 0 ? this.calcabrinas[0] : null;
+}
 class TerrifyingGlanceGaze(ModuleBase module) : Components.GenericGaze(module)
 {
     private DateTime activation;
