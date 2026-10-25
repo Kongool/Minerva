@@ -76,8 +76,10 @@ public sealed class RouteGrid
     private readonly float[] length;  // plain yalms along that route: what the destination is scored on
     private readonly int[] came;
     private readonly bool[] intoHit;  // the route here steps into something new that fires before it is crossed
+    private readonly bool[] intoLate; // ... or into one that does only by the solve's clock: late by the clearance lead
     private readonly ulong pending;   // zones that have not fired yet: telegraphs, as against ground already live
     private readonly bool[]? insideLive;  // inside ground already live, margin not counted; null with more than 64 zones
+    private readonly float[] firesIn = new float[64];  // seconds by the real clock until each zone fires (bit 63: the soonest of the rest)
     private readonly AIHints hints;
 
     // what it was built for, so a solve can hand the same grid to every attempt asking the same question
@@ -113,6 +115,14 @@ public sealed class RouteGrid
         this.builtLiveBy = liveBy;
         this.builtPlayer = player;
         this.builtMargin = margin;
+        var clock = liveBy == default ? now : liveBy;
+        Array.Fill(this.firesIn, float.MaxValue);
+        for (var k = 0; k < hints.ForbiddenZones.Count; ++k)
+        {
+            var a = hints.ForbiddenZones[k].Activation;
+            var bit = Math.Min(k, 63);
+            this.firesIn[bit] = MathF.Min(this.firesIn[bit], a == default ? 0f : (float)(a - clock).TotalSeconds);
+        }
         var center = hints.Center;
         // wide enough to hold a character who is a little way outside the arena, so there is a route back in
         var reach = MathF.Max(hints.Bounds.Extent, MathF.Min((player - center).Length() + cellSize, hints.Bounds.Extent + MaxOutsideReach));
@@ -131,6 +141,7 @@ public sealed class RouteGrid
         this.length = new float[n];
         this.came = new int[n];
         this.intoHit = new bool[n];
+        this.intoLate = new bool[n];
         for (var k = 0; k < hints.ForbiddenZones.Count; ++k)
         {
             if (hints.ForbiddenZones[k].Activation > (liveBy == default ? now : liveBy))
@@ -241,6 +252,21 @@ public sealed class RouteGrid
         return depth;
     }
 
+    /// <summary>The zones of <paramref name="zoneMask"/> that fire within <paramref name="seconds"/> by the real clock. Not
+    /// <see cref="dangerIn"/> plus the lead: that is clamped at the solve's now, so a zone firing inside the lead would read
+    /// as firing a whole lead away (Abductor, replayed 2026-10-24: a walk through an Aerosnare cone 0.16s from firing).</summary>
+    private ulong FiringBy(ulong zoneMask, float seconds)
+    {
+        var firing = 0ul;
+        for (var bits = zoneMask; bits != 0; bits &= bits - 1)
+        {
+            var k = System.Numerics.BitOperations.TrailingZeroCount(bits);
+            if (this.firesIn[k] <= seconds)
+                firing |= 1ul << k;
+        }
+        return firing;
+    }
+
     /// <summary>Is the cell's centre inside one of these zones proper, not merely within the margin of it?</summary>
     private bool InsideAny(int cell, ulong zoneMask)
     {
@@ -269,8 +295,13 @@ public sealed class RouteGrid
     /// is not already standing in? Leaving a zone about to go off means crossing it, and that is the escape;
     /// stepping into a different one on the way is the hit. Ground already live (a puddle, a hazard that is
     /// already out) does not count: that is priced by the route, not refused. See <see cref="Flood"/>.
+    /// <para>By the real clock. A route that is late only by the clearance lead answers <see cref="LateByTheLead"/>.</para>
     /// </summary>
     public bool WalksIntoAHit(int x, int z) => this.intoHit[(z * this.w) + x];
+
+    /// <summary>Does the route to this cell step into a telegraph it is across in real time, but not by the lead's clock?
+    /// Ground for a dodge to take only when nothing reachable is clear by the lead (see ArenaPathfinder.TryNearestSafe).</summary>
+    public bool LateByTheLead(int x, int z) => this.intoLate[(z * this.w) + x];
 
     /// <summary>
     /// Is this cell off the arena floor?
@@ -515,18 +546,28 @@ public sealed class RouteGrid
                     var step = (dx != 0 && dz != 0 ? Diagonal : 1f) * this.cell;
                     var penalty = 1f;
                     var hit = false;
+                    var lateByLead = false;
                     if (this.risky[j])
                     {
                         // Would it still be safe to be in that cell when we got there? The route so far is
                         // this.length[i] yalms, so arrival is that plus this step, divided by walk speed.
                         penalty = DangerStepPenalty;
-                        if (this.speed > 0f && this.dangerIn[j] <= ((this.length[i] + step) / this.speed) + ArrivalSlack)
+                        var arriving = ((this.length[i] + step) / this.speed) + ArrivalSlack;
+                        if (this.speed > 0f && this.dangerIn[j] <= arriving)
                         {
                             penalty = this.LethalPenalty(j);
                             // only a telegraph that has not gone off yet: a puddle or an orbiting hazard that is already
                             // live is ground to cross at a price, and stepping over one to escape something worse is
                             // often the right call (Elm Gigas' capsules, 2026-09-26, held a character inside a cyclone)
-                            hit = (this.zones[j] & ~startZones & this.pending) != 0 || this.InsideAny(j, this.zones[j] & beside);
+                            // -- and only one it fires on by the real clock. A step that is late only by the clearance
+                            // lead is lethal ground at its usual price, not the hit. Wyvern Piece, 2026-10-24: the way
+                            // round a Liquid Hell pool ran through a Buffet line's band and left it 2.1s before the line
+                            // fired; under Korha's 1.7s lead its last cells counted as walking into it, at ten times a
+                            // step of pool, and the route went through the middle of the pool and gave her the Burns
+                            // that killed her.
+                            var late = this.FiringBy(this.zones[j] & this.pending, arriving);
+                            hit = (late & ~startZones) != 0 || this.InsideAny(j, late & beside);
+                            lateByLead = !hit && ((this.zones[j] & ~startZones & this.pending) != 0 || this.InsideAny(j, this.zones[j] & beside));
                             // A route that walks into a hit is no route at all to the search that picks a destination
                             // (WalksIntoAHit refuses it), so one that crosses live ground instead must win whenever there
                             // is one. Priced alike, a detour through the edge of a Buffet line that fired before it was
@@ -543,6 +584,7 @@ public sealed class RouteGrid
                     this.length[j] = this.length[i] + step;
                     this.came[j] = i;
                     this.intoHit[j] = this.intoHit[i] || hit;
+                    this.intoLate[j] = this.intoLate[i] || lateByLead;
                     open.Enqueue(j, next);
                 }
             }

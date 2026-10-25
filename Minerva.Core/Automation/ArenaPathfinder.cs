@@ -473,6 +473,16 @@ public static class ArenaPathfinder
         if (safetyMargin > 0f && TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, 0f, goal, moveSpeed, float.MaxValue, out spot))
             return StepOutFirst(hints, spot, player, now, cellSize, 0f, goal, moveSpeed) ?? Settle(hints, deadline, player, spot, cellSize, 0f);
 
+        // Nothing is clear by the lead's clock either. Before waiting in a stage, take ground the walk reaches clean by
+        // the real one: it crosses something that fires after it is across, with less than the lead to spare. Wyvern
+        // Piece, 2026-10-24: the only way to the end Blazing Trail spared, other than through a Liquid Hell pool, ran
+        // round the pool through a Buffet line Korha would leave 2.1s before it fired. Refused, the way through the pool
+        // was the answer, and its Burns killed her. Last among the clean answers: taken alongside them, it outscored a
+        // 13y walk that kept the lead with a 21y one that left a cone 1.5s before it fired (Elm Gigas, replayed).
+        foreach (var margin in safetyMargin > 0f ? [safetyMargin, 0f] : new[] { safetyMargin })
+            if (TryNearestSafe(hints, deadline, solveNow, now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out spot, allowLate: true))
+                return StepOutFirst(hints, spot, player, now, cellSize, margin, goal, moveSpeed) ?? Settle(hints, deadline, player, spot, cellSize, margin);
+
         // Nothing is safe from everything inside the horizon. Before giving up, ask the same question with
         // a nearer deadline: the latest activation for which some reachable cell is clear of all that lands
         // by then. Alexander's Divine Arrow (2026-09-06): two waves of lines two seconds apart covered the
@@ -1213,7 +1223,9 @@ public static class ArenaPathfinder
         return AnchorBias * (1f - (deg / AnchorToleranceDeg)); // strongest on the anchor, fading to nothing
     }
 
-    private static bool TryNearestSafe(AIHints hints, DateTime deadline, DateTime now, DateTime realNow, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, float timeBudget, out SafeSpot spot)
+    /// <param name="allowLate">Also take ground whose route is late only by the clearance lead (see
+    /// <see cref="RouteGrid.LateByTheLead"/>): across what it crosses by the real clock, not by the lead's.</param>
+    private static bool TryNearestSafe(AIHints hints, DateTime deadline, DateTime now, DateTime realNow, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed, float timeBudget, out SafeSpot spot, bool allowLate = false)
     {
         var hasGoals = hints.GoalZones.Count > 0;
         var found = false;
@@ -1245,7 +1257,7 @@ public static class ArenaPathfinder
                 // in 0.7s, with a tornado dropped on the pocket firing in 4.7s, the dodge walked thirteen yalms across a
                 // line and was mid-line when it went off. Refusing it here leaves the stage below to answer "the lines
                 // first": stay in the pocket, then leave the tornado with seconds to spare.
-                if (grid.WalksIntoAHit(gx, gz))
+                if (grid.WalksIntoAHit(gx, gz) || (!allowLate && grid.LateByTheLead(gx, gz)))
                     continue;
                 if (hints.Misplaced(p))
                     continue;                                   // not where the module asked us to stand

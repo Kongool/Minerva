@@ -1536,6 +1536,57 @@ t.Section("Auto-dodge pathfinding");
             Length(soon.Route(from, to), from) >= Length(afterwards.Route(from, to), from) - 0.01f);
     }
 
+    // The clearance lead buys margin; it does not make a telegraph the walk clears in real time the hit. Wyvern Piece,
+    // Korha 2026-10-24: the way round a Liquid Hell pool ran through a Buffet line she would have left 2.1s before it
+    // fired; under her 1.7s lead its last cells counted as walking into it, at ten times a step of pool, and the route
+    // went through the middle of the pool.
+    {
+        var centre = new WPos(100f, 100f);
+        var from = new WPos(96f, 100f);
+        var to = new WPos(104f, 100f);
+        var pool = new AOEShapeRect(32f, 3f);   // live ground, x 97..103, from the south edge to z = 111
+        var poolOrigin = new WPos(100f, 79f);
+        var line = new AOEShapeRect(40f, 4.5f); // across the arena, z 111..120: the only way round the pool
+        var lineOrigin = new WPos(80f, 115.5f);
+        var lead = 1.7d;
+        RouteGrid Grid(double lineFiresIn)
+        {
+            var h = new AIHints { Center = centre, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = from };
+            h.AddForbiddenZone(pool, poolOrigin, default, now.AddSeconds(-1d));
+            h.AddForbiddenZone(line, lineOrigin, 90f.Degrees(), now.AddSeconds(lineFiresIn));
+            return new RouteGrid(h, now.AddSeconds(lead + 5d), from, 1f, 0f, now.AddSeconds(lead), ArenaPathfinder.DefaultMoveSpeed, now);
+        }
+        var poolSd = pool.Distance(poolOrigin, default);
+        bool ThroughThePool(List<WPos> route)
+        {
+            var prev = from;
+            foreach (var p in route)
+            {
+                for (var k = 0; k <= 100; ++k)
+                    if (poolSd.Distance(prev + ((p - prev) * (k / 100f))) < -0.5f)
+                        return true;
+                prev = p;
+            }
+            return false;
+        }
+
+        // the way round leaves the line about 2.8s in; it fires at 4.4s, so only the lead makes its last cells late
+        var leadOnly = Grid(4.4d);
+        t.True("a line the walk leaves in real time is crossed to go round a pool, not walked through the pool",
+            !ThroughThePool(leadOnly.Route(from, to)));
+        t.True("and the way round is no hit, only late by the lead", leadOnly.TryCellOf(to, out var tx, out var tz) && !leadOnly.WalksIntoAHit(tx, tz) && leadOnly.LateByTheLead(tx, tz));
+        // fired before the walk is across it by the real clock, the line is the hit, and the pool is the cheaper way
+        t.True("a line that fires on the walk in real time is still the hit: the route takes the pool",
+            ThroughThePool(Grid(2.5d).Route(from, to)));
+
+        // and one firing inside the lead is timed by the real clock as well, not read as a whole lead away (Abductor,
+        // replayed 2026-10-24: a walk through an Aerosnare cone 0.16s from firing passed as no hit)
+        var wallHints = new AIHints { Center = centre, Bounds = new ArenaBoundsSquare(20f), PlayerPosition = from };
+        wallHints.AddForbiddenZone(new AOEShapeRect(40f, 1f), new WPos(98f, 80f), default, now.AddSeconds(0.4d));   // x 97..99, the whole floor
+        var wallGrid = new RouteGrid(wallHints, now.AddSeconds(lead + 5d), from, 1f, 0f, now.AddSeconds(lead), ArenaPathfinder.DefaultMoveSpeed, now);
+        t.True("a line firing inside the lead is still the hit", wallGrid.TryCellOf(to, out var wx, out var wz) && wallGrid.WalksIntoAHit(wx, wz));
+    }
+
     // the trash-mode arena estimate follows the party: a box learned in the last room is forgotten the
     // moment the player is no longer inside it (Eureka Orthos, 2026-09-06)
     var footprint = new ArenaFootprint();
