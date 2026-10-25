@@ -664,7 +664,12 @@ public static class ArenaPathfinder
                     if (DoorwayWalkWeight * walk >= bestScore)
                         continue;
                     var score = exits.NearestTo(i, j, door, bestScore - (DoorwayWalkWeight * walk)) + DoorwayWalkWeight * walk;
-                    if (score < bestScore)
+                    // The door is safe and in reach; so must the walk to it be, asked only of a door that would win. A
+                    // walk that starts beside a zone, within the margin but outside it, does not get to cross it as
+                    // though it were leaving. Elm Gigas, 2026-10-19, Saar: with a 2s lead no stage left time to escape,
+                    // and the door taken was 8.2y away across an Ancient Aero line that fired in a second; Saar had been
+                    // standing 0.5y outside it, and was caught in the middle of it.
+                    if (score < bestScore && hints.WalkIsClear(player, door, now, m, moveSpeed, leavingMargin: 0f))
                     {
                         bestScore = score;
                         best = door;

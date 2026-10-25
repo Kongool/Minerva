@@ -5765,6 +5765,20 @@ t.Section("Pending effects");
     t.True("and starts afresh for the next fight", cost.Summarise() == null && cost.Frames == 0);
 }
 
+// ---- A walk that starts beside a zone is not leaving it ----
+// Elm Gigas, 2026-10-19, Saar: 0.5y outside an Ancient Aero line, inside the safety margin, the last-resort door was 8.2y
+// across the line, which fired in a second. Counted as leaving the line, the walk passed; it is crossing it.
+{
+    var walkNow = new DateTime(2026, 10, 19, 21, 15, 10, DateTimeKind.Utc);
+    var beside = new AIHints { Center = new WPos(0f, 0f), Bounds = new ArenaBoundsCircle(30f) };
+    beside.AddForbiddenZone(new SDRect(new WPos(-30f, 0f), 90f.Degrees(), 60f, 0f, 3f), walkNow.AddSeconds(1d));
+    var start = new WPos(0f, 3.5f);
+    var across = new WPos(0f, -5f);
+    t.True("counted by the margin, standing beside the line reads as leaving it", beside.WalkIsClear(start, across, walkNow, 1f, 6f));
+    t.True("counted by what the start is inside, the walk across it is not clear", !beside.WalkIsClear(start, across, walkNow, 1f, 6f, leavingMargin: 0f));
+    t.True("and one that starts inside it is still leaving it", beside.WalkIsClear(new WPos(0f, 2.5f), new WPos(0f, 9f), walkNow, 1f, 6f, leavingMargin: 0f));
+}
+
 // ---- Exaflare: the steps behind the next one are danger too ----
 // Moko the Restless, 2026-10-18: Spearman's Orders lines step 3.5y every 0.6s. With only the next step forbidden the
 // dodge stepped forward along the lane and was caught by the step after.

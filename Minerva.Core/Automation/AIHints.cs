@@ -899,7 +899,9 @@ public sealed class AIHints
     /// answer is "how long until something NEW catches this spot" rather than "how long until anything
     /// does". Only a walk starting inside danger needs this; pass null everywhere else.
     /// </param>
-    public float SecondsUntilDangerAt(WPos p, DateTime now, float margin, WPos? leaving)
+    /// <param name="leavingMargin">How close to a zone <paramref name="leaving"/> must be for the walk to count as
+    /// leaving it; the safety margin when not given. 0 counts only the zones the start is inside.</param>
+    public float SecondsUntilDangerAt(WPos p, DateTime now, float margin, WPos? leaving, float? leavingMargin = null)
     {
         if (this.InObstacle(p))
             return 0f;
@@ -908,7 +910,7 @@ public sealed class AIHints
         {
             if (!Touches(z, p, margin))
                 continue;
-            if (leaving is { } start && Touches(z, start, margin))
+            if (leaving is { } start && Touches(z, start, leavingMargin ?? margin))
                 continue;
             var seconds = z.Activation == default ? 0f : (float)(z.Activation - now).TotalSeconds;
             soonest = MathF.Min(soonest, MathF.Max(seconds, 0f));
@@ -959,7 +961,9 @@ public sealed class AIHints
     /// intervening frame at all. A zone already covering the starting point is the reason for the walk, not
     /// an objection to it; a zone that catches the path further on still is.</para>
     /// </summary>
-    public bool WalkIsClear(WPos from, WPos to, DateTime now, float margin, float moveSpeed)
+    /// <param name="leavingMargin">See <see cref="SecondsUntilDangerAt(WPos, DateTime, float, WPos?, float?)"/>: 0 holds
+    /// a walk that starts beside a zone, within the margin but outside it, to the zone like any other.</param>
+    public bool WalkIsClear(WPos from, WPos to, DateTime now, float margin, float moveSpeed, float? leavingMargin = null)
     {
         if (moveSpeed <= 0f)
             return true;
@@ -972,7 +976,7 @@ public sealed class AIHints
         for (var i = 1; i <= samples; ++i)
         {
             var along = distance * i / samples;
-            if (this.SecondsUntilDangerAt(from + (step * along), now, margin, from) <= (along / moveSpeed) + 0.3f)
+            if (this.SecondsUntilDangerAt(from + (step * along), now, margin, from, leavingMargin) <= (along / moveSpeed) + 0.3f)
                 return false;
         }
 
