@@ -145,7 +145,10 @@ sealed class WildCharge(ModuleBase module) : Components.GenericAOEs(module)
         {
             ref var aoe = ref nextAOEs[i];
             aoe.Color = i == 0 ? Colors.Danger : Colors.AOE;
-            aoe.Risky = i == 0;
+            // The next charge line is danger as well, not only the one firing: Saar, 2026-10-25, walked into the fourth
+            // while the third fired, and had 1.9s to get out. Not the next Arm and Hammer cone: the two face opposite
+            // ways from one spot, and together they cover the floor.
+            aoe.Risky = i == 0 || aoe.Shape is AOEShapeRect;
         }
 
         return nextAOEs[..max];

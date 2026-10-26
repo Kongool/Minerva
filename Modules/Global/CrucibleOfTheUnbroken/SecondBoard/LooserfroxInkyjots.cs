@@ -116,6 +116,17 @@ sealed class Explosion(ModuleBase module) : Components.SimpleAOEs(module, (uint)
                 arenaProjectionLayer: layer, restrictToArenaProjectionLayer: RestrictToArenaProjectionLayer));
         }
     }
+
+    // The bombs roll after they arm, and blow where they stop. Saar, 2026-10-25: two rolled 3.6-4y at 69.3s, two seconds
+    // after arming and five before the blast. The circle follows its bomb until it goes off.
+    public override void Update()
+    {
+        base.Update();
+        var aoes = CollectionsMarshal.AsSpan(Casters);
+        for (var i = 0; i < aoes.Length; ++i)
+            if (World.Actors.Find(aoes[i].ActorID) is { } bomb)
+                aoes[i].Origin = bomb.Position;
+    }
 }
 sealed class ExplosionCross(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ExplosionCross, new AOEShapeCross(40f, 4f))
 {
@@ -132,6 +143,17 @@ sealed class ExplosionCross(ModuleBase module) : Components.SimpleAOEs(module, (
             Casters.Add(new(Shape, origin, rotation, activation, actorID: actor.InstanceID, shapeDistance: Shape.Distance(origin, rotation),
                 arenaProjectionLayer: layer, restrictToArenaProjectionLayer: RestrictToArenaProjectionLayer));
         }
+    }
+
+    // The bombs roll after they arm, and blow where they stop. Saar, 2026-10-25: two rolled 3.6-4y at 69.3s, two seconds
+    // after arming and five before the blast. The circle follows its bomb until it goes off.
+    public override void Update()
+    {
+        base.Update();
+        var aoes = CollectionsMarshal.AsSpan(Casters);
+        for (var i = 0; i < aoes.Length; ++i)
+            if (World.Actors.Find(aoes[i].ActorID) is { } bomb)
+                aoes[i].Origin = bomb.Position;
     }
 }
 

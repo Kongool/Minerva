@@ -103,12 +103,49 @@ sealed class TonzeSwing1111 : Components.SimpleAOEGroups
     }
 }
 
+// The generic knockback guards only against being shoved into a zone, not off the floor, and BossmodReborn's gives no hint
+// at all. Saar, 2026-10-25: the first Shockwave left him at (138.1,12.4), 5y from the second's source (135,15), and the
+// dodge called that safe; the second threw him to (142.5,-8.6), off the 40y square: Bleeding twice. Each pending shove
+// forbids the ground it would throw you off from, tested a yalm inside the walls (the test is yes or no, so the dodge's
+// margin cannot apply), and is held a second past its cast, because the push lands later (see Ymir's Tsunami).
 sealed class Shockwave(ModuleBase module) : Components.SimpleKnockbackGroups(module, [(uint)AID.Shockwave, (uint)AID.ShockwaveLong], 20.0f)
 {
+    private const float HalfSize = 19.0f;
+    private readonly List<(WPos origin, DateTime until)> held = [];
+
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         base.OnCastStarted(caster, spell);
         SortHelpers.SortKnockbacksByActivation(Casters);
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID is (uint)AID.Shockwave or (uint)AID.ShockwaveLong)
+        {
+            held.Add((spell.LocXZ != default ? spell.LocXZ : caster.Position, World.FutureTime(1d)));
+        }
+        base.OnCastFinished(caster, spell);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (var k in Casters)
+        {
+            if (!IsImmune(slot, k.Activation))
+            {
+                hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, k.Origin, Distance, HalfSize, HalfSize), k.Activation);
+            }
+        }
+        held.RemoveAll(h => h.until <= World.CurrentTime);
+        foreach (var (origin, until) in held)
+        {
+            if (!IsImmune(slot, until))
+            {
+                hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, origin, Distance, HalfSize, HalfSize), World.CurrentTime);
+            }
+        }
     }
 }
 
