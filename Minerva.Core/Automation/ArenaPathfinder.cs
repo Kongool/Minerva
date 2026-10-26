@@ -1114,10 +1114,15 @@ public static class ArenaPathfinder
     /// <summary>Is every leg of the spot's route walkable before anything on it fires? Each leg is timed from when
     /// the walk reaches its start.</summary>
     private static bool RouteIsClear(AIHints hints, WPos player, SafeSpot spot, DateTime now, float margin, float moveSpeed)
+        => RouteIsClear(hints, player, spot.Route ?? [spot.Target], now, margin, moveSpeed);
+
+    /// <summary>Is every leg of <paramref name="route"/>, walked from <paramref name="player"/>, clear before anything on
+    /// it fires? Each leg is timed from when the walk reaches its start.</summary>
+    public static bool RouteIsClear(AIHints hints, WPos player, IReadOnlyList<WPos> route, DateTime now, float margin, float moveSpeed)
     {
         var from = player;
         var elapsed = 0f;
-        foreach (var corner in spot.Route ?? [spot.Target])
+        foreach (var corner in route)
         {
             if (!hints.WalkIsClear(from, corner, now.AddSeconds(elapsed), margin, moveSpeed))
                 return false;
@@ -1126,6 +1131,41 @@ public static class ArenaPathfinder
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The corners of <paramref name="route"/> still ahead of a walker now at <paramref name="at"/> that set out from
+    /// <paramref name="start"/>: those from the end of the leg it is nearest to. At a corner, the later leg wins, so the
+    /// corner reached is dropped.
+    /// </summary>
+    public static List<WPos> RouteAhead(WPos start, IReadOnlyList<WPos> route, WPos at)
+    {
+        var from = start;
+        var leg = 0;
+        var best = float.MaxValue;
+        for (var i = 0; i < route.Count; ++i)
+        {
+            var d = DistanceToSegment(at, from, route[i]);
+            if (d <= best)
+            {
+                best = d;
+                leg = i;
+            }
+            from = route[i];
+        }
+
+        var ahead = new List<WPos>(route.Count - leg);
+        for (var i = leg; i < route.Count; ++i)
+            ahead.Add(route[i]);
+        return ahead;
+    }
+
+    private static float DistanceToSegment(WPos p, WPos a, WPos b)
+    {
+        var ab = b - a;
+        var len = ab.LengthSq();
+        var t = len > 0f ? Math.Clamp((p - a).Dot(ab) / len, 0f, 1f) : 0f;
+        return (p - (a + (ab * t))).Length();
     }
 
     private static SafeSpot Settle(AIHints hints, DateTime deadline, WPos player, SafeSpot spot, float cellSize, float margin)

@@ -397,6 +397,28 @@ t.Section("A model-state change reaches components with its animation bytes");
     module.Dispose();
 }
 
+// A held destination is judged along the route planned to it, not the straight line, which crosses whatever the route
+// bends round. Rosa, 2026-10-25 21:28: a route round a Liquid Hell pool failed the straight-line check at once, the
+// destination hold lapsed, the navmesh path was re-issued every frame, and the walk drifted into the pool.
+t.Section("A held route is judged along its corners, from where the walker is");
+{
+    var start = new WPos(0, 0);
+    IReadOnlyList<WPos> route = [new WPos(5, 8), new WPos(12, 8), new WPos(16, 2)];
+    t.Eq("at the start, every corner is ahead", ArenaPathfinder.RouteAhead(start, route, start).Count, 3);
+    t.Eq("halfway up the first leg, still every corner", ArenaPathfinder.RouteAhead(start, route, new WPos(2.5f, 4)).Count, 3);
+    var past = ArenaPathfinder.RouteAhead(start, route, new WPos(5, 8));
+    t.True("on the first corner, it is dropped", past.Count == 2 && past[0] == route[1]);
+    var late = ArenaPathfinder.RouteAhead(start, route, new WPos(14.2f, 4.9f));
+    t.True("on the last leg, only the end", late.Count == 1 && late[0] == route[2]);
+
+    // a live pool between start and end: the straight walk is not clear, the route round it is
+    var hints = new AIHints();
+    var now = new DateTime(2026, 10, 25, 21, 0, 0);
+    hints.AddForbiddenZone(new SDCircle(new WPos(8, 1), 4f), now);
+    t.True("the straight line through the pool is not clear", !hints.WalkIsClear(start, route[^1], now, 1f, 6f));
+    t.True("the route round it is", ArenaPathfinder.RouteIsClear(hints, start, route, now, 1f, 6f));
+}
+
 // With its primary dead and nothing ranked, the enemies still fighting are ranked, so the dodge and Daedalus go to them.
 // Loosefrox, 2026-10-25: Chewchum Popoto stood untargeted 17-19y away for 21s after Loosefrox died.
 t.Section("A fight that outlives its primary ranks the enemies still fighting");

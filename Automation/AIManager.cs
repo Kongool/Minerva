@@ -53,6 +53,8 @@ public sealed class AIManager
     private Angle gazeTurnNow;       // facing this frame, for the same reason: EndGazeTurn has no actor to ask
     private ushort voidsZone;
     private WPos? committedTarget;
+    private IReadOnlyList<WPos>? committedRoute;   // the way there, as planned when the destination was chosen ...
+    private WPos committedFrom;                     // ... from here
     private DateTime committedAt;
     private Positional requestedPositional;
     private DateTime requestedUntil;
@@ -1426,6 +1428,7 @@ public sealed class AIManager
         if (!this.Current.NeedToMove || !this.Current.Found)
         {
             this.committedTarget = null;
+            this.committedRoute = null;
             return this.Current;
         }
 
@@ -1437,10 +1440,18 @@ public sealed class AIManager
 
         if (this.committedTarget is { } prev && (prev - pc.Position).Length() > ArrivedRange && !outdated)
         {
-            // The destination is still safe, and so is the way to it: keep going.
-            if (!this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev)
-                && this.WayStillClear(pc.Position, prev, now, margin, moveSpeed))
-                return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
+            // The destination is still safe, and so is the way to it: keep going, along the route planned to it. The way
+            // was the straight line, which crosses whatever the route bends round, so a route round a pool failed it at
+            // once, the hold lapsed, and every frame took a fresh answer whose corners sat a yalm off the last. The
+            // navmesh path was re-issued each time and the walk never got round: Rosa, 2026-10-25 21:28, planned north
+            // of a Liquid Hell pool, drifted toward the end point and went through it. The same route is handed on
+            // unchanged, so the follower keeps walking it.
+            var ahead = this.committedRoute is { Count: > 0 } route ? ArenaPathfinder.RouteAhead(this.committedFrom, route, pc.Position) : null;
+            var clear = ahead is { Count: > 0 }
+                ? ArenaPathfinder.RouteIsClear(this.hints, pc.Position, ahead, now, margin, moveSpeed)
+                : this.WayStillClear(pc.Position, prev, now, margin, moveSpeed);
+            if (!this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev) && clear)
+                return this.Held(pc, prev, ahead);
 
             // Something changed -- but a fresh answer every frame is not a dodge, it is a character
             // shuffling on the spot. Familiar Tactics, 2026-09-06: after reaching one safe spot the solver
@@ -1450,12 +1461,35 @@ public sealed class AIManager
             if (this.world.CurrentTime - this.committedAt < TimeSpan.FromSeconds(MinCommitSeconds)
                 && !this.hints.InImminentDanger(pc.Position, deadline, margin)
                 && !this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev))
-                return this.Current with { Target = prev, Direction = (prev - pc.Position).Normalized() };
+                return this.Held(pc, prev, ahead);
         }
 
         this.committedTarget = this.Current.Target;
+        this.committedRoute = this.Current.Route;
+        this.committedFrom = pc.Position;
         this.committedAt = this.world.CurrentTime;
         return this.Current;
+    }
+
+    /// <summary>The held destination, steered at the next corner of the route committed to, and handing the mover only
+    /// the corners still ahead: the same points every frame until one is passed, so the navmesh path is re-issued only
+    /// then. Not the whole route: a re-issue (a stall re-issues one) walked back to corners already passed, and Saar,
+    /// 2026-10-25 21:41, rocked between (516.4,9.8) and (518.5,7.7) for six seconds short of the way round a pool.
+    /// Without a route, straight at the destination as before.</summary>
+    private SafeSpot Held(Actor pc, WPos target, List<WPos>? ahead)
+    {
+        if (ahead is not { Count: > 0 } || this.committedRoute == null)
+            return this.Current with { Target = target, Direction = (target - pc.Position).Normalized() };
+        var steer = ahead[^1];
+        foreach (var corner in ahead)
+        {
+            if ((corner - pc.Position).Length() > ArrivedRange)
+            {
+                steer = corner;
+                break;
+            }
+        }
+        return this.Current with { Target = target, Direction = (steer - pc.Position).Normalized(), Waypoint = steer, Route = ahead };
     }
 
     /// <summary>
