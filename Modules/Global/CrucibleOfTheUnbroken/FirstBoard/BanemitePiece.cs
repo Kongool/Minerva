@@ -64,7 +64,10 @@ sealed class BedrockUplift(ModuleBase module) : Components.ConcentricAOEs(module
 sealed class DeadlyThrust(ModuleBase module) : Components.BaitAwayCast(module, (uint)AID.DeadlyThrust, 2f, tankbuster: true);
 
 // Aoe circles that drop on center then around the outside and explode one after another
-sealed class VenomWeb(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VenomWeb1, 9f, 6);
+// Nine webs a wave (once 32), cast 0.25-0.4s apart and firing in that order: the centre and eight on a 15y ring, which
+// between them cover the floor. Drawn six at a time, as BossmodReborn draws them, the last three were not there until the
+// first three had fired, and the dodge parked Saar 4.5y inside the ninth (2026-10-25 15:58, Poison and Damage Down).
+sealed class VenomWeb(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VenomWeb1, 9f);
 
 sealed class MitelingAdds(ModuleBase module) : Components.Adds(module, (uint)OID.MitelingPiece);
 

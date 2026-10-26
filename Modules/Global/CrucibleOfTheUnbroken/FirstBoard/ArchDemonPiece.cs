@@ -40,7 +40,11 @@ sealed class AbyssalLanceAdds(ModuleBase module) : Components.AddsPointless(modu
 sealed class AbyssalCharge(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AbyssalCharge, new AOEShapeRect(40f, 2f));
 
 // Lasers that spread across the arena and fire off one after another. Showing 1 to try and help pc run across before it gets all the way to the other end.
-sealed class Dismember(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Dismember, new AOEShapeRect(35f, 4f), 1);
+// Five lines 8y apart (x 504-536), cast one after another and firing 0.35-1.3s apart: a wave over the whole floor, safe only
+// in a line already fired. Drawn one at a time (maxCasts 1), the next line showed only when the last went off, with as
+// little as 0.5s left: Saar walked back for uptime into one (2026-10-25 15:55, Damage Down). And 1y wider than the sheet's
+// width 8: the dodge parked 5.0-5.4y off a line's axis (4 and its margin) and was hit there, 5.1-5.4y, now and then.
+sealed class Dismember(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Dismember, new AOEShapeRect(35f, 5f));
 
 // Laser swords that appear above a r6 circle and step down into the ground.
 sealed class AbyssalTransfixion(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AbyssalTransfixion1, 6f);
