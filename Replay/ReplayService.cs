@@ -52,6 +52,8 @@ public sealed class ReplayService : IDisposable
     private bool recordingPrimaryEnds;    // ... the module deactivates and takes ActiveModule with it
     private ModuleBase? recordingModule;  // ... and the module itself, for one whose end is its own (both bosses dead)
     private string? recordingEncounterName; // Occult CE name, when the fight came from the director
+    private ushort recordingZone;         // the zone it started in: leaving it ends the fight
+    private ModuleBase? endedModule;      // the module whose recording last ended on its own, not started again idle
 
     // A solo duty is recorded whole (see UpdateRecording): the duty this recording is in, and the one auto-record last
     // started in, so a recording stopped by hand inside the duty is not started again the next frame.
@@ -136,6 +138,7 @@ public sealed class ReplayService : IDisposable
         this.recordingModule = null;
         this.recordingEncounterName = null;
         this.recordingSoloDuty = 0;
+        this.recordingZone = this.world.CurrentZone;
     }
 
     // make a boss name safe for a filename (keeps spaces/hyphens; replaces only the truly-invalid chars)
@@ -320,6 +323,12 @@ public sealed class ReplayService : IDisposable
                     if (module.PrimaryActor.IsDead || module.PrimaryActor.HPMP.CurHP == 0)
                         return null;
 
+                    // Nor on a fight whose recording has just ended on going quiet, until the player is back in it. Saar,
+                    // 2026-10-25: dead on the Banemite Piece and revived as the Crucible put her out, the recording ended 8s
+                    // after the death and a new one started the next frame, on the module still loaded and still pulled.
+                    if (ReferenceEquals(module, this.endedModule) && this.modules.LocalPlayer() is not { InCombat: true })
+                        return null;
+
                     // A module loads as soon as its boss exists, often a pack or two early; recording from then filed the
                     // trash before Tesleen as a one-minute "Tesleen" recording and split her pull into a second file
                     // (newtoon2, 2026-10-04). Start when the fight does, or when the player is in its arena.
@@ -351,12 +360,22 @@ public sealed class ReplayService : IDisposable
             return null;
         }
 
+        // A fight is over when its zone is left: the player was put out, or gave up. Saar, 2026-10-25: a recording started
+        // 0.2s before the Crucible put her out to Central Shroud never saw combat, so the idle stop could not end it, and
+        // it ran on there until the plugin reloaded.
+        if (this.world.CurrentZone != this.recordingZone)
+        {
+            var ops = this.Stop();
+            return $"Left the zone. Recording stopped: {ops} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
+        }
+
         this.DetectModuleBossDeath();
         this.DetectNoModuleBossDeath();
         this.recordingCompletion.NoteCombat(this.modules.LocalPlayer() is { InCombat: true }, realDt);
         if (!this.recordingCompletion.Update(realDt))
             return null;
 
+        this.endedModule = this.modules.ActiveModule;
         var opCount = this.Stop();
         return $"Encounter ended. Recording stopped automatically: {opCount} ops -> {Path.GetFileName(this.LastPath)}. Fact sheet ready.";
     }
