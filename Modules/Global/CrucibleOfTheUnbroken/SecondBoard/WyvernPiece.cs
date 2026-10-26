@@ -65,16 +65,24 @@ sealed class StormTrail(ModuleBase module) : Components.SimpleAOEs(module, (uint
 sealed class LiquidHellPuddle(ModuleBase module) : Components.Voidzone(module, 5.0f,
     module => module.Enemies((uint)OID.LiquidHellPuddle).Where(z => z.EventState != 7));
 
+// A whirlwind waits about 3.5s at the edge it spawns on, then crosses the floor in a straight lane at 2.0 y/s (Rosa,
+// 2026-10-25: 11.5, 7.5, 3.6, -0.6 ... every 2s, heading 0 or 180 only). Drawn only where it is, its lane was invisible:
+// the dodge parked Rosa in one 4y ahead of it and walked into it (Strong Wind, 239 and Damage Down). So the lane ahead is
+// drawn as well, a second of travel at a time and each timed for when the whirlwind gets there, a second early, so the
+// dodge crosses a lane ahead of it but does not wait in one.
 sealed class Whirlwind(ModuleBase module) : Components.GenericAOEs(module)
 {
-    private AOEInstance[] aoes = [];
-    private readonly List<Actor> puddles = [];
+    private const float Speed = 2.0f;
+    private const double Pause = 3.5d;
+    private const int SecondsAhead = 4;
+    private readonly List<AOEInstance> aoes = [];
+    private readonly List<(Actor actor, WPos spawn, DateTime born)> puddles = [];
 
     public override void OnActorCreated(Actor actor)
     {
         if (actor.OID is (uint)OID.WhirlwindSmall or (uint)OID.WhirlwindBig)
         {
-            puddles.Add(actor);
+            puddles.Add((actor, actor.Position, World.CurrentTime));
         }
     }
 
@@ -82,24 +90,33 @@ sealed class Whirlwind(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (actor.OID is (uint)OID.WhirlwindSmall or (uint)OID.WhirlwindBig)
         {
-            puddles.Remove(actor);
+            puddles.RemoveAll(p => p.actor == actor);
         }
     }
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
-        return aoes;
+        return CollectionsMarshal.AsSpan(aoes);
     }
 
     public override void Update()
     {
-        var count = puddles.Count;
-        aoes = new AOEInstance[count];
-        for (var i = 0; i < count; i++)
+        aoes.Clear();
+        var now = World.CurrentTime;
+        foreach (var (puddle, spawn, born) in puddles)
         {
-            var puddle = puddles[i];
-            AOEShapeCapsule shape = puddle.OID == (uint)OID.WhirlwindSmall ? new AOEShapeCapsule(2.0f, 2.5f) : new AOEShapeCapsule(3.0f, 3.5f);
-            aoes[i] = new(shape, puddle.Position, puddle.Rotation, color: Colors.Danger);
+            // Its touch reaches past its 2y (3y) body: Strong Wind hit at 3.3y centre to centre (Saar, 2026-10-25 19:27, "judged
+            // safe"), the player's own half yalm and the lag behind a 2 y/s mover. Drawn a yalm and a half wider (BossmodReborn's
+            // 2.0/3.0 drew the body only).
+            AOEShapeCapsule shape = puddle.OID == (uint)OID.WhirlwindSmall ? new AOEShapeCapsule(3.5f, 2.5f) : new AOEShapeCapsule(4.5f, 3.5f);
+            aoes.Add(new(shape, puddle.Position, puddle.Rotation, color: Colors.Danger));
+            var moving = (puddle.Position - spawn).LengthSq() > 0.09f;
+            var start = moving ? now : born.AddSeconds(Pause) > now ? born.AddSeconds(Pause) : now;
+            var dir = puddle.Rotation.ToDirection();
+            for (var i = 1; i <= SecondsAhead; ++i)
+            {
+                aoes.Add(new(shape, puddle.Position + dir * (Speed * i), puddle.Rotation, start.AddSeconds(i - 1)));
+            }
         }
     }
 }

@@ -349,7 +349,17 @@ public sealed class YoungerTablitaurPiece : ModuleBase
         var elders = this.Enemies((uint)OID.ElderTablitaurPiece);
         var elder = elders.Count > 0 ? elders[0] : null;
         var younger = this.PrimaryActor;
-        if (elder == null || younger.IsDeadOrDestroyed || elder.IsDeadOrDestroyed)
+        if (elder == null)
+            return;
+        // With one bull down the other is the fight, and nothing else names it: the dodge walks to a ranked target or the
+        // module's primary (the Younger, dead), and Daedalus retargets only within 25y. Saar, 2026-10-25: the Younger fell
+        // at 80s, the Elder walked to (120,-22) past the north edge, and he stood 29y away for 81s.
+        if (younger.IsDeadOrDestroyed != elder.IsDeadOrDestroyed)
+        {
+            hints.SetPriority(younger.IsDeadOrDestroyed ? elder : younger, 1);
+            return;
+        }
+        if (younger.IsDeadOrDestroyed)
             return;
         static float Left(Actor a) => a.HPMP.MaxHP > 0 && a.HPMP.CurHP > 0 ? (float)a.HPMP.CurHP / a.HPMP.MaxHP : 1f; // 0 on a live bull: not synced yet
         var y = Left(younger);
