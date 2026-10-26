@@ -760,6 +760,10 @@ public abstract class ModuleBase : IDisposable
                 this.ReportError($"CalculateModuleAIHints threw ({ex.GetType().Name}: {ex.Message}); the module's own hints are off for the rest of the encounter, its components keep running.");
             }
         }
+
+        // The fight can outlive its primary (two bosses, both to die). With nothing ranked, nobody walked to the survivor.
+        if (this.PrimaryActor.IsDeadOrDestroyed)
+            hints.RankSurvivors();
     }
 
     private readonly HashSet<ModuleComponent> brokenHints = [];

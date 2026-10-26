@@ -1050,6 +1050,22 @@ public sealed class AIHints
         }
     }
 
+    /// <summary>
+    /// With nothing ranked above the default, raise every engaged enemy (priority 0) to 1; the order among them is
+    /// unchanged. For a fight that goes on after its primary dies: the dodge walks to a ranked enemy or the live
+    /// primary, and Daedalus retargets only to ranked ones, so an unranked survivor was walked to by nobody (Younger
+    /// Tablitaur's Elder and Loosefrox's Chewchum Popoto, 2026-10-25: 17-29y off, untargeted, for 21-81s).
+    /// </summary>
+    public void RankSurvivors()
+    {
+        foreach (var e in this.PotentialTargets)
+            if (e.Priority > 0)
+                return;
+        foreach (var e in this.PotentialTargets)
+            if (e.Priority == 0)
+                e.Priority = 1;
+    }
+
     /// <summary>The module says not to attack this one (invincible, or forbidden outright): no uptime to regain on it.</summary>
     public bool IsForbiddenTarget(Actor a)
     {

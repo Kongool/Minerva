@@ -397,6 +397,33 @@ t.Section("A model-state change reaches components with its animation bytes");
     module.Dispose();
 }
 
+// With its primary dead and nothing ranked, the enemies still fighting are ranked, so the dodge and Daedalus go to them.
+// Loosefrox, 2026-10-25: Chewchum Popoto stood untargeted 17-19y away for 21s after Loosefrox died.
+t.Section("A fight that outlives its primary ranks the enemies still fighting");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x40000001B, second = 0x40000001C, idle = 0x40000001D, player = 0x10000001E;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(second, 0x5005, 0, "second", 0, ActorType.Enemy, new Vector4(110, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(idle, 0x5006, 0, "idle", 0, ActorType.Enemy, new Vector4(130, 0, 100, 0), 1f, new ActorHPMP(100, 100, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(player, 0, 0, "me", 0, ActorType.Player, new Vector4(100, 0, 95, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    ws.Execute(new ActorState.OpCombat(second, true));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    var hints = new AIHints();
+    module.BuildAIHints(0, ws.Actors.Find(player)!, hints);
+    int Prio(ulong id) => hints.PotentialTargets.First(e => e.Actor.InstanceID == id).Priority;
+    t.Eq("while the primary lives, nothing is raised", Prio(second), 0);
+    ws.Execute(new ActorState.OpDead(boss, true));
+    module.BuildAIHints(0, ws.Actors.Find(player)!, hints);
+    t.Eq("with it dead, the one still fighting is ranked", Prio(second), 1);
+    t.Eq("one not engaged is left as it was", Prio(idle), AIHints.Enemy.PriorityUndesirable);
+    hints.PotentialTargets.First(e => e.Actor.InstanceID == second).Priority = 3;
+    hints.RankSurvivors();
+    t.Eq("a ranking the module made is left alone", Prio(second), 3);
+    module.Dispose();
+}
+
 // A group knockback forgets a shove once its cast is over. It removed only its one watched action, which a group leaves
 // unset, so every Shockwave stayed listed all fight (Younger Tablitaur, 2026-10-25).
 t.Section("A group knockback drops a shove when its cast ends");
