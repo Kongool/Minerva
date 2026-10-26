@@ -4,7 +4,7 @@
     <!-- Dalamud.NET.Sdk sets TargetFramework, references (Dalamud, ImGui,
          Lumina, Lumina.Excel, FFXIVClientStructs), output path, and the
          generated plugin manifest for you. Matches the Mercury setup. -->
-    <Version>0.1.1.0</Version>
+    <Version>0.1.2.0</Version>
     <Authors>Aaron</Authors>
     <Company></Company>
     <Description>Real-time boss mechanic guidance, arena radar, automation, and AI-assisted module generation for FFXIV.</Description>
