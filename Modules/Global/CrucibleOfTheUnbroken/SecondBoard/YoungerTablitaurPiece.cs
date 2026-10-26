@@ -169,6 +169,11 @@ sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module, (u
     private readonly AOEShapeCapsule shape = new(8.0f, 3.0f);
     private Actor? spellSource;
     private readonly EndlessSwipes? endlessSwipes = module.FindComponent<EndlessSwipes>();
+    // Over once it stops ticking: the first tick comes 7.0-7.2s after the cast starts, then every 1.2s or less (seven
+    // pulls, 2026-10-25). A swing cut short was left up for good: Saar, 21:45, the Elder died 3s into the Younger's
+    // swing, the Younger enraged (Disorienting Groan) and never swung, and the circle covered its whole melee ring for the
+    // rest of the fight, so the dodge kept him 18y off it.
+    private DateTime quietAfter;
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
@@ -180,6 +185,7 @@ sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module, (u
             aoes.Add(new(shape, spell.LocXZ, spell.Rotation));
             spellSource = caster;
             NumCasts = 0;
+            quietAfter = World.FutureTime(10d);
             if (endlessSwipes != null)
                 endlessSwipes.isCasterDead = false;
         }
@@ -187,6 +193,10 @@ sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module, (u
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
+        if (spell.Action.ID == (uint)AID.EndlessSwing1)
+            quietAfter = World.FutureTime(3d);
+        else if (spell.Action.ID == (uint)AID.DisorientingGroan)
+            aoes.Clear();
         if (spell.Action.ID is (uint)AID.EndlessSwipes1 or (uint)AID.EndlessSwipes3)
         {
             NumCasts++;
@@ -201,7 +211,7 @@ sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module, (u
     public override void Update()
     {
         // If the caster of swipes dies, then we have to clear any left over aoes otherwise they will not get removed - it can be either boss
-        if (endlessSwipes != null && endlessSwipes.isCasterDead)
+        if (endlessSwipes != null && endlessSwipes.isCasterDead || aoes.Count != 0 && World.CurrentTime > quietAfter)
         {
             aoes.Clear();
             return;
