@@ -99,22 +99,40 @@ sealed class VulnDown(ModuleBase module) : Components.GenericInvincible(module)
     protected override ReadOnlySpan<Actor> ForbiddenTargets(int slot, Actor actor) => CollectionsMarshal.AsSpan(avoidBosses);
 }
 
+// The push lands about half a second after the cast resolves, measured from wherever the player is by then, so the ground
+// it would throw you off from is kept a second longer. Saar, 2026-10-25: at both Tsunamis the dodge walked toward the boss
+// in that half second (0.7y, 2.3y), and the push carried him off the floor: Bleeding, then dead. Tested a yalm inside the
+// walls as well, because the test is yes or no and the dodge's margin cannot keep off its edge (he waited 0.2y inside it).
 sealed class Tsunami(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.Tsunami, 35.0f, kind: Kind.DirForward)
 {
+    private const float HalfSize = 19.0f;
+    private WDir lastPush;
+    private DateTime holdUntil;
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+        {
+            lastPush = Distance * spell.Rotation.ToDirection();
+            holdUntil = World.FutureTime(1d);
+        }
+        base.OnCastFinished(caster, spell);
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        var count = Casters.Count;
-        if (count == 0)
+        if (Casters.Count > 0)
         {
-            return;
+            var knockback = Casters[0];
+            if (!IsImmune(slot, knockback.Activation))
+            {
+                hints.AddForbiddenZone(new SDKnockbackInAABBRectFixedDirection(Module.Center, Distance * knockback.Direction.ToDirection(), HalfSize, HalfSize),
+                    knockback.Activation);
+            }
         }
-
-        var knockback = Casters[0];
-
-        if (!IsImmune(slot, knockback.Activation))
+        else if (World.CurrentTime < holdUntil && !IsImmune(slot, holdUntil))
         {
-            hints.AddForbiddenZone(new SDKnockbackInAABBRectFixedDirection(Module.Center, Distance * knockback.Direction.ToDirection(), 20.0f, 20.0f),
-                knockback.Activation);
+            hints.AddForbiddenZone(new SDKnockbackInAABBRectFixedDirection(Module.Center, lastPush, HalfSize, HalfSize), World.CurrentTime);
         }
     }
 }

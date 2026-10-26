@@ -112,6 +112,7 @@ sealed class CrushingBlade(ModuleBase module) : Components.GenericKnockback(modu
     private BitMask affectedPlayers;
     private DateTime activation = default;
     private Actor? source = null;
+    private DateTime holdUntil;
 
     public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
     {
@@ -132,9 +133,22 @@ sealed class CrushingBlade(ModuleBase module) : Components.GenericKnockback(modu
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
+        // The shove lands about half a second after the cast resolves, measured from wherever the player is by then
+        // (Ymir's Tsunami, 2026-10-25), so its ground is kept a second longer. Saar, 18:00: Bleeding at 60.6, off the floor
+        // after the 58.8 Blade.
         if (spell.Action.ID == (uint)AID.CrushingBlade)
         {
+            holdUntil = World.FutureTime(1d);
+        }
+    }
+
+    public override void Update()
+    {
+        base.Update();
+        if (holdUntil != default && World.CurrentTime >= holdUntil)
+        {
             affectedPlayers.Reset();
+            holdUntil = default;
         }
     }
 
@@ -150,12 +164,24 @@ sealed class CrushingBlade(ModuleBase module) : Components.GenericKnockback(modu
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (!affectedPlayers[slot] || activation == default || source == null || IsImmune(slot, activation))
+        if (!affectedPlayers[slot] || activation == default || source == null)
         {
             return;
         }
 
-        hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, source.Position, KnockbackDistance, 20.0f, 20.0f));
+        // Not predicted as tankbuster damage, though it hits for 300-385: the familiar's Cover does not take it (Saar,
+        // 2026-10-25, Covered and still hit), and Daedalus spends a worn familiar on Snarl when SecondsUntilTankbuster
+        // says one is coming.
+        if (IsImmune(slot, activation))
+        {
+            return;
+        }
+
+        // At the shove's own time. Without it the zone read as now, and Saar, 2026-10-25, stood still between two Menace
+        // circles: the only ground clear of them was ground the shove would throw her off, but the circles landed 1.8s
+        // before it, with time to step back in. Tested a yalm inside the walls: the test is yes or no, so the dodge's
+        // margin cannot keep off its edge.
+        hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, source.Position, KnockbackDistance, 19.0f, 19.0f), activation);
     }
 }
 
@@ -173,15 +199,43 @@ sealed class CavalierPieceStates : StateMachineBuilder
 [ModuleInfo(CFCID = 1090u, NameID = 14564u, PrimaryActorOID = (uint)OID.CavalierPiece, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 public sealed class CavalierPiece(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(120f, 0f), new ArenaBoundsSquare(20f))
 {
+    // Each Bone Bishop that dies leaves a Bone Fragment, and Doubling turns every fragment on the floor into a Feinted
+    // Cavalier for the next wave, five at most. Every pull runs one timer: packs at 11/49/84/106/132/156/178s, Doublings at
+    // 34/65/99/126/170/198s. So two packs fall between 126 and 170, and a pack split across a Doubling carries its
+    // fragments on: every pull on 2026-10-25 had five 20y Menace circles at ~188s, which leave no ground clear. Once three
+    // are waiting, the bishops go below the boss until a Doubling takes them, so no wave is above three, and three always
+    // leave corners clear. BossmodReborn ranks the bishops first throughout.
+    private const int MaxWaitingFragments = 3;
+    // Fragments a Doubling has taken: the tether lasts 1.5s, but the fragment stays two seconds more.
+    private readonly HashSet<ulong> taken = [];
+
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        var waiting = 0;
+        foreach (var f in Enemies((uint)OID.BoneFragmentOrb))
+        {
+            if (f.IsDestroyed)
+            {
+                continue;
+            }
+            if (f.Tether.ID == (uint)TetherID.DoublingTether)
+            {
+                taken.Add(f.InstanceID);
+            }
+            else if (!taken.Contains(f.InstanceID))
+            {
+                ++waiting;
+            }
+        }
+        var bishop = waiting >= MaxWaitingFragments ? 0 : 2;
+
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i)
         {
             var e = hints.PotentialTargets[i];
             e.Priority = e.Actor.OID switch
             {
-                (uint)OID.BoneBishop => 2,
+                (uint)OID.BoneBishop => bishop,
                 (uint)OID.CavalierPiece => 1,
                 _ => 0
             };

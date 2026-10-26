@@ -36,7 +36,7 @@ public enum AID : uint
 
 public enum SID : uint
 {
-    _Gen_ = 2056, // CatoblepasPiece->4C9D/4C9C, extra=0xAE
+    GazeMark = 2056, // CatoblepasPiece->4C9D/4C9C, extra=0xAE: Shifting Gaze's mark; this eye gazes when it bursts
     _Gen_Petrification = 4891, // Helper->player, extra=0x0
 
 }
@@ -76,6 +76,9 @@ sealed class NearFarburst(ModuleBase module) : Components.GenericAOEs(module)
     private readonly List<DemonicEye> _eyes = [];
     private readonly AOEShapeCircle _circle = new(25f);
     private readonly AOEShapeDonut _donut = new(5f, 50f);
+
+    /// <summary>Every eye's predicted burst, not just the two drawn: where it ends up and when.</summary>
+    public ReadOnlySpan<AOEInstance> Predicted => CollectionsMarshal.AsSpan(_aoes);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
@@ -152,9 +155,30 @@ sealed class NearFarburst(ModuleBase module) : Components.GenericAOEs(module)
     }
 }
 
+// Shifting Gaze marks three eyes in turn (status 2056), and each marked eye gazes, petrifying, from where it bursts as it
+// bursts: Saar, 2026-10-25, petrified at 96.45 by the second marked eye's Farburst at (140.4,-419.8). BossmodReborn drew
+// no eyes for it. Taken from the burst NearFarburst predicts for the eye, which is where and when the gaze comes.
 sealed class FalseDemonEye(ModuleBase module) : Components.GenericGaze(module, (uint)AID.FalseDemonEye)
 {
-    public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor) => [];
+    private readonly NearFarburst? bursts = module.FindComponent<NearFarburst>();
+    private readonly List<Eye> eyes = [];
+
+    public override ReadOnlySpan<Eye> ActiveEyes(int slot, Actor actor)
+    {
+        eyes.Clear();
+        if (bursts == null)
+        {
+            return [];
+        }
+        foreach (ref readonly var burst in bursts.Predicted)
+        {
+            if (World.Actors.Find(burst.ActorID) is { } eye && eye.FindStatus((uint)SID.GazeMark) != null)
+            {
+                eyes.Add(new(burst.Origin, burst.Activation, actorID: eye.InstanceID));
+            }
+        }
+        return CollectionsMarshal.AsSpan(eyes);
+    }
 }
 
 sealed class CatoblepasPieceStates : StateMachineBuilder
