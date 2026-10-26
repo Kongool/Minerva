@@ -347,6 +347,21 @@ public class SimpleKnockbackGroups(ModuleBase module, uint[] aids, float distanc
         this.Casters.Add(new Knockback(origin, this.Distance, this.Module.CastFinishAt(cast), this.Shape, cast.Rotation, this.KnockbackKind, this.MinDistance, null, caster.InstanceID, this.IgnoreImmunes));
     }
 
+    // By its caster, as BossmodReborn does. The base removes only its one watched action, which a group leaves unset, so
+    // every shove stayed listed all fight: Younger Tablitaur, 2026-10-25, the dodge and the drawn push chained through
+    // Shockwaves already gone.
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast)
+    {
+        for (var i = 0; i < this.Casters.Count; ++i)
+        {
+            if (this.Casters[i].ActorID == caster.InstanceID)
+            {
+                this.Casters.RemoveAt(i);
+                return;
+            }
+        }
+    }
+
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (this.Watches(spell.Action.ID))

@@ -377,6 +377,69 @@ t.Section("A component activated late is told what is already there");
     module.Dispose();
 }
 
+// A component is told the animation bytes of a model-state change. The sync has carried them since 2026-09-06, but the
+// modules were handed zeros, so every ported component keyed on them was blind: Loosefrox Inkyjots' Gobbie Bombs, 2026-10-25,
+// start their 12y blast when AnimState1 turns 1, and none was ever drawn.
+t.Section("A model-state change reaches components with its animation bytes");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x400000015, bomb = 0x400000016;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(bomb, 0x4C69, 0, "bomb", 0, ActorType.Enemy, new Vector4(104, 0, 100, 0), 0.6f, new ActorHPMP(10, 10, 0, 0, 0), true, false, 0));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<ModelStateProbe>();
+    ws.Execute(new ActorState.OpModelState(bomb, 3, 1, 2));
+    var probe = module.FindComponent<ModelStateProbe>()!;
+    t.Eq("the model byte", probe.Last.Model, 3);
+    t.Eq("AnimState1", probe.Last.Anim1, 1);
+    t.Eq("AnimState2", probe.Last.Anim2, 2);
+    module.Dispose();
+}
+
+// A group knockback forgets a shove once its cast is over. It removed only its one watched action, which a group leaves
+// unset, so every Shockwave stayed listed all fight (Younger Tablitaur, 2026-10-25).
+t.Section("A group knockback drops a shove when its cast ends");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x400000019, caster = 0x40000001A;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(caster, 0x233C, 0, "helper", 0, ActorType.Enemy, new Vector4(105, 0, 85, 0), 0.5f, default, false, false, 0));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<TestKnockbackGroup>();
+    var kb = module.FindComponent<TestKnockbackGroup>()!;
+    ws.Execute(new ActorState.OpCastInfo(caster, new ActorCastInfo { Action = ActionID.MakeSpell(48202u), TotalTime = 10.5f, Location = new Vector3(105, 0, 85) }));
+    t.Eq("listed while it is cast", kb.Casters.Count, 1);
+    ws.Execute(new ActorState.OpCastInfo(caster, null));
+    t.Eq("gone when the cast ends", kb.Casters.Count, 0);
+    module.Dispose();
+}
+
+// A tankbuster bait is predicted tankbuster damage on its carrier, so Minerva.Hints.SecondsUntilTankbuster can warn a
+// rotation plugin ahead of it (Daedalus Snarls the familiar onto it). Younger Tablitaur's 100-tonze Slash, 2026-10-25:
+// the module flagged it tankbuster, BossmodReborn declares it with damageType, and Minerva predicted nothing.
+t.Section("A tankbuster bait predicts tankbuster damage on whoever carries it");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x400000017, player = 0x100000018;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(player, 0, 0, "me", 0, ActorType.Player, new Vector4(100, 0, 90, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    ws.Execute(new PartyState.OpModify(2, new PartyState.Member(0xA3, player)));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<TestTankbusterBait>();
+    module.ActivateComponent<TestPlainBait>();
+    ws.Execute(new ActorState.OpIcon(player, 412u, player));
+    var hints = new AIHints();
+    module.BuildAIHints(2, ws.Actors.Find(player)!, hints);
+    var busters = hints.PredictedDamage.Where(p => p.type == AIHints.PredictedDamageType.Tankbuster).ToList();
+    t.Eq("one tankbuster predicted", busters.Count, 1);
+    t.True("on the carrier's party slot", busters.Count == 1 && busters[0].players.Raw == 1ul << 2);
+    t.True("at the bait's resolution", busters.Count == 1 && Math.Abs((busters[0].activation - ws.CurrentTime).TotalSeconds - 9.1) < 0.01);
+    module.Dispose();
+}
+
 // ---------------------------------------------------------------------------
 // 4. Reflection registry: discovers [ModuleInfo] modules and instantiates them
 // ---------------------------------------------------------------------------
@@ -7307,6 +7370,16 @@ sealed class WorldProbe(ModuleBase module) : ModuleComponent(module)
     public override void OnActorCreated(Actor actor) => this.Created.Add(actor.InstanceID);
     public override void OnCastStarted(Actor caster, ActorCastInfo cast) => this.Casts.Add(cast.Action.ID);
     public override void OnActorUntargetable(Actor actor) => this.Untargetable.Add(actor.InstanceID);
+}
+
+sealed class TestKnockbackGroup(ModuleBase module) : Minerva.Components.SimpleKnockbackGroups(module, [48199u, 48202u], 20f);
+sealed class TestTankbusterBait(ModuleBase module) : Minerva.Components.BaitAwayIcon(module, new AOEShapeRect(65f, 4f), 412u, 48204u, 9.1d, tankbuster: true);
+sealed class TestPlainBait(ModuleBase module) : Minerva.Components.BaitAwayIcon(module, new AOEShapeRect(65f, 4f), 412u, 48205u, 9.1d);
+
+sealed class ModelStateProbe(ModuleBase module) : ModuleComponent(module)
+{
+    public (int Model, int Anim1, int Anim2) Last = (-1, -1, -1);
+    public override void OnActorModelStateChange(Actor actor, byte modelState, byte animState1, byte animState2) => this.Last = (modelState, animState1, animState2);
 }
 
 // A mesh that bends every leg through one corner at height 1.

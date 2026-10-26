@@ -124,13 +124,27 @@ public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysD
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        BitMask busted = default;
+        var first = DateTime.MaxValue;
         foreach (var bait in this.ActiveBaits)
         {
             if (bait.Target != actor)
                 hints.AddForbiddenZone(bait.Shape, this.BaitOrigin(in bait), bait.Rotation, bait.Activation);
             else
                 this.AddTargetSpecificHints(actor, in bait, hints);
+            if (this.Tankbuster && this.Raid.FindSlot(bait.Target.InstanceID) is var s && s >= 0)
+            {
+                busted.Set(s);
+                if (bait.Activation < first)
+                    first = bait.Activation;
+            }
         }
+
+        // A tankbuster bait is predicted tankbuster damage on whoever carries it, as BossmodReborn's modules declare
+        // with damageType (dropped in the port). Minerva.Hints.SecondsUntilTankbuster never heard of these: Younger
+        // Tablitaur's 100-tonze Slash, 2026-10-25, killed the beastmaster that a Snarl ahead of it would have covered.
+        if (busted.Any())
+            hints.AddPredictedDamage(busted, first, AIHints.PredictedDamageType.Tankbuster);
     }
 
     // for the player's own bait: avoid clipping party members, as BossmodReborn does. Position-anchored shapes

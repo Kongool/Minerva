@@ -94,7 +94,7 @@ public abstract class ModuleBase : IDisposable
             world.Actors.Untethered.Subscribe(this.DispatchUntethered),
             world.Actors.IconAppeared.Subscribe((a, e) => this.Dispatch(c => c.OnEventIcon(a, e.IconID, e.TargetID))),
             world.Actors.VFXAppeared.Subscribe((a, e) => this.Dispatch(c => c.OnEventVFX(a, e.VFXID, e.TargetID))),
-            world.Actors.ModelStateChanged.Subscribe((a, s) => this.Dispatch(c => c.OnActorModelStateChange(a, s, 0, 0))),
+            world.Actors.ModelStateChanged.Subscribe((a, s) => this.Dispatch(c => c.OnActorModelStateChange(a, s, a.ModelState.AnimState1, a.ModelState.AnimState2))),
             world.Actors.ActionTimelineEvent.Subscribe((a, id) => this.Dispatch(c => c.OnActorPlayActionTimelineEvent(a, id))),
             world.Actors.EventStateChanged.Subscribe((a, v) => this.Dispatch(c => c.OnActorEventStateChange(a, v))),
             world.Actors.RenderflagsChanged.Subscribe((a, f) => this.Dispatch(c => c.OnActorRenderflagsChange(a, f))),

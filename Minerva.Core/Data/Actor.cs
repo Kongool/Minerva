@@ -130,9 +130,8 @@ public readonly record struct ActorForayInfo(byte Level, byte Element);
 /// landed reports a different model state than one still airborne, and a mechanic can key off that
 /// without any cast to watch.
 ///
-/// <para><see cref="AnimState1"/> and <see cref="AnimState2"/> are always 0: Minerva's sync captures the
-/// model byte only. Components reading them get a consistent zero rather than a wrong value, but a
-/// module that genuinely needs them needs the sync widened first.</para>
+/// <para><see cref="AnimState1"/> and <see cref="AnimState2"/> are synced since 2026-09-06, and handed to
+/// components with the model byte since 2026-10-25 (until then they were passed zeros).</para>
 /// </summary>
 public readonly struct ActorModelState(byte modelState, byte animState1 = 0, byte animState2 = 0)
 {
