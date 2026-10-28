@@ -55,6 +55,15 @@ public class RaidwideCasts(ModuleBase module, uint[] aids, string hint = "Raidwi
         if (this.active > 0)
             hints.Add(this.Hint);
     }
+
+    // Predicted raidwide damage on the whole party, as BossmodReborn's RaidwideCast records it. The port had
+    // dropped this, so Minerva.Hints.SecondsUntilRaidwide never saw a single raidwide cast (2026-10-26).
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var caster in this.Casters)
+            if (caster.CastInfo is { } cast)
+                hints.AddPredictedDamage(this.Raid.WithSlot().Mask(), this.Module.CastFinishAt(cast), AIHints.PredictedDamageType.Raidwide, cast.Action.ID);
+    }
 }
 
 /// <summary>Single-AID convenience form of <see cref="RaidwideCasts"/>.</summary>
@@ -77,6 +86,15 @@ public class RaidwideInstant(ModuleBase module, uint aid, double delay = default
             hints.Add(this.Hint);
     }
 
+    /// <summary>The action that announces the raidwide: the visual cast where there is one, else the hit.</summary>
+    protected virtual uint AnnouncingAction => this.WatchedAction;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (this.Activation != default)
+            hints.AddPredictedDamage(this.Raid.WithSlot().Mask(), this.Activation, AIHints.PredictedDamageType.Raidwide, this.AnnouncingAction);
+    }
+
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID == this.WatchedAction)
@@ -95,6 +113,8 @@ public class RaidwideCastDelay(ModuleBase module, uint actionVisual, uint action
 {
     public readonly uint ActionVisual = actionVisual;
 
+    protected override uint AnnouncingAction => this.ActionVisual;
+
     public override void OnCastStarted(Actor caster, ActorCastInfo cast)
     {
         if (cast.Action.ID == this.ActionVisual)
@@ -107,11 +127,17 @@ public class RaidwideCastsDelay(ModuleBase module, uint[] aidsVisual, uint[] aid
 {
     private readonly uint[] AIDsVisual = aidsVisual;
     private readonly uint[] AIDsAOE = aidsAOE;
+    private uint visual;
+
+    protected override uint AnnouncingAction => this.visual;
 
     public override void OnCastStarted(Actor caster, ActorCastInfo cast)
     {
         if (Array.IndexOf(this.AIDsVisual, cast.Action.ID) >= 0)
+        {
             this.Activation = this.Module.CastFinishAt(cast, (float)this.Delay);
+            this.visual = cast.Action.ID;
+        }
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
@@ -181,7 +207,7 @@ public class CastHint(ModuleBase module, uint aid, string hint, bool showCastTim
                 continue;
             var target = this.Raid.FindSlot(cast.TargetID);
             var mask = target >= 0 ? new BitMask().WithBit(target) : default;
-            hints.AddPredictedDamage(mask, this.Module.CastFinishAt(cast), this.DamageType);
+            hints.AddPredictedDamage(mask, this.Module.CastFinishAt(cast), this.DamageType, cast.Action.ID);
         }
     }
 }
@@ -223,6 +249,22 @@ public class CastInterruptHint(ModuleBase module, uint aid, bool canBeInterrupte
 {
     public readonly bool CanBeInterrupted = canBeInterrupted;
     public readonly bool CanBeStunned = canBeStunned;
+
+    // Marks the caster for a rotation plugin to interrupt or stun, as BossmodReborn's does. The port kept only the text
+    // cue, so Minerva.Hints.TargetsToInterrupt and TargetsToStun came back empty for all 71 modules that use this (Ymir's
+    // Dreadwash, Administrator's Confound among them); only the ones setting the flags by hand were heard.
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (var caster in this.Casters)
+        {
+            if (hints.FindEnemy(caster) is { } e)
+            {
+                e.ShouldBeInterrupted |= this.CanBeInterrupted;
+                e.ShouldBeStunned |= this.CanBeStunned;
+            }
+        }
+    }
     public readonly bool ShowNameInHint = showNameInHint;
 
     private static string BuildHint(bool canBeInterrupted, bool canBeStunned, string hintExtra)
@@ -282,7 +324,7 @@ public class SingleTargetInstant(ModuleBase module, uint aid, double delay = def
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         foreach (var t in this.Targets)
-            hints.AddPredictedDamage(new BitMask().WithBit(t.slot), t.activation, damageType);
+            hints.AddPredictedDamage(new BitMask().WithBit(t.slot), t.activation, damageType, this.WatchedAction);
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent cast)

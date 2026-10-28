@@ -199,6 +199,6 @@ public class ProximityAOEs(ModuleBase module, uint aid, float radius) : SimpleAO
     {
         base.AddAIHints(slot, actor, assignment, hints);
         if (this.Casters.Count != 0)
-            hints.AddPredictedDamage(this.World.Party.WithSlot().Mask(), this.Casters[0].Activation);
+            hints.AddPredictedDamage(this.World.Party.WithSlot().Mask(), this.Casters[0].Activation, AIHints.PredictedDamageType.Raidwide, this.WatchedAction);
     }
 }

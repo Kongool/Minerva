@@ -51,6 +51,9 @@ sealed class SandTempest(ModuleBase module) : Components.RaidwideCast(module, (u
 sealed class EarthShaker(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeCone(60.0f, 75.0f.Degrees()), (uint)IconID.EarthShake,
     (uint)AID.EarthShaker, 3.3f)
 {
+    // under Cover the familiar takes this hit twice, its own and the beastmaster's: keep it out of the cone
+    protected override bool AvoidOwnPet => true;
+
     private const float additionalActivationTime = 1.0f;
     private DateTime? eventCastActivation;
 

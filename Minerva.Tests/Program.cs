@@ -397,6 +397,28 @@ t.Section("A model-state change reaches components with its animation bytes");
     module.Dispose();
 }
 
+// An interruptible cast marks its caster for the rotation plugin (Minerva.Hints.TargetsToInterrupt / TargetsToStun), as
+// BossmodReborn's does. The port kept only the text cue: Ymir's Dreadwash, 2026-10-25, was never asked to be interrupted.
+t.Section("An interruptible cast marks its caster to interrupt");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x40000001F, caster = 0x400000020, player = 0x100000021;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(caster, 0x4C95, 0, "Sahagin", 0, ActorType.Enemy, new Vector4(110, 0, 100, 0), 2f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(player, 0, 0, "me", 0, ActorType.Player, new Vector4(100, 0, 95, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    ws.Execute(new ActorState.OpCombat(caster, true));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<TestInterruptible>();
+    ws.Execute(new ActorState.OpCastInfo(caster, new ActorCastInfo { Action = ActionID.MakeSpell(48485u), TotalTime = 8f }));
+    var hints = new AIHints();
+    module.BuildAIHints(0, ws.Actors.Find(player)!, hints);
+    var e = hints.PotentialTargets.First(x => x.Actor.InstanceID == caster);
+    t.True("the caster is marked to interrupt", e.ShouldBeInterrupted);
+    t.True("and to stun when the cast allows it", e.ShouldBeStunned);
+    module.Dispose();
+}
+
 // A held destination is judged along the route planned to it, not the straight line, which crosses whatever the route
 // bends round. Rosa, 2026-10-25 21:28: a route round a Liquid Hell pool failed the straight-line check at once, the
 // destination hold lapsed, the navmesh path was re-issued every frame, and the walk drifted into the pool.
@@ -489,6 +511,45 @@ t.Section("A tankbuster bait predicts tankbuster damage on whoever carries it");
     module.Dispose();
 }
 
+// A raidwide cast is predicted raidwide damage on the party, named by the cast that announces it, as BossmodReborn's
+// RaidwideCast records it. The port had dropped the prediction, so Minerva.Hints.SecondsUntilRaidwide never fired; and
+// the action id lets a rotation plugin tell Durga's Atomic Ray (which a familiar's Cover does not take) from the rest.
+t.Section("A raidwide is predicted on the party, with the action announcing it");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x400000022, player = 0x100000023;
+    ws.Execute(new ActorState.OpCreate(boss, 0x1234, 0, "Dummy", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(player, 0, 0, "me", 0, ActorType.Player, new Vector4(100, 0, 90, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, true, 0));
+    ws.Execute(new PartyState.OpModify(2, new PartyState.Member(0xA3, player)));
+    var module = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    module.ActivateComponent<TestRaidwide>();
+    module.ActivateComponent<TestRaidwideDelay>();
+
+    var hints = new AIHints();
+    module.BuildAIHints(2, ws.Actors.Find(player)!, hints);
+    t.Eq("nothing predicted before a cast", hints.PredictedDamage.Count, 0);
+
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(49272u), TotalTime = 13f }));
+    hints = new AIHints();
+    module.BuildAIHints(2, ws.Actors.Find(player)!, hints);
+    var raidwides = hints.PredictedDamage.Where(p => p.type == AIHints.PredictedDamageType.Raidwide).ToList();
+    t.Eq("one raidwide predicted", raidwides.Count, 1);
+    t.True("on the party", raidwides.Count == 1 && raidwides[0].players[2]);
+    t.True("when the cast finishes", raidwides.Count == 1 && Math.Abs((raidwides[0].activation - ws.CurrentTime).TotalSeconds - 13) < 0.01);
+    t.True("named by the cast", raidwides.Count == 1 && raidwides[0].action == 49272u);
+
+    // a visual cast followed by an instant hit is named by the visual, the one on the bar
+    ws.Execute(new ActorState.OpCastInfo(boss, null));
+    ws.Execute(new ActorState.OpCastInfo(boss, new ActorCastInfo { Action = ActionID.MakeSpell(48900u), TotalTime = 5f }));
+    hints = new AIHints();
+    module.BuildAIHints(2, ws.Actors.Find(player)!, hints);
+    raidwides = hints.PredictedDamage.Where(p => p.type == AIHints.PredictedDamageType.Raidwide).ToList();
+    t.True("the delayed hit is named by its visual", raidwides.Count == 1 && raidwides[0].action == 48900u);
+    t.True("and lands after it", raidwides.Count == 1 && Math.Abs((raidwides[0].activation - ws.CurrentTime).TotalSeconds - 7) < 0.01);
+    module.Dispose();
+}
+
 // ---------------------------------------------------------------------------
 // 4. Reflection registry: discovers [ModuleInfo] modules and instantiates them
 // ---------------------------------------------------------------------------
@@ -567,13 +628,15 @@ t.Section("Replay round-trip");
     {
         var w = new WorldState(10_000_000, "test");
         var fsw = new System.IO.StringWriter();
-        const ulong bossId = 0x40000CCCC, meId = 0x10000AAAA, randoId = 0x10000FFFF;
+        const ulong bossId = 0x40000CCCC, meId = 0x10000AAAA, randoId = 0x10000FFFF, myPetId = 0x40000BBBB, randoPetId = 0x40000EEEE;
         using (var rec = new ReplayRecorder(w, fsw, excludeOtherPlayers: true, localPlayerId: meId))
         {
             w.Execute(new WorldState.OpFrameStart(Frame(w, 0), TimeSpan.Zero));
             w.Execute(new ActorState.OpCreate(bossId, 0x4190, 0, "Boss", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 8f, default, true, false, 0));
             w.Execute(new ActorState.OpCreate(meId, 0x2000, 1, "Me", 0, ActorType.Player, new Vector4(1, 0, 1, 0), 0.5f, default, true, true, 0));
             w.Execute(new ActorState.OpCreate(randoId, 0x2000, 2, "Rando Player", 0, ActorType.Player, new Vector4(9, 0, 9, 0), 0.5f, default, true, true, 0));
+            w.Execute(new ActorState.OpCreate(myPetId, 0x4E00, 3, "My Familiar", 0, ActorType.Pet, new Vector4(2, 0, 1, 0), 0.5f, default, true, true, meId));
+            w.Execute(new ActorState.OpCreate(randoPetId, 0x4E00, 5, "Rando Familiar", 0, ActorType.Pet, new Vector4(9, 0, 8, 0), 0.5f, default, true, true, randoId));
             w.Execute(new ActorState.OpMove(randoId, new Vector4(8, 0, 8, 1f))); // noise from another player
             w.Execute(new ActorState.OpMove(bossId, new Vector4(0, 0, 2, 0)));
         }
@@ -595,6 +658,8 @@ t.Section("Replay round-trip");
         t.True("filter keeps the local player", flog.Contains(meId.ToString("X")));
         t.True("filter drops other players (create + moves)", !flog.Contains(randoId.ToString("X")));
         t.True("filter dropped rando's name too", !flog.Contains("Rando Player"));
+        t.True("filter keeps the local player's own pet", flog.Contains(myPetId.ToString("X")));
+        t.True("filter drops another player's pet", !flog.Contains(randoPetId.ToString("X")));
     }
 
     // parse it back and attach an analyzer during playback
@@ -3010,6 +3075,46 @@ t.Section("A cone bait is kept off the party");
     var ho = new AIHints();
     other.AddAIHints(0, tank, PartyRolesConfig.Assignment.Unassigned, ho);
     t.True("someone else's cone is still avoided as before", ho.ForbiddenZones.Count == 1 && ho.ForbiddenZones[0].ShapeDistance.Contains(new WPos(5f, 9f)));
+    mod.Dispose();
+}
+
+// A bait that a pet shares is kept off the player's own pet too, where the component asks for it. Under Snarl's Cover a
+// Crucible familiar takes both its own hit and the beastmaster's, so a Thunderbolt carried through it lands on it twice
+// (Daedalus research, 2026-10-26). Other players' pets and components that do not ask are left alone.
+t.Section("A shared bait is kept off the player's own pet");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x4000000D1, me = 0x100000D2, pet = 0x4000000D3, rando = 0x100000D4, randoPet = 0x4000000D5;
+    ws.Execute(new ActorState.OpCreate(boss, 0xD1u, 0, "Guttler", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 3f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(me, 0u, 1, "Me", 0, ActorType.Player, new Vector4(0, 0, -10, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpCreate(pet, 0xD3u, 2, "Familiar", 0, ActorType.Pet, new Vector4(0, 0, 4, 0), 1f, default, true, true, me));
+    ws.Execute(new ActorState.OpCreate(rando, 0u, 3, "Rando", 0, ActorType.Player, new Vector4(30, 0, 30, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpCreate(randoPet, 0xD3u, 4, "Rando Familiar", 0, ActorType.Pet, new Vector4(-6, 0, 0, 0), 1f, default, true, true, rando));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, me)));
+    var guttler = ws.Actors.Find(boss)!;
+    var player = ws.Actors.Find(me)!;
+    var mod = new TestModule(ws, guttler) { Arena = new NullArena() };
+
+    var shared = new TestPetBait(mod);
+    shared.CurrentBaits.Add(new(guttler, player, new AOEShapeRect(50f, 3f), ws.FutureTime(5d)));
+    var h = new AIHints();
+    shared.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, h);
+    bool Forbidden(AIHints hints, float x, float z) => hints.ForbiddenZones.Any(f => f.ShapeDistance.Contains(new WPos(x, z)));
+    t.True("the line may not be carried through the familiar", Forbidden(h, 0, 10));
+    t.True("well round the boss from it, it may", !Forbidden(h, 10, 0));
+    t.True("another player's pet is not ours to protect", !Forbidden(h, -10, 0));
+
+    var plain = new Minerva.Components.GenericBaitAway(mod);
+    plain.CurrentBaits.Add(new(guttler, player, new AOEShapeRect(50f, 3f), ws.FutureTime(5d)));
+    var hp = new AIHints();
+    plain.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hp);
+    t.True("a bait that does not ask leaves the pet out of it", !Forbidden(hp, 0, 10));
+
+    ws.Execute(new ActorState.OpDead(pet, true));
+    var hd = new AIHints();
+    shared.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hd);
+    t.True("a dead familiar is not steered round", !Forbidden(hd, 0, 10));
     mod.Dispose();
 }
 
@@ -7421,6 +7526,13 @@ sealed class WorldProbe(ModuleBase module) : ModuleComponent(module)
     public override void OnActorUntargetable(Actor actor) => this.Untargetable.Add(actor.InstanceID);
 }
 
+sealed class TestInterruptible(ModuleBase module) : Minerva.Components.CastInterruptHint(module, 48485u, canBeStunned: true);
+sealed class TestRaidwide(ModuleBase module) : Minerva.Components.RaidwideCast(module, 49272u);
+sealed class TestPetBait(ModuleBase module) : Minerva.Components.GenericBaitAway(module)
+{
+    protected override bool AvoidOwnPet => true;
+}
+sealed class TestRaidwideDelay(ModuleBase module) : Minerva.Components.RaidwideCastDelay(module, 48900u, 48901u, 2d);
 sealed class TestKnockbackGroup(ModuleBase module) : Minerva.Components.SimpleKnockbackGroups(module, [48199u, 48202u], 20f);
 sealed class TestTankbusterBait(ModuleBase module) : Minerva.Components.BaitAwayIcon(module, new AOEShapeRect(65f, 4f), 412u, 48204u, 9.1d, tankbuster: true);
 sealed class TestPlainBait(ModuleBase module) : Minerva.Components.BaitAwayIcon(module, new AOEShapeRect(65f, 4f), 412u, 48205u, 9.1d);

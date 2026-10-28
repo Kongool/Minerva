@@ -137,11 +137,15 @@ sealed class Tsunami(ModuleBase module) : Components.SimpleKnockbacks(module, (u
     }
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26): Buffalo's War Cry, a stun.
+sealed class BlanketThunderStun(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.BlanketThunder, canBeInterrupted: false, canBeStunned: true, showNameInHint: true);
+
 sealed class YmirPieceStates : StateMachineBuilder
 {
     public YmirPieceStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<BlanketThunderStun>()
             .ActivateOnEnter<WaterII>()
             .ActivateOnEnter<Tsunami>()
             .ActivateOnEnter<BlanketThunder>()

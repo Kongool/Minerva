@@ -54,6 +54,7 @@ internal sealed class MinervaIpc : IDisposable
     private readonly ICallGateProvider<System.Numerics.Vector3, bool> isPositionSafe;
     private readonly ICallGateProvider<System.Numerics.Vector3, System.Numerics.Vector3, bool> isDashSafe;
     private readonly ICallGateProvider<float> secondsUntilRaidwide;
+    private readonly ICallGateProvider<uint> nextRaidwideActionId;
     private readonly ICallGateProvider<float> secondsUntilTankbuster;
     private readonly ICallGateProvider<float> secondsUntilSharedDamage;
     private readonly ICallGateProvider<uint> nextTankbusterTargets;
@@ -169,6 +170,9 @@ internal sealed class MinervaIpc : IDisposable
         // decide a tank swap rather than just a mitigation.
         this.secondsUntilRaidwide = pi.GetIpcProvider<float>("Minerva.Hints.SecondsUntilRaidwide");
         this.secondsUntilRaidwide.RegisterFunc(() => this.ai.SecondsUntilRaidwide);
+
+        this.nextRaidwideActionId = pi.GetIpcProvider<uint>("Minerva.Hints.NextRaidwideActionId");
+        this.nextRaidwideActionId.RegisterFunc(() => this.ai.NextRaidwideActionId);
 
         this.secondsUntilTankbuster = pi.GetIpcProvider<float>("Minerva.Hints.SecondsUntilTankbuster");
         this.secondsUntilTankbuster.RegisterFunc(() => this.ai.SecondsUntilTankbuster);
@@ -348,6 +352,7 @@ internal sealed class MinervaIpc : IDisposable
         this.isPositionSafe.UnregisterFunc();
         this.isDashSafe.UnregisterFunc();
         this.secondsUntilRaidwide.UnregisterFunc();
+        this.nextRaidwideActionId.UnregisterFunc();
         this.secondsUntilTankbuster.UnregisterFunc();
         this.secondsUntilSharedDamage.UnregisterFunc();
         this.nextTankbusterTargets.UnregisterFunc();

@@ -321,11 +321,15 @@ sealed class TonzeSlash100(ModuleBase module) : Components.BaitAwayIcon(module, 
     public override Actor? BaitSource(Actor target) => this.elders.Count > 0 ? this.elders[0] : null;
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class RallyingCheer(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.RallyingCheer, showNameInHint: true);
+
 sealed class YoungerTablitaurPieceStates : StateMachineBuilder
 {
     public YoungerTablitaurPieceStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<RallyingCheer>()
             .ActivateOnEnter<TonzeSwipe1000>()
             .ActivateOnEnter<TonzeSwing1111>()
             .ActivateOnEnter<Shockwave>()

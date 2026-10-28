@@ -308,9 +308,13 @@ sealed class SlimesInterrupt(ModuleBase module) : Components.CastInterruptHint(m
     // it by hand is dropped rather than translated.
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class Camaraderie(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.Camaraderie, showNameInHint: true);
+
 sealed class GigantisPieceStates : StateMachineBuilder {
     public GigantisPieceStates(ModuleBase module) : base(module) {
         TrivialPhase()
+            .ActivateOnEnter<Camaraderie>()
             .ActivateOnEnter<SmashingStampBait>()
             .ActivateOnEnter<SmashingStampBaitAOE>()
             .ActivateOnEnter<SmashingStamp>()

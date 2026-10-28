@@ -141,6 +141,9 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
 
 sealed class Thunderbolt(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeRect(50.0f, 3.0f), (uint)IconID.ThunderboltTankBuster,
     (uint)AID.Thunderbolt, tankbuster: true) {
+    // under Cover the familiar takes this hit twice, its own and the beastmaster's: keep it out of the line
+    protected override bool AvoidOwnPet => true;
+
     public override void AddHints(int slot, Actor actor, TextHints hints) {
         if (CurrentBaits.Count == 0) {
             return;

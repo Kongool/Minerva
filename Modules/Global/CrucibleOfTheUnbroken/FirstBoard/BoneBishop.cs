@@ -175,11 +175,15 @@ sealed class BlackEruption(ModuleBase module) : Components.GenericAOEs(module)
     }
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class Ossify(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.Ossify, showNameInHint: true);
+
 sealed class BoneBishopStates : StateMachineBuilder
 {
     public BoneBishopStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<Ossify>()
             .ActivateOnEnter<DeathSpiral>()
             .ActivateOnEnter<ForwardGuard>()
             .ActivateOnEnter<BlackEruption>()

@@ -130,7 +130,7 @@ public sealed class AIHints
     public List<ShapeDistance> TemporaryObstacles = [];
     public readonly List<Func<WPos, float>> GoalZones = [];
     public readonly List<(Angle center, Angle halfWidth, DateTime activation)> ForbiddenDirections = [];
-    public readonly List<(BitMask players, DateTime activation, PredictedDamageType type)> PredictedDamage = [];
+    public readonly List<(BitMask players, DateTime activation, PredictedDamageType type, uint action)> PredictedDamage = [];
 
     /// <summary>
     /// Instance ID of the tank currently holding a mechanic that wants passing on, or 0 when no swap is
@@ -648,8 +648,10 @@ public sealed class AIHints
         return GoalSingleTarget(dest, 1f, 10f);
     }
 
-    public void AddPredictedDamage(BitMask players, DateTime activation, PredictedDamageType type = PredictedDamageType.Raidwide)
-        => this.PredictedDamage.Add((players, activation, type));
+    /// <param name="action">The cast that announces the damage (or, with no cast bar, the hit itself); 0 when the
+    /// producer cannot name one. Published as Minerva.Hints.NextRaidwideActionId.</param>
+    public void AddPredictedDamage(BitMask players, DateTime activation, PredictedDamageType type = PredictedDamageType.Raidwide, uint action = 0)
+        => this.PredictedDamage.Add((players, activation, type, action));
 
     public static Func<WPos, float> GoalSingleTarget(WPos target, float radius, float weight = 1f)
         => p => p.InCircle(target, radius) ? weight : 0f;

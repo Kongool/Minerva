@@ -752,7 +752,7 @@ public sealed class AIManager
             return float.NaN;
         var now = this.world.CurrentTime;
         var soonest = DateTime.MaxValue;
-        foreach (var (_, activation, t) in this.hints.PredictedDamage)
+        foreach (var (_, activation, t, _) in this.hints.PredictedDamage)
             if (t == type && activation < soonest)
                 soonest = activation;
         return soonest == DateTime.MaxValue ? float.NaN : MathF.Max((float)(soonest - now).TotalSeconds, 0f);
@@ -760,6 +760,30 @@ public sealed class AIManager
 
     /// <summary>Seconds until the next raidwide, or NaN. Mitigation timing.</summary>
     public float SecondsUntilRaidwide => this.SecondsUntilDamage(AIHints.PredictedDamageType.Raidwide);
+
+    /// <summary>
+    /// The action announcing the raidwide <see cref="SecondsUntilRaidwide"/> times, or 0 when none is coming or
+    /// its producer cannot name one. That is the cast on the boss's bar where there is one (for a visual cast
+    /// followed by an instant hit, the visual), else the hit itself. A consumer reads it to tell raidwides
+    /// apart: Durga's Atomic Ray (49272) is one a familiar's Cover does not take.
+    /// </summary>
+    public uint NextRaidwideActionId
+    {
+        get
+        {
+            if (!this.HasSolution)
+                return 0u;
+            var soonest = DateTime.MaxValue;
+            var action = 0u;
+            foreach (var (_, activation, t, a) in this.hints.PredictedDamage)
+                if (t == AIHints.PredictedDamageType.Raidwide && activation < soonest)
+                {
+                    soonest = activation;
+                    action = a;
+                }
+            return action;
+        }
+    }
 
     /// <summary>Seconds until the next tankbuster, or NaN.</summary>
     public float SecondsUntilTankbuster => this.SecondsUntilDamage(AIHints.PredictedDamageType.Tankbuster);
@@ -782,7 +806,7 @@ public sealed class AIManager
                 return 0u;
             var soonest = DateTime.MaxValue;
             BitMask mask = default;
-            foreach (var (players, activation, t) in this.hints.PredictedDamage)
+            foreach (var (players, activation, t, _) in this.hints.PredictedDamage)
                 if (t == AIHints.PredictedDamageType.Tankbuster && activation < soonest)
                 {
                     soonest = activation;

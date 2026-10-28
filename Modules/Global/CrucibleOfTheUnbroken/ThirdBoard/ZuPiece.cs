@@ -415,11 +415,15 @@ sealed class Carve(ModuleBase module) : Components.GenericAOEs(module)
     }
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class CausticVomit(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.CausticVomit, showNameInHint: true);
+
 sealed class ZuPieceStates : StateMachineBuilder
 {
     public ZuPieceStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<CausticVomit>()
             .ActivateOnEnter<CrossbreezeBait>()
             .ActivateOnEnter<Crossbreeze>()
             .ActivateOnEnter<FlyingFrenzy>()

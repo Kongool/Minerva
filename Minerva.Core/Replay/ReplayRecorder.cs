@@ -82,7 +82,7 @@ public sealed class ReplayRecorder : IDisposable
     {
         if (this.excludeOtherPlayers)
         {
-            if (op is ActorState.OpCreate create && !this.KeepActor(create.InstanceID, create.Type))
+            if (op is ActorState.OpCreate create && !this.KeepActor(create.InstanceID, create.Type, create.OwnerID))
             {
                 this.dropped.Add(create.InstanceID);
                 return;
@@ -122,12 +122,16 @@ public sealed class ReplayRecorder : IDisposable
         }
     }
 
-    // keep enemies/helpers/objects always; for players & pets keep only the POV player and party members
-    private bool KeepActor(ulong instanceID, ActorType type)
+    // keep enemies/helpers/objects always; for players & pets keep only the POV player, their own pet, and party members.
+    // The pet matters: a Crucible familiar takes hits for the beastmaster under Cover, and without it a recording shows
+    // the Cover status and the hits on an id that never appears (2026-10-26).
+    private bool KeepActor(ulong instanceID, ActorType type, ulong ownerID)
     {
         if (type is not (ActorType.Player or ActorType.Pet or ActorType.Chocobo or ActorType.Companion))
             return true;
         if (instanceID == this.localPlayerId || instanceID == this.ws.Party.PlayerInstanceID)
+            return true;
+        if (ownerID != 0 && (ownerID == this.localPlayerId || ownerID == this.ws.Party.PlayerInstanceID))
             return true;
         foreach (var slot in this.ws.Party.Slots)
             if (slot.InstanceID == instanceID)

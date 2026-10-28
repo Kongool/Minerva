@@ -98,11 +98,15 @@ sealed class HeartShatter(ModuleBase module) : Components.GenericAOEs(module)
 //SweetSteel = 46930, // SuccubusKnight->self, 6.0s cast, range 10 120.000-degree cone
 sealed class SweetSteel(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SweetSteel, new AOEShapeCone(10f, 60f.Degrees()));
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class Fanaticism(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.Fanaticism, showNameInHint: true);
+
 sealed class PasDeSeulStates : StateMachineBuilder
 {
     public PasDeSeulStates(ModuleBase module) : base(module)
     {
         TrivialPhase()
+            .ActivateOnEnter<Fanaticism>()
             .ActivateOnEnter<BloodRainCircle>()
             .ActivateOnEnter<BloodRainDonut>()
             .ActivateOnEnter<VoidAeroIIRect>()

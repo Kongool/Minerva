@@ -71,7 +71,7 @@ public enum TetherID : uint {
 }
 
 sealed class ScaldingScolding(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ScaldingScolding, new AOEShapeCone(40.0f, 90.0f.Degrees()));
-sealed class MassiveExplosion(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.MassiveExplosion);
+sealed class MassiveExplosion(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.MassiveExplosion, (uint)AID.MassiveExplosionBoss]);
 sealed class ToxicFumes(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ToxicFumes, new AOEShapeCone(40.0f, 10.0f.Degrees()));
 sealed class FireII(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.FireII, 6.0f);
 
@@ -143,9 +143,15 @@ sealed class FieryFuryAOE : Components.SimpleAOEs {
     }
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class MassiveExplosionInterrupt(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.MassiveExplosion, showNameInHint: true);
+sealed class MassiveExplosionBossInterrupt(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.MassiveExplosionBoss, showNameInHint: true);
+
 sealed class ProgenitrixPieceStates : StateMachineBuilder {
     public ProgenitrixPieceStates(ModuleBase module) : base(module) {
         TrivialPhase()
+            .ActivateOnEnter<MassiveExplosionInterrupt>()
+            .ActivateOnEnter<MassiveExplosionBossInterrupt>()
             .ActivateOnEnter<ScaldingScolding>()
             .ActivateOnEnter<MassiveExplosion>()
             .ActivateOnEnter<ToxicFumes>()

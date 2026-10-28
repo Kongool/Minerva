@@ -160,22 +160,39 @@ public class GenericBaitAway(ModuleBase module, uint aid = default, bool alwaysD
             var a = this.World.Party.Actor(i);
             if (a == null || a == actor || a.IsDead)
                 continue;
-            switch (bait.Shape)
-            {
-                case AOEShapeCircle or AOEShapeDonut or AOEShapeCross:
-                    hints.AddForbiddenZone(bait.Shape, a.Position - bait.Offset, bait.Rotation, bait.Activation);
-                    break;
-                case AOEShapeCone cone when !this.CenterAtTarget:
-                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), cone.HalfAngle), bait.Activation);
-                    break;
-                case AOEShapeRect rect when !this.CenterAtTarget:
-                    var dist = (a.Position - bait.Source.Position).Length();
-                    if (dist > 0f)
-                        hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), Angle.Asin(Math.Min(1f, rect.HalfWidth / dist))), bait.Activation);
-                    break;
-            }
+            this.AvoidClipping(a, in bait, hints);
+        }
+        if (this.AvoidOwnPet)
+            foreach (var a in this.World.Actors)
+                if (a.OwnerID == actor.InstanceID && a.Type is ActorType.Pet or ActorType.Chocobo && !a.IsDead)
+                    this.AvoidClipping(a, in bait, hints);
+    }
+
+    private void AvoidClipping(Actor a, in Bait bait, AIHints hints)
+    {
+        switch (bait.Shape)
+        {
+            case AOEShapeCircle or AOEShapeDonut or AOEShapeCross:
+                hints.AddForbiddenZone(bait.Shape, a.Position - bait.Offset, bait.Rotation, bait.Activation);
+                break;
+            case AOEShapeCone cone when !this.CenterAtTarget:
+                hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), cone.HalfAngle), bait.Activation);
+                break;
+            case AOEShapeRect rect when !this.CenterAtTarget:
+                var dist = (a.Position - bait.Source.Position).Length();
+                if (dist > 0f)
+                    hints.AddForbiddenZone(new SDCone(bait.Source.Position, 100f, bait.Source.AngleTo(a), Angle.Asin(Math.Min(1f, rect.HalfWidth / dist))), bait.Activation);
+                break;
         }
     }
+
+    /// <summary>
+    /// Whether the player's own bait should also be kept off the player's own pet, as it is off party members.
+    /// <para>For hits a pet shares: in the Crucible of the Unbroken a familiar covering the beastmaster (Snarl) takes
+    /// both its own hit and the beastmaster's, so a Thunderbolt or Earthshaker carried through it lands twice on it.
+    /// Off by default: elsewhere a pet is not hurt by it, and steering a cleave off a fairy only costs uptime.</para>
+    /// </summary>
+    protected virtual bool AvoidOwnPet => false;
 
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {

@@ -149,9 +149,13 @@ sealed class ArborealStorm(ModuleBase module) : Components.GenericAOEs(module) {
     }
 }
 
+// Interruptible per the Crucible research (wiki and Icy Veins; Daedalus, 2026-10-26). BossmodReborn shows no cue.
+sealed class NaturalNurture(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.NaturalNurture, showNameInHint: true);
+
 sealed class TreantPieceStates : StateMachineBuilder {
     public TreantPieceStates(ModuleBase module) : base(module) {
         TrivialPhase()
+            .ActivateOnEnter<NaturalNurture>()
             .ActivateOnEnter<BossPuddle>()
             .ActivateOnEnter<RustlingBreezeLeftRight>()
             .ActivateOnEnter<RustlingBreezeMiddle>()
