@@ -141,22 +141,12 @@ sealed class Burst(ModuleBase module) : Components.GenericAOEs(module)
     }
 }
 
+// Aimed by the base component: it walks the march from every facing and turns the character onto one that stays on the
+// floor and out of anything drawn. BossmodReborn's override here only forbade marching outward (within 90 degrees of
+// straight out), and replaced that aim. Korha, 2026-10-27 20:28: Left Face, then the 18y march began 18.5y from the
+// centre of this 20y circle and ran along the edge, ending 0.3y from it.
 sealed class InvitingVerse(ModuleBase module) : Components.StatusDrivenForcedMarch(module, 3.0f, (uint)SID.ForwardMarch, (uint)SID.AboutFace, (uint)SID.LeftFace,
-    (uint)SID.RightFace)
-{
-    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
-    {
-        var state = State.GetValueOrDefault(actor.InstanceID);
-        if (state == null || state.PendingMoves.Count == 0)
-        {
-            return;
-        }
-
-        var move0 = state.PendingMoves[0];
-        var outwards = Angle.FromDirection(actor.Position - Module.Center) - move0.dir;
-        hints.ForbiddenDirections.Add((outwards, 90.0f.Degrees(), move0.activation));
-    }
-}
+    (uint)SID.RightFace);
 
 sealed class SirenPieceStates : StateMachineBuilder
 {
