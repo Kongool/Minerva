@@ -159,14 +159,16 @@ sealed class TonzeStomp10 : Components.SimpleAOEGroups
 }
 
 // TODO change shape to arc cap
-// Ticks about once a second (EndlessSwing1, no cast) around the Elder, and the Elder walks after its target at 2.5-2.9y/s,
-// so a circle where it stands is a yalm or three short by the next tick. Korha, 2026-10-25: parked 8.6-9.0y from the
-// Elder, just past an 8y circle and its margin, she was hit twice, 279 each, and died. Drawn as the circle carried a tick's
-// walk ahead along the Elder's facing; with that, she was inside it at every tick from 103.4s.
+// Ticks about once a second (EndlessSwing1, no cast) around the Elder, and the Elder walks after its target at 2.5-2.9y/s.
+// The sheet says range 8, and BossmodReborn draws 8; it reaches about 11 from the Elder's centre (its hitbox is 3.6).
+// Every tick in the 2026-10-25..27 recordings (Korha and Saar, about 220): hits out to 10.9y, at any angle off the Elder's
+// facing, and none past 11 in 90-odd ticks at 11-13y. Hits and misses mix inside that, so it is likely an arc that swings
+// round; drawn as the whole circle. Drawn at 8 (then 8 carried 3y ahead), the dodge parked at 9-10y: Korha was hit there
+// twice, 279 each, and died on 10-25, and hit twice more for 501 on 10-27.
 sealed class EndlessSwing(ModuleBase module) : Components.GenericAOEs(module, (uint)AID.EndlessSwing)   // named for the validator; OnEventCast below does the counting
 {
     private readonly List<AOEInstance> aoes = [];
-    private readonly AOEShapeCapsule shape = new(8.0f, 3.0f);
+    private readonly AOEShapeCircle shape = new(11.0f);
     private Actor? spellSource;
     private readonly EndlessSwipes? endlessSwipes = module.FindComponent<EndlessSwipes>();
     // Over once it stops ticking: the first tick comes 7.0-7.2s after the cast starts, then every 1.2s or less (seven
