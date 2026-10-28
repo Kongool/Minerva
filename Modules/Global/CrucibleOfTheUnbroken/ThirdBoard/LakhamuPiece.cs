@@ -166,6 +166,28 @@ sealed class Landslip(ModuleBase module) : Components.SimpleKnockbacks(module, (
 {
     private readonly Rockslide? rockslide = module.FindComponent<Rockslide>();
 
+    // The push lands about half a second after the cast resolves, from wherever the player is by then (as Ymir's Tsunami), so
+    // each lane is kept a second past its cast. Korha, 2026-10-27 20:25: in a lane pushing 20 west she stood at x=121.8,
+    // landing at 101.8, which is legal; as the cast resolved the dodge stepped 1.8y west out of a Rockslide lane, and the push
+    // carried her from 120.0 to the wall at 100: Bleeding.
+    private readonly List<(Knockback knockback, DateTime until)> held = [];
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction && Casters.Count == 0)
+            held.Clear();
+        base.OnCastStarted(caster, spell);
+    }
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+            foreach (var knockback in Casters)
+                if (knockback.ActorID == caster.InstanceID)
+                    held.Add((knockback, World.FutureTime(1d)));
+        base.OnCastFinished(caster, spell);
+    }
+
     // Grid map
     private const float tileSize = 10.0f;
     private const float tileHalf = tileSize * 0.5f;
@@ -223,26 +245,32 @@ sealed class Landslip(ModuleBase module) : Components.SimpleKnockbacks(module, (
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (rockslide == null || rockslide.aoes.Count == 0 || Casters.Count == 0)
-        {
-            return;
-        }
+        // With no golems up the walls still apply: this returned early, so a Landslip without Rockslides was not avoided at all.
+        AOEInstance[] rocks = rockslide != null ? [.. rockslide.aoes] : [];
 
         var knockbacks = CollectionsMarshal.AsSpan(Casters);
         for (var i = 0; i < knockbacks.Length; i++)
         {
             ref var knockback = ref knockbacks[i];
-            if (knockback.Shape == null || IsImmune(slot, knockback.Activation))
-            {
-                continue;
-            }
-
-            var direction = knockback.Distance * knockback.Direction.ToDirection();
-            hints.AddForbiddenZone(new SDIntersection([
-                    knockback.Shape.Distance(knockback.Origin, knockback.Direction),
-                    new SDKnockbackInAABBSquareFixedDirectionPlusMixedAOEs(Module.Center, direction,  19.0f, [.. rockslide.aoes], rockslide.aoes.Count)]),
-                    knockback.Activation);
+            AddLane(slot, in knockback, knockback.Activation, rocks, hints);
         }
+        foreach (var (knockback, until) in held)
+            if (World.CurrentTime < until)
+                AddLane(slot, in knockback, World.CurrentTime, rocks, hints);
+    }
+
+    private void AddLane(int slot, in Knockback knockback, DateTime activation, AOEInstance[] rocks, AIHints hints)
+    {
+        if (knockback.Shape == null || IsImmune(slot, activation))
+        {
+            return;
+        }
+
+        var direction = knockback.Distance * knockback.Direction.ToDirection();
+        hints.AddForbiddenZone(new SDIntersection([
+                knockback.Shape.Distance(knockback.Origin, knockback.Direction),
+                new SDKnockbackInAABBSquareFixedDirectionPlusMixedAOEs(Module.Center, direction, 19.0f, rocks, rocks.Length)]),
+                activation);
     }
 }
 
