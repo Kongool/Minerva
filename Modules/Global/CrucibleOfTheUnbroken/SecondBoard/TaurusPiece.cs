@@ -135,21 +135,34 @@ sealed class Doom(ModuleBase module) : ModuleComponent(module)
         }
     }
 
+    // How far in from a tile's edge the character is sent: the solver's cells are a yalm apart, and the edge itself is
+    // where a step of drift takes it off and the charge starts over.
+    private const float StandHalfSize = 1.0f;
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (_active)
+        // The player's own Doom, not "someone gained Doom": the familiar's would otherwise send the beastmaster too.
+        if (actor.FindStatus((uint)SID.Doom) == null)
+            return;
+
+        // Goal zones only weigh where a dodge lands; with nothing to dodge the character never walked to a tile and died to
+        // Doom with the tiles drawn. "Stand on a tile" is a positioning instruction: everything off the four is ground the
+        // module did not assign, at no deadline, which walks the character there and gives way to real danger.
+        var count = _tiles.Length;
+        var offTiles = new ShapeDistance[count];
+        for (var i = 0; i < count; i++)
         {
-            var count = _tiles.Length;
-            for (var i = 0; i < count; i++)
-            {
-                // try to stay on tile if it's already charging up
-                // TODO: stay on tile if doom is almost expiring but there is an imminent AOE; damage better than death
-                // would forbidden shape with 4 holes and status expiration as activation make the AI better?
-                var pos = _tiles[i];
-                var weight = _lightup[i] ? 50f : 10f;
-                hints.GoalZones.Add(AIHints.GoalSingleTarget(pos, _halfsize, weight));
-            }
+            // Return to a tile already charging if a dodge forces the character off it. BossmodReborn also weighs every
+            // unlit tile at 10; here a goal point is worth two yalms of walking, so 10 on all four wiped out the distance
+            // between them and the first tile in scan order won: from beside the south tile the character crossed to the
+            // north one. Among unlit tiles the walk decides.
+            // TODO: stay on tile if doom is almost expiring but there is an imminent AOE; damage better than death
+            var pos = _tiles[i];
+            if (_lightup[i])
+                hints.GoalZones.Add(AIHints.GoalSingleTarget(pos, _halfsize, 50f));
+            offTiles[i] = new SDInvertedRect(pos, new WDir(0f, 1f), StandHalfSize, StandHalfSize, StandHalfSize);
         }
+        hints.AddForbiddenZone(new SDIntersection(offTiles), DateTime.MaxValue);
     }
 }
 sealed class MortalRay(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.MortalRay, "Raidwide + Doom");
