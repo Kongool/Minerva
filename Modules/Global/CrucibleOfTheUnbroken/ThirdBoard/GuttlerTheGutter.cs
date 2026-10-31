@@ -219,9 +219,13 @@ sealed class OverpoweringPoint(ModuleBase module) : Components.GenericAOEs(modul
     {
         if (spell.Action.ID == (uint)AID.OverpoweringPoint)
         {
-            aoes.Add(new(cone, Module.Center, Angle.AnglesCardinals[0]));
-            aoes.Add(new(cone, Module.Center, Angle.AnglesCardinals[3]));
-            aoes.Add(new(circle, Module.PrimaryActor.Position, Module.PrimaryActor.Rotation));
+            // The line's direction is fixed when the boss cast resolves, 4.9s in, though its bar says 8.1s (recordings,
+            // 2026-10-31). These guides are timed to that, not immediate: untimed, the dodge ran out of them at once and
+            // into two Life Claim crosses going off 2s later, and Korha died.
+            var aim = Module.CastFinishAt(spell, -3.2d);
+            aoes.Add(new(cone, Module.Center, Angle.AnglesCardinals[0], aim));
+            aoes.Add(new(cone, Module.Center, Angle.AnglesCardinals[3], aim));
+            aoes.Add(new(circle, Module.PrimaryActor.Position, Module.PrimaryActor.Rotation, aim));
         }
 
         if (spell.Action.ID == (uint)AID.OverpoweringPoint2)
