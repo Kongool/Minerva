@@ -68,14 +68,16 @@ sealed class LiquidHellPuddle(ModuleBase module) : Components.Voidzone(module, 5
 // A whirlwind waits about 3.5s at the edge it spawns on, then crosses the floor in a straight lane at 2.0 y/s (Rosa,
 // 2026-10-25: 11.5, 7.5, 3.6, -0.6 ... every 2s, heading 0 or 180 only). Drawn only where it is, its lane was invisible:
 // the dodge parked Rosa in one 4y ahead of it and walked into it (Strong Wind, 239 and Damage Down). So the lane ahead is
-// drawn as well, a second of travel at a time and each timed for when the whirlwind gets there, a second early, so the
-// dodge crosses a lane ahead of it but does not wait in one.
+// avoided as well, a second of travel at a time and each timed for when the whirlwind gets there, a second early, so the
+// dodge crosses a lane ahead of it but does not wait in one. The lane is for the dodge only: drawn, its four overlapping
+// copies read as several whirlwinds for each one (the user, 2026-10-30), so the radar shows the whirlwind itself.
 sealed class Whirlwind(ModuleBase module) : Components.GenericAOEs(module)
 {
     private const float Speed = 2.0f;
     private const double Pause = 3.5d;
     private const int SecondsAhead = 4;
     private readonly List<AOEInstance> aoes = [];
+    private readonly List<AOEInstance> lane = [];
     private readonly List<(Actor actor, WPos spawn, DateTime born)> puddles = [];
 
     public override void OnActorCreated(Actor actor)
@@ -99,9 +101,17 @@ sealed class Whirlwind(ModuleBase module) : Components.GenericAOEs(module)
         return CollectionsMarshal.AsSpan(aoes);
     }
 
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (var ahead in lane)
+            hints.AddForbiddenZone(ahead);
+    }
+
     public override void Update()
     {
         aoes.Clear();
+        lane.Clear();
         var now = World.CurrentTime;
         foreach (var (puddle, spawn, born) in puddles)
         {
@@ -115,7 +125,7 @@ sealed class Whirlwind(ModuleBase module) : Components.GenericAOEs(module)
             var dir = puddle.Rotation.ToDirection();
             for (var i = 1; i <= SecondsAhead; ++i)
             {
-                aoes.Add(new(shape, puddle.Position + dir * (Speed * i), puddle.Rotation, start.AddSeconds(i - 1)));
+                lane.Add(new(shape, puddle.Position + dir * (Speed * i), puddle.Rotation, start.AddSeconds(i - 1)));
             }
         }
     }
