@@ -3118,6 +3118,72 @@ t.Section("A shared bait is kept off the player's own pet");
     mod.Dispose();
 }
 
+// A cleave swung at the player is kept off the player's own pet, where the component asks for it. Guttler swings at the
+// beastmaster about half the time, and the familiar standing beside it was cleaved too (the user, 2026-10-31).
+t.Section("A cleave at the player is kept off the player's own pet");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x4000000E1, me = 0x100000E2, pet = 0x4000000E3, rando = 0x100000E4, randoPet = 0x4000000E5;
+    ws.Execute(new ActorState.OpCreate(boss, 0xE1u, 0, "Guttler", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 3f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(me, 0u, 1, "Me", 0, ActorType.Player, new Vector4(0, 0, -5, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpCreate(pet, 0xE3u, 2, "Familiar", 0, ActorType.Pet, new Vector4(1, 0, -5, 0), 1f, default, true, true, me));
+    ws.Execute(new ActorState.OpCreate(rando, 0u, 3, "Rando", 0, ActorType.Player, new Vector4(30, 0, 30, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new ActorState.OpCreate(randoPet, 0xE3u, 4, "Rando Familiar", 0, ActorType.Pet, new Vector4(5, 0, 0, 0), 1f, default, true, true, rando));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, me)));
+    ws.Execute(new ActorState.OpTarget(boss, me));
+    var guttler = ws.Actors.Find(boss)!;
+    var player = ws.Actors.Find(me)!;
+    var mod = new TestModule(ws, guttler) { Arena = new NullArena() };
+    bool Forbidden(AIHints hints, float x, float z) => hints.ForbiddenZones.Any(f => f.ShapeDistance.Contains(new WPos(x, z)));
+
+    var cleave = new TestPetCleave(mod);
+    var h = new AIHints();
+    cleave.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, h);
+    t.True("the swing may not be aimed through the familiar", Forbidden(h, 0, -5));
+    t.True("off its side, it may", !Forbidden(h, -5, 0));
+    t.True("another player's pet is not ours to protect", !Forbidden(h, 8, 0));
+
+    var plain = new Minerva.Components.Cleave(mod, 49714u, new AOEShapeCone(9f, 55f.Degrees()));
+    var hp = new AIHints();
+    plain.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hp);
+    t.True("a cleave that does not ask leaves the pet out of it", !Forbidden(hp, 0, -5));
+
+    ws.Execute(new ActorState.OpMove(pet, new Vector4(0.5f, 0, -0.5f, 0)));
+    var hc = new AIHints();
+    cleave.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hc);
+    t.True("a familiar over the boss's centre is in every swing, so it steers nothing", !Forbidden(hc, 0, -5) && !Forbidden(hc, 5, 0));
+
+    // the familiar's 1-yalm hitbox 4 yalms out widens the 55-degree swing by 14.5 degrees on each side
+    ws.Execute(new ActorState.OpMove(pet, new Vector4(0, 0, -4, 0)));
+    var hw = new AIHints();
+    cleave.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hw);
+    var off62 = 62f * MathF.PI / 180f;
+    var off80 = 80f * MathF.PI / 180f;
+    t.True("62 degrees off the familiar still clips its hitbox", Forbidden(hw, 5 * MathF.Sin(off62), -5 * MathF.Cos(off62)));
+    t.True("80 degrees off clears it", !Forbidden(hw, 5 * MathF.Sin(off80), -5 * MathF.Cos(off80)));
+    ws.Execute(new ActorState.OpMove(pet, new Vector4(1, 0, -5, 0)));
+
+    ws.Execute(new ActorState.OpTarget(boss, pet));
+    var hpet = new AIHints();
+    cleave.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hpet);
+    t.True("when the familiar holds the boss, the player stays out of the swing at it", Forbidden(hpet, 0, -5));
+    t.True("and may stand off its side", !Forbidden(hpet, -5, 0));
+
+    // a cleave that gives way stands down while another component's zone is timed to land (Ymir's Tsunami, replayed)
+    var yielding = new TestYieldingCleave(mod);
+    var hm = new AIHints();
+    hm.AddForbiddenZone(new AOEShapeCircle(3f), new WPos(15, 15), default, ws.FutureTime(4d));
+    yielding.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hm);
+    t.True("with a mechanic due, the cleave adds nothing", hm.ForbiddenZones.Count == 1 && !Forbidden(hm, 0, -5));
+    var hq = new AIHints();
+    hq.AddForbiddenZone(new AOEShapeCircle(3f), new WPos(15, 15));
+    hq.AddForbiddenZone(new SDInvertedCircle(new WPos(15, -15), 2f), DateTime.MaxValue);
+    yielding.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hq);
+    t.True("scenery and a spot to stand on are not mechanics: it still steers", Forbidden(hq, 0, -5));
+    mod.Dispose();
+}
+
 // BossmodReborn's GetActor(uint) finds an actor by OID; ported modules call it 132 times. Minerva only had the
 // instance-id overload, so each call found nothing (2026-09-29).
 t.Section("GetActor finds an actor by OID");
@@ -7531,6 +7597,20 @@ sealed class TestRaidwide(ModuleBase module) : Minerva.Components.RaidwideCast(m
 sealed class TestPetBait(ModuleBase module) : Minerva.Components.GenericBaitAway(module)
 {
     protected override bool AvoidOwnPet => true;
+}
+sealed class TestPetCleave(ModuleBase module) : Minerva.Components.Cleave(module, 49714u, new AOEShapeCone(9f, 55f.Degrees()))
+{
+    protected override bool AvoidOwnPet => true;
+}
+sealed class TestYieldingCleave(ModuleBase module) : Minerva.Components.Cleave(module, 49714u, new AOEShapeCone(9f, 55f.Degrees()))
+{
+    protected override bool AvoidOwnPet => true;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (!this.TimedMechanicPending(hints))
+            base.AddAIHints(slot, actor, assignment, hints);
+    }
 }
 sealed class TestRaidwideDelay(ModuleBase module) : Minerva.Components.RaidwideCastDelay(module, 48900u, 48901u, 2d);
 sealed class TestKnockbackGroup(ModuleBase module) : Minerva.Components.SimpleKnockbackGroups(module, [48199u, 48202u], 20f);

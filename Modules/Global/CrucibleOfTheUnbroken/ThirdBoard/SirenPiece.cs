@@ -69,6 +69,36 @@ sealed class DeadMansDirgeOuter(ModuleBase module) : Components.SimpleAOEs(modul
 sealed class DeadMansDirgeInner(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.DeadMansDirgeInner, new AOEShapeDonut(3.0f, 43.0f));
 sealed class Wallop(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Wallop, new AOEShapeRect(5.0f, 1.5f));
 
+// Siren's auto-attack cleaves (BMR: range 9, angle unknown). Measured over Korha's 13 Siren runs (2026-10-31): a
+// bystander was hit out to 45 degrees off the swing and almost never past it, and out to 13 yalms from her centre (her
+// hitbox is 4). Drawn at 13 yalms and 55 degrees, erring wide. As at Guttler: the beastmaster stays out of a swing at
+// the familiar, and keeps the familiar out of a swing at itself (the user). Timed 1.5s out, as Guttler's is, and
+// stands down while any timed mechanic is pending, so it never costs the walk to a safe spot.
+sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID.AutoAttack, new AOEShapeCone(13.0f, 55.0f.Degrees()))
+{
+    protected override bool AvoidOwnPet => true;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (TimedMechanicPending(hints))
+        {
+            return;
+        }
+
+        foreach (var (origin, target, angle) in OriginsAndTargets())
+        {
+            if (actor != target)
+            {
+                hints.AddForbiddenZone(Shape, origin.Position, angle, World.FutureTime(1.5d));
+            }
+            else
+            {
+                AddTargetSpecificHints(actor, origin, hints, World.FutureTime(1.5d));
+            }
+        }
+    }
+}
+
 sealed class UnmooringMelody(ModuleBase module) : Components.GenericAOEs(module)
 {
     private readonly List<AOEInstance> aoes = [];
@@ -160,7 +190,8 @@ sealed class SirenPieceStates : StateMachineBuilder
             .ActivateOnEnter<DeadMansDirgeInner>()
             .ActivateOnEnter<Burst>()
             .ActivateOnEnter<InvitingVerse>()
-            .ActivateOnEnter<Wallop>();
+            .ActivateOnEnter<Wallop>()
+            .ActivateOnEnter<AutoAttack>();
     }
 }
 

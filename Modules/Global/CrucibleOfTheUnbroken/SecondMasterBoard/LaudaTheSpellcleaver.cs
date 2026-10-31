@@ -127,16 +127,21 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
 
     // Set the cleave aoe to be 1.5f so it doesn't overlap with really bad mechanics such as the cage - getting hitting by the cleave is fine
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
-        if (beastlyAura == null || beastlyAura.knockbacks.Count > 0) {
+        if (beastlyAura == null || beastlyAura.knockbacks.Count > 0 || TimedMechanicPending(hints)) {
             return;
         }
 
         foreach (var (origin, target, angle) in OriginsAndTargets()) {
             if (actor != target) {
                 hints.AddForbiddenZone(Shape, origin.Position, angle, World.FutureTime(1.5d));
+            } else {
+                AddTargetSpecificHints(actor, origin, hints, World.FutureTime(1.5d));
             }
         }
     }
+
+    // Guttler's cleave: when it swings at the beastmaster, keep the familiar out of it (the user, 2026-10-31).
+    protected override bool AvoidOwnPet => true;
 }
 
 sealed class Thunderbolt(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeRect(50.0f, 3.0f), (uint)IconID.ThunderboltTankBuster,

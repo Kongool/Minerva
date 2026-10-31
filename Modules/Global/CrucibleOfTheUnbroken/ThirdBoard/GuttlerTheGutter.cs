@@ -97,7 +97,7 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
     // Set the cleave aoe to be 1.5f so it doesn't overlap with really bad mechanics such as the cage - getting hitting by the cleave is fine
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (beastlyAura == null || beastlyAura.knockbacks.Count > 0)
+        if (beastlyAura == null || beastlyAura.knockbacks.Count > 0 || TimedMechanicPending(hints))
         {
             return;
         }
@@ -108,8 +108,16 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
             {
                 hints.AddForbiddenZone(Shape, origin.Position, angle, World.FutureTime(1.5d));
             }
+            else
+            {
+                AddTargetSpecificHints(actor, origin, hints, World.FutureTime(1.5d));
+            }
         }
     }
+
+    // The boss swings at the beastmaster about half the time (all 12 runs, 2026-10-31); standing beside the familiar,
+    // the swing cleaved it too. Stand off the familiar's side instead (the user).
+    protected override bool AvoidOwnPet => true;
 }
 
 sealed class Gyrocleave(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Gyrocleave, new AOEShapeRect(80.0f, 10.0f));

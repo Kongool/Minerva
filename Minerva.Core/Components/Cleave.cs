@@ -41,30 +41,75 @@ public class Cleave(ModuleBase module, uint aid, AOEShape shape, uint[]? enemyOI
     /// <summary>
     /// When the viewer IS the cleave target, they can't dodge it — instead they must not aim it at anyone.
     /// Each other party member becomes a forbidden direction (or, for a circle, a forbidden spot to stand
-    /// near), so the pathfinder keeps the cleave pointed at empty ground.
+    /// near), so the pathfinder keeps the cleave pointed at empty ground. With <see cref="AvoidOwnPet"/>, the
+    /// viewer's own pet is kept out of it too.
     /// </summary>
-    private void AddTargetSpecificHints(Actor actor, Actor source, AIHints hints)
+    protected void AddTargetSpecificHints(Actor actor, Actor source, AIHints hints, DateTime activation = default)
     {
         foreach (var a in this.World.Party.WithoutSlot())
         {
             if (a == actor)
                 continue;
-            switch (this.Shape)
+            this.AvoidAiming(a, source, hints, activation);
+        }
+        if (this.AvoidOwnPet)
+            foreach (var a in this.World.Actors)
             {
-                case AOEShapeCircle circle:
-                    hints.AddForbiddenZone(circle, a.Position);
-                    break;
-                case AOEShapeCone cone:
-                    hints.AddForbiddenZone(new SDCone(source.Position, 100f, source.AngleTo(a), cone.HalfAngle));
-                    break;
-                case AOEShapeRect rect:
-                    var dist = (a.Position - source.Position).Length();
-                    if (dist > 0f)
-                        hints.AddForbiddenZone(new SDCone(source.Position, 100f, source.AngleTo(a), Angle.Asin(Math.Min(1f, rect.HalfWidth / dist))));
-                    break;
+                // a pet standing over the enemy's centre is in every swing, and the direction to it is noise
+                if (a.OwnerID != actor.InstanceID || a.Type is not (ActorType.Pet or ActorType.Chocobo) || a.IsDead)
+                    continue;
+                var dist = (a.Position - source.Position).Length();
+                if (dist > a.HitboxRadius)
+                    this.AvoidAiming(a, source, hints, activation, a.HitboxRadius);
             }
+    }
+
+    // `reach` widens the shape by the actor's hitbox: a familiar is 1 to 2 yalms across, so a swing clips it well
+    // outside the angle its centre sits at (measured at Ymir and Siren, 2026-10-31).
+    private void AvoidAiming(Actor a, Actor source, AIHints hints, DateTime activation, float reach = 0f)
+    {
+        var dist = (a.Position - source.Position).Length();
+        switch (this.Shape)
+        {
+            case AOEShapeCircle circle:
+                hints.AddForbiddenZone(new AOEShapeCircle(circle.Radius + reach), a.Position, default, activation);
+                break;
+            case AOEShapeCone cone:
+                var pad = reach > 0f && dist > 0f ? Angle.Asin(Math.Min(1f, reach / dist)) : default;
+                hints.AddForbiddenZone(new SDCone(source.Position, 100f, source.AngleTo(a), cone.HalfAngle + pad), activation);
+                break;
+            case AOEShapeRect rect:
+                if (dist > 0f)
+                    hints.AddForbiddenZone(new SDCone(source.Position, 100f, source.AngleTo(a), Angle.Asin(Math.Min(1f, (rect.HalfWidth + reach) / dist))), activation);
+                break;
         }
     }
+
+    /// <summary>
+    /// <para>Has a component before this one timed a zone to land: a cast, a bait, a spawn with a fuse? A cleave is an
+    /// auto-attack, and stepping round it must never cost the walk to a safe spot. A component that asks this and adds
+    /// nothing while it holds leaves the dodge planning for the mechanic alone. Ymir, 2026-10-31 (replayed): kept out
+    /// of Head Snatch, which is always about to swing, the character took the long way to Tsunami's safe wall and was
+    /// still walking when the wave came.</para>
+    /// <para>It reads the zones already added this frame, so the cleave must be activated after the fight's other
+    /// components. Untimed zones (scenery, a spot to walk to) and "stand here" instructions do not count.</para>
+    /// </summary>
+    protected bool TimedMechanicPending(AIHints hints)
+    {
+        var now = this.World.CurrentTime;
+        foreach (var z in hints.ForbiddenZones)
+            if (z.Activation > now && z.Activation != DateTime.MaxValue)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// <para>Also keep the cleave off the viewer's own pet when the viewer holds the enemy. For a Crucible of the
+    /// Unbroken familiar, the tank: it stands in melee beside the beastmaster, so a swing at the beastmaster cleaves
+    /// it as well, and under Cover it takes the beastmaster's hit on top of its own (the user, 2026-10-31: Guttler).</para>
+    /// <para>Off by default, like <see cref="GenericBaitAway"/>'s: elsewhere a pet is not hurt by it.</para>
+    /// </summary>
+    protected virtual bool AvoidOwnPet => false;
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)
     {

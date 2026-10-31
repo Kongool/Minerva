@@ -53,6 +53,49 @@ sealed class WaterII(ModuleBase module) : Components.SimpleAOEs(module, (uint)AI
 sealed class BlanketThunder(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.BlanketThunder);
 sealed class Dreadwash(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.Dreadwash);
 
+// Head Snatch, Ymir's auto-attack, cleaves her front. The note at the top says it hits one person; the recordings
+// (2026-10-31) show it taking the beastmaster and the familiar together in 46 of 81 swings. Measured over 21 runs: hit
+// out to about 60 degrees off her facing and 11 yalms from her centre (her hitbox is 4); drawn at 11 yalms and 70
+// degrees, erring wide. A snail turns slowly, so the swing follows her facing, not her target: a tenth of the swings were
+// 80 degrees or more off it. As at Guttler and Siren: the beastmaster stays out of a swing at the familiar and keeps the
+// familiar out of a swing at itself (the user). Timed 1.5s out, as theirs are, and stands down while any timed
+// mechanic is pending: kept out of it, the character once took the long way to Tsunami's safe wall (replayed).
+sealed class HeadSnatch(ModuleBase module) : Components.Cleave(module, (uint)AID.AutoAttackHeadSnatch, new AOEShapeCone(11.0f, 70.0f.Degrees()))
+{
+    protected override bool AvoidOwnPet => true;
+
+    public override List<(Actor origin, Actor target, Angle angle)> OriginsAndTargets()
+    {
+        var list = base.OriginsAndTargets();
+        for (var i = 0; i < list.Count; ++i)
+        {
+            list[i] = (list[i].origin, list[i].target, list[i].origin.Rotation);
+        }
+
+        return list;
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (TimedMechanicPending(hints))
+        {
+            return;
+        }
+
+        foreach (var (origin, target, angle) in OriginsAndTargets())
+        {
+            if (actor != target)
+            {
+                hints.AddForbiddenZone(Shape, origin.Position, angle, World.FutureTime(1.5d));
+            }
+            else
+            {
+                AddTargetSpecificHints(actor, origin, hints, World.FutureTime(1.5d));
+            }
+        }
+    }
+}
+
 sealed class ParalyzingSpikes(ModuleBase module) : Components.GenericInvincible(module, "Attacking boss with spikes debuff!")
 {
     private readonly List<Actor> avoidBosses = [];
@@ -152,6 +195,7 @@ sealed class YmirPieceStates : StateMachineBuilder
             .ActivateOnEnter<ParalyzingSpikes>()
             .ActivateOnEnter<VulnDown>()
             .ActivateOnEnter<Dreadwash>()
+            .ActivateOnEnter<HeadSnatch>()
             .Raw.Update = () => AllDeadOrDestroyed(YmirPiece.Bosses);
     }
 }
