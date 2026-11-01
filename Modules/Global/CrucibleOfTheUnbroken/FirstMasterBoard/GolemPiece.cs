@@ -49,6 +49,8 @@ public enum TetherID : uint {
 sealed class EarthenRing(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.EarthenRing, new AOEShapeDonut(5.0f, 50.0f));
 sealed class Plaincracker(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Plaincracker, 20.0f);
 sealed class Obliterate(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.Obliterate, 17.0f);
+// Obliterate hits everyone as well (1,622 on a beastmaster at full health, 2026-10-31): announced as a raidwide.
+sealed class ObliterateRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.Obliterate);
 sealed class Outcrop(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Outcrop, new AOEShapeCone(40.0f, 30.0f.Degrees()));
 sealed class SelfDestruct(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.SelfDestruct, "Enrage");
 
@@ -198,6 +200,7 @@ sealed class GolemPieceStates : StateMachineBuilder {
             .ActivateOnEnter<Rockslide>()
             .ActivateOnEnter<Plaincracker>()
             .ActivateOnEnter<Obliterate>()
+            .ActivateOnEnter<ObliterateRaidwide>()
             .ActivateOnEnter<Outcrop>()
             .ActivateOnEnter<PlaincrackerSwap>()
             .ActivateOnEnter<SkyRock>()

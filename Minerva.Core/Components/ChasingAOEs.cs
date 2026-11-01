@@ -94,23 +94,28 @@ public class GenericChasingAOEs(ModuleBase module, float moveDistance, uint aid 
     }
 
     /// <summary>
-    /// The chased player's own zone is pushed back along their facing and widened by the step distance,
-    /// so the pathfinder always has a strictly-better direction to run — otherwise every escape route
-    /// scores the same and it stalls inside the AOE. (BMR's trick, kept verbatim.)
+    /// <para>The chased player's zone is a step and a radius around where the chaser last landed. The next explosion
+    /// lands a step toward them, so it reaches exactly that far, whichever way they face or run; the nearest way out
+    /// is straight away from the last landing, so the pathfinder has a direction.</para>
+    /// <para>BossmodReborn instead pushes the circle back along the player's facing. That keeps a player ahead only
+    /// while they keep running, as its AI does; Minerva's dodge stops once it is safe, and facing away the pushed
+    /// circle reached 7 yalms while the explosion reached 10. Zu's Airy Pursuit, 2026-10-31: three hits and a death.
+    /// The whole step is used even before the first explosion, so the walk away from it already leaves room for the
+    /// next.</para>
     /// </summary>
     private void AddForbiddenZones(Actor actor, AIHints hints, bool isTarget)
     {
         if (this.Chasers[0].Shape is not AOEShapeCircle circle)
-            return; // the pushed-back-circle hack only makes sense for circular chasers
+            return; // the reach of a step is only a circle for circular chasers
         var radius = circle.Radius;
         foreach (var c in this.Chasers)
         {
             if (c.Target == actor == isTarget)
             {
-                var radiusAdj = isTarget ? this.moveDistance + radius : radius + 1f;
-                var predicted = c.PredictedPosition();
-                var position = isTarget ? predicted - radius * actor.Rotation.ToDirection() : predicted;
-                hints.AddForbiddenZone(new SDCircle(position, radiusAdj), c.NextActivation);
+                if (isTarget)
+                    hints.AddForbiddenZone(new SDCircle(c.PrevPos, this.moveDistance + radius), c.NextActivation);
+                else
+                    hints.AddForbiddenZone(new SDCircle(c.PredictedPosition(), radius + 1f), c.NextActivation);
             }
         }
     }

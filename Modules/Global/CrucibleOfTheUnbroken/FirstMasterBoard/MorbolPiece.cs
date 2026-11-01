@@ -59,6 +59,9 @@ public enum TetherID : uint
 
 sealed class AcidMist(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AcidMist, 6.0f);
 sealed class Tremblor(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.Tremblor, 10.0f);
+// Tremblor also hits everyone, 900-1,200 in every recorded run whatever the distance (2026-10-31); a beastmaster
+// at 909 HP died to it. Announced as a raidwide so a rotation plugin hears it coming (SecondsUntilRaidwide).
+sealed class TremblorRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.Tremblor);
 sealed class VineProbe(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VineProbe, new AOEShapeRect(13.0f, 4.0f));
 
 sealed class GreenPuddle(ModuleBase module) : Components.Voidzone(module, 6.0f, GetVoidzones)
@@ -188,6 +191,7 @@ sealed class MorbolPieceStates : StateMachineBuilder
             .ActivateOnEnter<ExtremelyBadBreathBoss>()
             .ActivateOnEnter<AcidMist>()
             .ActivateOnEnter<Tremblor>()
+            .ActivateOnEnter<TremblorRaidwide>()
             .ActivateOnEnter<VineProbe>()
             .ActivateOnEnter<GreenPuddle>();
     }

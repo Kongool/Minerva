@@ -339,6 +339,9 @@ sealed class PurpleVoidZone(ModuleBase module) : Components.Voidzone(module, 6.0
     }
 }
 
+// The knockback hits everyone (Korha took it in each recorded run, about 290; 2026-10-31): announced as a raidwide.
+sealed class FivefoldFalloutRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.FivefoldFalloutKnockback);
+
 sealed class FivefoldFallout(ModuleBase module) : Components.GenericKnockback(module)
 {
     private readonly List<Knockback> knockbacks = [];
@@ -410,7 +413,8 @@ sealed class GargoylePieceStates : StateMachineBuilder
             .ActivateOnEnter<GrimFate>()
             .ActivateOnEnter<SeaOfPitch>()
             .ActivateOnEnter<PurpleVoidZone>()
-            .ActivateOnEnter<FivefoldFallout>();
+            .ActivateOnEnter<FivefoldFallout>()
+            .ActivateOnEnter<FivefoldFalloutRaidwide>();
     }
 }
 

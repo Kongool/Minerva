@@ -137,6 +137,8 @@ sealed class FirePuddles(ModuleBase module) : Components.Voidzone(module, 6.0f, 
 }
 
 sealed class FieryFuryKnockback(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.FieryFuryKnockback, 15.0f, maxCasts: 2);
+// The push hits everyone (3 of 3 recorded casts on Korha, about 210; 2026-10-31): announced as a raidwide too.
+sealed class FieryFuryRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.FieryFuryKnockback);
 sealed class FieryFuryAOE : Components.SimpleAOEs {
     public FieryFuryAOE(ModuleBase module) : base(module, (uint)AID.FieryFuryAOE, 6.0f, maxCasts: 2) {
         MaxDangerColor = 1;
@@ -160,7 +162,8 @@ sealed class ProgenitrixPieceStates : StateMachineBuilder {
             .ActivateOnEnter<Meltdown>()
             .ActivateOnEnter<MeltdownKnockback>()
             .ActivateOnEnter<FieryFuryAOE>()
-            .ActivateOnEnter<FieryFuryKnockback>();
+            .ActivateOnEnter<FieryFuryKnockback>()
+            .ActivateOnEnter<FieryFuryRaidwide>();
     }
 }
 

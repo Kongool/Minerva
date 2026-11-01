@@ -92,14 +92,22 @@ public class Cleave(ModuleBase module, uint aid, AOEShape shape, uint[]? enemyOI
     /// of Head Snatch, which is always about to swing, the character took the long way to Tsunami's safe wall and was
     /// still walking when the wave came.</para>
     /// <para>It reads the zones already added this frame, so the cleave must be activated after the fight's other
-    /// components. Untimed zones (scenery, a spot to walk to) and "stand here" instructions do not count.</para>
+    /// components. Untimed zones (scenery, a spot to walk to) and "stand here" instructions do not count. An overdue
+    /// one does: a cast resolves a little after its bar ends, and its zone stays until it has. Guttler's Gyrocleave,
+    /// 2026-10-31 (replayed): bar done at 54.61s, the line at 54.91s; counting only zones still ahead, the cleave stood
+    /// back up in between and walked the character out of the safe notch into the line.</para>
+    /// <para>An untimed zone the character stands in counts too: they are already on their way somewhere, so the
+    /// cleave must not lengthen the walk. Guttler's Molten Metal "go to the spot", replayed: twice as long otherwise.</para>
     /// </summary>
     protected bool TimedMechanicPending(AIHints hints)
     {
-        var now = this.World.CurrentTime;
         foreach (var z in hints.ForbiddenZones)
-            if (z.Activation > now && z.Activation != DateTime.MaxValue)
+        {
+            if (z.Activation == DateTime.MaxValue)
+                continue;
+            if (z.Activation != default || z.ShapeDistance.Distance(hints.PlayerPosition) <= 0f)
                 return true;
+        }
         return false;
     }
 

@@ -51,6 +51,8 @@ public enum TetherID : uint
 
 sealed class WaterII(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.WaterII, 6.0f);
 sealed class BlanketThunder(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.BlanketThunder);
+// Tsunami's push also hits everyone (38 of 38 recorded casts on Korha, about 290; 2026-10-31): announced as well.
+sealed class TsunamiRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.Tsunami);
 sealed class Dreadwash(ModuleBase module) : Components.CastInterruptHint(module, (uint)AID.Dreadwash);
 
 // Head Snatch, Ymir's auto-attack, cleaves her front. The note at the top says it hits one person; the recordings
@@ -191,6 +193,7 @@ sealed class YmirPieceStates : StateMachineBuilder
             .ActivateOnEnter<BlanketThunderStun>()
             .ActivateOnEnter<WaterII>()
             .ActivateOnEnter<Tsunami>()
+            .ActivateOnEnter<TsunamiRaidwide>()
             .ActivateOnEnter<BlanketThunder>()
             .ActivateOnEnter<ParalyzingSpikes>()
             .ActivateOnEnter<VulnDown>()

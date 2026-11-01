@@ -125,7 +125,9 @@ sealed class GluttonousGoring(ModuleBase module) : Components.SimpleAOEs(module,
 sealed class MoltenMetalBaitAOE(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.MoltenMetalBaitCircle, 6.0f);
 
 // TODo confirm aoe damage size - its a flare - last checks: 30.0f - ~600 damage, 35.0f - ~464 damage, test going further out again
-sealed class BeastlyFlare(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.BeastlyFlare, 35.0f);
+// It reaches the whole floor and falls off with distance (Korha took it in 20 of 29 recorded casts, 698 on average,
+// 2026-10-31): drawn and dodged as before, and announced as a raidwide so a rotation plugin hears it coming.
+sealed class BeastlyFlare(ModuleBase module) : Components.ProximityAOEs(module, (uint)AID.BeastlyFlare, 35.0f);
 sealed class GluttonousGutting(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GluttonousGutting, new AOEShapeRect(50.0f, 20.0f));
 
 sealed class MagicalCombustion : Components.SimpleAOEs

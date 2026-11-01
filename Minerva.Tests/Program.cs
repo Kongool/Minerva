@@ -3118,6 +3118,55 @@ t.Section("A shared bait is kept off the player's own pet");
     mod.Dispose();
 }
 
+// A chasing AOE steps 3.5 yalms toward its target each second, so the chased player has to stay a step and a radius
+// from where it last landed. The zone BossmodReborn draws for them was pushed back along their facing, which keeps them
+// ahead only while they keep running; Minerva's dodge stops once it is safe, and facing away it parked 7 yalms from the
+// last puddle while the next one, landing 3.5 closer, reached 10. Zu's Airy Pursuit, 2026-10-31: three hits and a death.
+t.Section("A chasing AOE never catches a player the dodge moves");
+{
+    var ws = new WorldState(10_000_000, "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong boss = 0x4000000F1, me = 0x100000F2;
+    ws.Execute(new ActorState.OpCreate(boss, 0xF1u, 0, "Zu", 0, ActorType.Enemy, new Vector4(100, 0, 100, 0), 3f, default, true, false, 0));
+    ws.Execute(new ActorState.OpCreate(me, 0u, 1, "Me", 0, ActorType.Player, new Vector4(100, 0, 104, 0), 0.5f, default, true, true, 0));
+    ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, me)));
+    var mod = new TestModule(ws, ws.Actors.Find(boss)!) { Arena = new NullArena() };
+    var chase = new Minerva.Components.StandardChasingAOEs(mod, 6f, 1u, 2u, 3.5f, 1d, 6);
+    var player = ws.Actors.Find(me)!;
+    chase.Chasers.Add(new(new AOEShapeCircle(6f), player, player.Position, 0f, 7, ws.FutureTime(3d), 1d));
+    int hits = 0, steps = 0;
+    uint frame = 1;
+    for (var i = 0; i < 150 && chase.Chasers.Count > 0; ++i)
+    {
+        ws.Execute(new WorldState.OpFrameStart(Frame(ws, frame++, 0.1f), TimeSpan.Zero));
+        var c = chase.Chasers[0];
+        if (ws.CurrentTime >= c.NextActivation)
+        {
+            var lands = c.PredictedPosition();
+            if ((player.Position - lands).Length() <= 6f + player.HitboxRadius)
+                ++hits;
+            ++steps;
+            chase.Advance(lands, 3.5f, ws.CurrentTime);
+            continue;
+        }
+        var h = new AIHints { Center = mod.Center, Bounds = mod.Bounds, PlayerPosition = player.Position };
+        chase.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, h);
+        var spot = ArenaPathfinder.Solve(h, ws.CurrentTime, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        if (spot.NeedToMove)
+        {
+            var d = spot.Steer - player.Position;
+            var len = d.Length();
+            if (len > 0.01f)
+            {
+                var np = player.Position + d / len * MathF.Min(len, 0.6f);
+                ws.Execute(new ActorState.OpMove(me, new Vector4(np.X, 0, np.Z, Angle.FromDirection(d).Rad)));
+            }
+        }
+    }
+    t.True($"seven explosions land, none on the player (hit {hits} of {steps})", steps == 7 && hits == 0);
+    mod.Dispose();
+}
+
 // A cleave swung at the player is kept off the player's own pet, where the component asks for it. Guttler swings at the
 // beastmaster about half the time, and the familiar standing beside it was cleaved too (the user, 2026-10-31).
 t.Section("A cleave at the player is kept off the player's own pet");
@@ -3176,11 +3225,19 @@ t.Section("A cleave at the player is kept off the player's own pet");
     hm.AddForbiddenZone(new AOEShapeCircle(3f), new WPos(15, 15), default, ws.FutureTime(4d));
     yielding.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hm);
     t.True("with a mechanic due, the cleave adds nothing", hm.ForbiddenZones.Count == 1 && !Forbidden(hm, 0, -5));
+    var ho = new AIHints();
+    ho.AddForbiddenZone(new AOEShapeCircle(3f), new WPos(15, 15), default, ws.CurrentTime.AddSeconds(-0.2d));
+    yielding.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, ho);
+    t.True("nor while one is overdue: the bar has ended, the hit has not landed (Gyrocleave)", ho.ForbiddenZones.Count == 1);
     var hq = new AIHints();
     hq.AddForbiddenZone(new AOEShapeCircle(3f), new WPos(15, 15));
     hq.AddForbiddenZone(new SDInvertedCircle(new WPos(15, -15), 2f), DateTime.MaxValue);
     yielding.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hq);
     t.True("scenery and a spot to stand on are not mechanics: it still steers", Forbidden(hq, 0, -5));
+    var hw2 = new AIHints { PlayerPosition = player.Position };
+    hw2.AddForbiddenZone(new SDInvertedCircle(new WPos(15, -15), 2f));
+    yielding.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, hw2);
+    t.True("on the way to a spot it must reach (an untimed zone holds it), the cleave adds nothing", hw2.ForbiddenZones.Count == 1);
     mod.Dispose();
 }
 
