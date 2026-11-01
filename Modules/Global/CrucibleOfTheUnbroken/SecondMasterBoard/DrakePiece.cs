@@ -63,23 +63,28 @@ sealed class ManglingFang(ModuleBase module) : Components.SingleTargetCast(modul
 sealed class SeedingNeedles(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SeedingNeedles, 20.0f);
 
 sealed class BlazeSpikes(ModuleBase module) : Components.Dispel(module, (uint)SID.BlazeSpikes, (uint)AID.BlazeSpikes);
-sealed class BlazeSpikesTarget(ModuleBase module) : Components.GenericInvincible(module, "Attacking boss with spikes debuff!") {
+// A reflect is forbidden from the start of its cast until the status wears off: the status lands almost a second after
+// the cast bar ends, so neither the cast nor the status alone covers it.
+class ReflectTarget(ModuleBase module, uint aid, uint sid, string hint) : Components.GenericInvincible(module, hint) {
     private readonly List<Actor> avoidBosses = [];
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell) {
-        if (spell.Action.ID == (uint)AID.BlazeSpikes) {
+        if (spell.Action.ID == aid && !avoidBosses.Contains(caster)) {
             avoidBosses.Add(caster);
         }
     }
 
     public override void OnStatusLose(Actor actor, ref ActorStatus status) {
-        if (status.ID == (uint)SID.BlazeSpikes) {
+        if (status.ID == sid) {
             avoidBosses.Remove(actor);
         }
     }
 
     protected override ReadOnlySpan<Actor> ForbiddenTargets(int slot, Actor actor) => CollectionsMarshal.AsSpan(avoidBosses);
 }
+
+sealed class BlazeSpikesTarget(ModuleBase module) : ReflectTarget(module, (uint)AID.BlazeSpikes, (uint)SID.BlazeSpikes, "Attacking boss with spikes debuff!");
+sealed class NeedlesOutTarget(ModuleBase module) : ReflectTarget(module, (uint)AID.NeedlesOut, (uint)SID.NeedlesOut, "Attacking Barbmole with needles out!");
 
 // Uses GenericAOEs component to show it sooner
 sealed class BurningCyclone(ModuleBase module) : Components.GenericAOEs(module) {
@@ -188,6 +193,7 @@ sealed class DrakePieceStates : StateMachineBuilder {
             .ActivateOnEnter<BallOfFireRing>()
             .ActivateOnEnter<BlazeSpikes>()
             .ActivateOnEnter<BlazeSpikesTarget>()
+            .ActivateOnEnter<NeedlesOutTarget>()
             .ActivateOnEnter<AbaddonEat>()
             .ActivateOnEnter<SeedingNeedles>()
             .Raw.Update = () => AllDeadOrDestroyed(DrakePiece.Bosses);
@@ -202,9 +208,17 @@ public sealed class DrakePiece(WorldState ws, Actor primary) : ModuleBase(ws, pr
         var morphoPieceAlive = Enemies((uint)OID.MorphoPiece).Any(morpho => !morpho.IsDead);
         var AbaddonPieceAlive = Enemies((uint)OID.AbaddonPiece).Any(abaddon => !abaddon.IsDead);
 
+        // Blaze Spikes and Needles Out reflect every hit, auto-attacks included, so the reflect components forbid from
+        // the start of the cast and this switch must not overwrite them: the rotation gets the cast bar to change target
+        // before the reflect is up. It used to, forbidding only once the status landed. Korha, 2026-10-31: still swinging
+        // at Drake when it went up, about 340 a hit took her from 4,477 HP to 1,788, and the Barbmoles' Needles Out
+        // bleed finished her.
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i) {
             var e = hints.PotentialTargets[i];
+            if (e.Priority <= AIHints.Enemy.PriorityInvincible) {
+                continue;
+            }
             e.Priority = e.Actor.OID switch {
                 (uint)OID.AbaddonPiece => morphoPieceAlive ? AIHints.Enemy.PriorityForbidden : 4,
                 (uint)OID.MorphoPiece => AbaddonPieceAlive ? AIHints.Enemy.PriorityForbidden : 3, // This should never happen, but it could

@@ -104,7 +104,7 @@ sealed class ParalyzingSpikes(ModuleBase module) : Components.GenericInvincible(
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.ParalyzingSpikes)
+        if (spell.Action.ID == (uint)AID.ParalyzingSpikes && !avoidBosses.Contains(caster))
         {
             avoidBosses.Add(caster);
         }
@@ -121,13 +121,16 @@ sealed class ParalyzingSpikes(ModuleBase module) : Components.GenericInvincible(
     protected override ReadOnlySpan<Actor> ForbiddenTargets(int slot, Actor actor) => CollectionsMarshal.AsSpan(avoidBosses);
 }
 
+// Ymir has Vulnerability Down while her shell lives, and it is nearly total: over 21 recorded runs (2026-10-27 to
+// 10-31) she lost 5 to 46 HP a second with it against 400 to 700 without, and the runs that kept hitting her through it
+// were the long ones. Forbidden meanwhile, so the rotation breaks the shell instead.
 sealed class VulnDown(ModuleBase module) : Components.GenericInvincible(module)
 {
     private readonly List<Actor> avoidBosses = [];
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status)
     {
-        if (status.ID == (uint)SID.VulnerabilityDown)
+        if (status.ID == (uint)SID.VulnerabilityDown && !avoidBosses.Contains(actor))
         {
             avoidBosses.Add(actor);
         }
@@ -210,10 +213,16 @@ public sealed class YmirPiece(WorldState ws, Actor primary) : ModuleBase(ws, pri
 
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        // Runs after the components, so it must not overwrite their forbids: Paralyzing Spikes from the start of its cast,
+        // Vulnerability Down while the shell lives (as at Drake, 2026-10-31).
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i)
         {
             var e = hints.PotentialTargets[i];
+            if (e.Priority <= AIHints.Enemy.PriorityInvincible)
+            {
+                continue;
+            }
             e.Priority = e.Actor.OID switch
             {
                 (uint)OID.YmirShell => 3,
