@@ -8,11 +8,10 @@ namespace Minerva.Radar;
 
 /// <summary>
 /// ImGui-backed <see cref="Arena"/>: maps world (XZ) coordinates to a square canvas (north-up) and
-/// draws with the window draw list. Renders each shape type the best way the binding allows —
-/// native filled circles, triangulated donut rings, and triangle-fan fills for convex shapes —
-/// since this ImGui build has no concave-poly fill.
+/// draws with the window draw list. Filled zones come from <see cref="ZoneMeshes"/>, which cuts them to
+/// the field and keeps them between frames; this class only turns their offsets into screen vertices.
 /// </summary>
-public sealed class ImGuiArena : Arena
+public sealed unsafe class ImGuiArena : Arena
 {
     private ImDrawListPtr draw;
     private Vector2 screenCenter;
@@ -28,15 +27,21 @@ public sealed class ImGuiArena : Arena
     /// </summary>
     public bool ClipZones = true;
 
-    private readonly PolygonClipper clipper = new();
-    private ArenaBounds? clipBoundsFor;
-    private PolygonClipper.Operand? clipBounds;
+    private readonly ZoneMeshes meshes = new();
 
     /// <summary>
     /// Screen-space rotation (radians) applied about the arena centre. 0 = north-up (default). Set to
     /// <c>player.Rotation.Rad + π</c> to make the local player's facing point up ("rotate with character").
     /// </summary>
     public float Rotation;
+
+    // the rotation's sine and cosine, worked out once per value rather than once per vertex
+    private float rotationFor = float.NaN;
+    private float rotSin;
+    private float rotCos = 1f;
+
+    // screen points for one polyline, reused
+    private Vector2[] points = new Vector2[128];
 
     /// <summary>Set the transform for this frame from a canvas rectangle.</summary>
     private bool clipPushed;
@@ -60,6 +65,7 @@ public sealed class ImGuiArena : Arena
         this.canvasSize = canvasSize;
         var half = MathF.Min(canvasSize.X, canvasSize.Y) * 0.5f - margin;
         this.scale = this.Bounds.Extent > 0f ? half / this.Bounds.Extent : 1f;
+        this.meshes.BeginFrame(ImGui.GetFrameCount(), this.Center, this.Bounds, this.ClipZones);
         if (clip)
         {
             this.draw.PushClipRect(canvasTopLeft, canvasTopLeft + canvasSize, true);
@@ -76,15 +82,21 @@ public sealed class ImGuiArena : Arena
         this.draw.PopClipRect();
     }
 
-    private Vector2 W2S(WPos p)
+    private Vector2 W2S(WPos p) => this.R2S(p - this.Center);
+
+    /// <summary>An offset from the arena centre to a screen pixel.</summary>
+    private Vector2 R2S(WDir o)
     {
-        var o = p - this.Center;
         var x = o.X;
         var z = o.Z;
         if (this.Rotation != 0f)
         {
-            var (sin, cos) = MathF.SinCos(this.Rotation);
-            (x, z) = (x * cos - z * sin, x * sin + z * cos);
+            if (this.Rotation != this.rotationFor)
+            {
+                (this.rotSin, this.rotCos) = MathF.SinCos(this.Rotation);
+                this.rotationFor = this.Rotation;
+            }
+            (x, z) = (x * this.rotCos - z * this.rotSin, x * this.rotSin + z * this.rotCos);
         }
         return this.screenCenter + new Vector2(x, z) * this.scale; // +Z (south) => +Y (down)
     }
@@ -112,45 +124,11 @@ public sealed class ImGuiArena : Arena
         if (color == 0u)
             color = Colors.AOE;
 
-        // A custom shape is drawn from its combined polygon, cut-outs and all. Its contour loops are only the shapes
-        // it unites, and filled one by one they paint its holes too. Moko the Restless, 2026-10-18: the band outside a
-        // shrinking floor (a 24.5y square less a 20y one) filled the whole arena red while the dodge, which reads the
-        // real shape, said nothing was imminent.
-        if (shape is AOEShapeCustom custom)
-        {
-            this.FillComplex(custom.Polygon, custom.PolygonOrigin, color);
-            return;
-        }
-
-        if (this.ClipZones)
-        {
-            var loops = shape.Contours(origin, rotation);
-            if (this.NeedsClip(loops))
-            {
-                this.FillClipped(loops, color);
-                return;
-            }
-        }
-
-        switch (shape)
-        {
-            case AOEShapeCircle c:
-                this.draw.AddCircleFilled(this.W2S(origin), c.Radius * this.scale, color, 48);
-                break;
-            case AOEShapeDonut d:
-                this.FillDonut(origin, d.InnerRadius, d.OuterRadius, color);
-                break;
-            case AOEShapeCross x:
-                // decompose into two convex rectangles (arms)
-                this.FillConvex(RectPts(origin, rotation, x.Length, x.Length, x.HalfWidth), color);
-                this.FillConvex(RectPts(origin, rotation + new Angle(MathF.PI / 2f), x.Length, x.Length, x.HalfWidth), color);
-                break;
-            default: // cone, rect, and boolean combinations — one fill per loop, any of them possibly concave
-                foreach (var loop in shape.Contours(origin, rotation))
-                    this.FillPolygon(loop, color);
-                break;
-        }
-        this.OutlineShape(shape, origin, rotation, WithAlpha(color, 255), 1.5f);
+        // A custom shape is drawn from its combined polygon, cut-outs and all (ZoneMeshes builds it that way). Its
+        // contour loops are only the shapes it unites, and filled one by one they paint its holes too. Moko the
+        // Restless, 2026-10-18: the band outside a shrinking floor (a 24.5y square less a 20y one) filled the whole
+        // arena red while the dodge, which reads the real shape, said nothing was imminent.
+        this.DrawMesh(this.meshes.Get(shape, origin, rotation), color, outline: true);
     }
 
     public override void OutlineShape(AOEShape shape, WPos origin, Angle rotation, uint color, float thickness = 1f)
@@ -158,21 +136,25 @@ public sealed class ImGuiArena : Arena
         if (color == 0u)
             color = Colors.Danger;
 
-        if (shape is AOEShapeCircle c)
+        switch (shape)
         {
-            this.draw.AddCircle(this.W2S(origin), c.Radius * this.scale, color, 48, thickness);
-            return;
-        }
-        if (shape is AOEShapeCustom custom)
-        {
-            var delta = custom.PolygonOrigin - this.Center;
-            foreach (var part in custom.Polygon.Parts)
-            {
-                this.PolylineRel(part.Exterior, color, delta, thickness);
-                for (var h = 0; h < part.HoleStarts.Count; ++h)
-                    this.PolylineRel(part.Interior(h), color, delta, thickness);
-            }
-            return;
+            case AOEShapeCircle c:
+                this.draw.AddCircle(this.W2S(origin), c.Radius * this.scale, color, 48, thickness);
+                return;
+            case AOEShapeDonut d:
+                // two circles: its contour is one loop with a seam, and stroked whole it draws a spoke at east
+                this.draw.AddCircle(this.W2S(origin), d.OuterRadius * this.scale, color, 48, thickness);
+                this.draw.AddCircle(this.W2S(origin), d.InnerRadius * this.scale, color, 48, thickness);
+                return;
+            case AOEShapeCustom custom:
+                var delta = custom.PolygonOrigin - this.Center;
+                foreach (var part in custom.Polygon.Parts)
+                {
+                    this.PolylineRel(part.Exterior, delta, color, thickness, closed: true);
+                    for (var h = 0; h < part.HoleStarts.Count; ++h)
+                        this.PolylineRel(part.Interior(h), delta, color, thickness, closed: true);
+                }
+                return;
         }
         foreach (var loop in shape.Contours(origin, rotation))
             this.Polyline(loop, color, thickness, closed: true);
@@ -217,16 +199,14 @@ public sealed class ImGuiArena : Arena
     public override void AddLine(WPos a, WPos b, uint color, float thickness = 1f)
         => this.draw.AddLine(this.W2S(a), this.W2S(b), color, thickness);
 
+    /// <summary>A filled triangle, cut to the field when zones are. No outline: modules tile areas with these, and an
+    /// outline would draw every seam.</summary>
     public override void AddTriangleFilled(WPos a, WPos b, WPos c, uint color)
     {
         if (this.ClipZones)
         {
-            IReadOnlyList<IReadOnlyList<WPos>> loops = [new[] { a, b, c }];
-            if (this.NeedsClip(loops))
-            {
-                this.FillClipped(loops, color);
-                return;
-            }
+            this.DrawMesh(this.meshes.GetTriangle(a, b, c), color, outline: false);
+            return;
         }
 
         this.draw.AddTriangleFilled(this.W2S(a), this.W2S(b), this.W2S(c), color);
@@ -322,21 +302,20 @@ public sealed class ImGuiArena : Arena
     }
 
     /// <summary>
-    /// Paint over everything drawn outside the arena boundary with <paramref name="background"/>, so
-    /// AOE fills that extend past the arena are cut off at the edge (we have no polygon-clipping, so
-    /// this masks rather than clips). Works for any arena that is star-shaped from its centre — every
-    /// shape we use (circle, square, rect, donut, convex polygon): each boundary edge is extruded
-    /// radially outward far enough to cover the canvas, tiling the whole exterior with no corner gaps.
-    /// For a donut it also fills the inner hole. Call after module content, then redraw the boundary.
-    /// </summary>
-    /// <summary>
     /// Hide everything drawn beyond the arena edge by painting over it with <paramref name="background"/>.
+    /// Works for any arena that is star-shaped from its centre — every shape we use (circle, square, rect,
+    /// donut, convex polygon): each boundary edge is extruded radially outward far enough to cover the
+    /// canvas, tiling the whole exterior with no corner gaps. For a donut it also fills the inner hole.
+    /// Call after module content, then redraw the boundary.
     /// <para>The colour is used exactly as given, alpha included. A translucent one dims the overspill
     /// rather than erasing it — painting over is all this can do, so partial opacity means partial hiding.
-    /// </para>
+    /// A fully transparent one hides nothing, so nothing is drawn.</para>
     /// </summary>
     public void ClipOutsideArena(uint background)
     {
+        if ((background >> 24) == 0u)
+            return;
+
         const float k = 4f; // radial blow-up factor; boundary sits at ~half-canvas so 4x always clears the corners
         // The mask is emitted after any widgets the host window already submitted, so without a clip rect it
         // paints straight over them — a playback toolbar disappears under the very mask meant to tidy the
@@ -369,6 +348,53 @@ public sealed class ImGuiArena : Arena
     // --- helpers ---
 
     /// <summary>
+    /// A zone's mesh: its triangles written straight into the draw list (one reservation, not one call per
+    /// triangle), then its outline at full alpha.
+    /// <para>Raw triangles carry no anti-aliased fringe, so two sharing an edge meet without the hairline seam
+    /// ImGui's own fill leaves there; the outline gives the shape its smooth edge.</para>
+    /// </summary>
+    private void DrawMesh(ZoneMeshes.Mesh mesh, uint color, bool outline)
+    {
+        var verts = mesh.Vertices;
+        var indices = mesh.Indices;
+        if (verts.Length > 0 && indices.Length > 0)
+        {
+            if (verts.Length >= ushort.MaxValue)
+            {
+                // past what one 16-bit reservation can address: a custom polygon this large is not expected, but
+                // drawn a triangle at a time it still draws
+                var aa = this.SuspendAntiAliasedFill();
+                for (var i = 0; i + 2 < indices.Length; i += 3)
+                    this.draw.AddTriangleFilled(this.R2S(verts[indices[i]]), this.R2S(verts[indices[i + 1]]), this.R2S(verts[indices[i + 2]]), color);
+                this.draw.Flags = aa;
+            }
+            else
+            {
+                // PrimReserve may open a new draw command (a new vertex offset) when this list nears 65,536 vertices,
+                // so the base index is read after it
+                this.draw.PrimReserve(indices.Length, verts.Length);
+                var uv = this.draw.Data.Handle->TexUvWhitePixel;
+                var vtx = this.draw.VtxWritePtr.Handle;
+                var idx = this.draw.IdxWritePtr;
+                var baseIndex = this.draw.VtxCurrentIdx;
+                for (var i = 0; i < verts.Length; ++i)
+                    vtx[i] = new ImDrawVert(this.R2S(verts[i]), uv, color);
+                for (var i = 0; i < indices.Length; ++i)
+                    idx[i] = (ushort)(baseIndex + (uint)indices[i]);
+                this.draw.VtxWritePtr = new ImDrawVertPtr(vtx + verts.Length);
+                this.draw.IdxWritePtr = idx + indices.Length;
+                this.draw.VtxCurrentIdx = baseIndex + (uint)verts.Length;
+            }
+        }
+
+        if (!outline)
+            return;
+        var outlineColor = WithAlpha(color, 255);
+        foreach (var o in mesh.Outlines)
+            this.PolylineRel(o.Points, default, outlineColor, 1.5f, o.Closed);
+    }
+
+    /// <summary>
     /// Turns anti-aliased fill off for a run of triangles that tile one surface, returning the previous
     /// flags to restore. ImGui's AA fill insets each triangle by half a pixel and feathers the edge, so
     /// two triangles sharing an edge never reach full opacity along it and whatever is underneath bleeds
@@ -382,164 +408,27 @@ public sealed class ImGuiArena : Arena
         return saved;
     }
 
-    /// <summary>
-    /// Fill a closed loop that may be concave. A boulder's shadow is an annular sector, and the convex fan
-    /// used elsewhere would paint straight across its hollow — turning "stand behind the rock" into a solid
-    /// wedge that covers the rock itself.
-    /// </summary>
-    private void FillPolygon(IReadOnlyList<WPos> contour, uint color)
-    {
-        if (contour.Count < 3)
-            return;
-        var aa = this.SuspendAntiAliasedFill();
-        foreach (var (a, b, c) in EarClip.Triangulate(contour))
-            this.draw.AddTriangleFilled(this.W2S(contour[a]), this.W2S(contour[b]), this.W2S(contour[c]), color);
-        this.draw.Flags = aa;
-    }
-
-    /// <summary>
-    /// Whether any of <paramref name="loops"/> reaches outside the field. For the convex bounds a vertex
-    /// test is exact; a donut, polygon or custom field can be crossed by an edge whose ends are both inside,
-    /// so those always clip.
-    /// </summary>
-    private bool NeedsClip(IReadOnlyList<IReadOnlyList<WPos>> loops)
-    {
-        if (this.Bounds is not (ArenaBoundsCircle or ArenaBoundsSquare or ArenaBoundsRect))
-            return true;
-        foreach (var loop in loops)
-            foreach (var p in loop)
-                if (!this.Bounds.Contains(this.Center, p))
-                    return true;
-        return false;
-    }
-
-    /// <summary>
-    /// Intersect the loops with the field and fill what is left: the triangles of the result, then its
-    /// outline -- which now runs along the arena edge where the shape used to leave it.
-    /// </summary>
-    private void FillClipped(IReadOnlyList<IReadOnlyList<WPos>> loops, uint color)
-    {
-        var subject = new PolygonClipper.Operand();
-        var offsets = new List<WDir>();
-        foreach (var loop in loops)
-        {
-            if (loop.Count < 3)
-                continue;
-            offsets.Clear();
-            foreach (var p in loop)
-                offsets.Add(p - this.Center);
-            subject.AddContour(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(offsets));
-        }
-
-        this.FillOperand(subject, color, clip: true);
-    }
-
-    /// <summary>A polygon with holes, offsets measured from <paramref name="polyOrigin"/>: filled, outlined, and cut to
-    /// the arena when zones are clipped.</summary>
-    private void FillComplex(RelSimplifiedComplexPolygon poly, WPos polyOrigin, uint color)
-    {
-        var subject = new PolygonClipper.Operand();
-        var delta = polyOrigin - this.Center;
-        var ring = new List<WDir>();
-        foreach (var part in poly.Parts)
-        {
-            AddRing(part.Exterior);
-            for (var h = 0; h < part.HoleStarts.Count; ++h)
-                AddRing(part.Interior(h));
-        }
-        this.FillOperand(subject, color, this.ClipZones);
-
-        void AddRing(ReadOnlySpan<WDir> vertices)
-        {
-            if (vertices.Length < 3)
-                return;
-            ring.Clear();
-            foreach (var v in vertices)
-                ring.Add(v + delta);
-            subject.AddContour(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(ring));
-        }
-    }
-
-    /// <summary>Fill and outline a polygon given relative to the arena centre, cut to the arena or not.</summary>
-    private void FillOperand(PolygonClipper.Operand subject, uint color, bool clip)
-    {
-        var clipped = clip ? this.clipper.Intersect(subject, this.BoundsOperand()) : this.clipper.Simplify(subject);
-        if (clipped.Parts.Count == 0)
-            return;
-
-        var aa = this.SuspendAntiAliasedFill();
-        foreach (var t in clipped.Triangulate())
-            this.draw.AddTriangleFilled(this.W2S(this.Center + t.A), this.W2S(this.Center + t.B), this.W2S(this.Center + t.C), color);
-        this.draw.Flags = aa;
-
-        var outline = WithAlpha(color, 255);
-        foreach (var part in clipped.Parts)
-        {
-            this.PolylineRel(part.Exterior, outline);
-            for (var h = 0; h < part.HoleStarts.Count; ++h)
-                this.PolylineRel(part.Interior(h), outline);
-        }
-    }
-
-    private void PolylineRel(ReadOnlySpan<WDir> ring, uint color, WDir delta = default, float thickness = 1.5f)
+    /// <summary>One polyline call per ring rather than one line per edge: half the vertices, and joined corners.</summary>
+    private void PolylineRel(ReadOnlySpan<WDir> ring, WDir delta, uint color, float thickness, bool closed)
     {
         if (ring.Length < 2)
             return;
-        var first = this.W2S(this.Center + delta + ring[0]);
-        var prev = first;
-        for (var i = 1; i < ring.Length; ++i)
-        {
-            var next = this.W2S(this.Center + delta + ring[i]);
-            this.draw.AddLine(prev, next, color, thickness);
-            prev = next;
-        }
-        this.draw.AddLine(prev, first, color, thickness);
+        if (this.points.Length < ring.Length)
+            this.points = new Vector2[ring.Length * 2];
+        for (var i = 0; i < ring.Length; ++i)
+            this.points[i] = this.R2S(ring[i] + delta);
+        this.draw.AddPolyline(ref this.points[0], ring.Length, color, closed ? ImDrawFlags.Closed : ImDrawFlags.None, thickness);
     }
 
-    /// <summary>
-    /// The field as a clipper operand, relative to the centre: the outer contour minus the donut hole and
-    /// any obstacles, built with the clipper itself so hole orientation is its problem, not ours. Cached
-    /// per bounds instance -- a FATE swaps in a new one when its radius changes, which invalidates it.
-    /// </summary>
-    private PolygonClipper.Operand BoundsOperand()
+    private void Polyline(IReadOnlyList<WPos> contour, uint color, float thickness, bool closed)
     {
-        if (this.clipBounds != null && ReferenceEquals(this.Bounds, this.clipBoundsFor))
-            return this.clipBounds;
-
-        RelSimplifiedComplexPolygon field;
-        if (this.Bounds is ArenaBoundsCustom custom && custom.Center.AlmostEqual(this.Center, 0.1f))
-        {
-            field = custom.Polygon;
-        }
-        else
-        {
-            var outer = new PolygonClipper.Operand(this.Offsets(this.Bounds.Contour(this.Center)));
-            var cutouts = new PolygonClipper.Operand();
-            var any = false;
-            if (this.Bounds.InnerContour(this.Center) is { } inner)
-            {
-                cutouts.AddContour(this.Offsets(inner));
-                any = true;
-            }
-            foreach (var obstacle in this.Bounds.Obstacles(this.Center))
-            {
-                cutouts.AddContour(this.Offsets(obstacle));
-                any = true;
-            }
-            field = any ? this.clipper.Difference(outer, cutouts) : this.clipper.Simplify(outer);
-        }
-
-        this.clipBoundsFor = this.Bounds;
-        this.clipBounds = new PolygonClipper.Operand(field);
-        return this.clipBounds;
-    }
-
-    private WDir[] Offsets(IReadOnlyList<WPos> contour)
-    {
-        var result = new WDir[contour.Count];
+        if (contour.Count < 2)
+            return;
+        if (this.points.Length < contour.Count)
+            this.points = new Vector2[contour.Count * 2];
         for (var i = 0; i < contour.Count; ++i)
-            result[i] = contour[i] - this.Center;
-        return result;
+            this.points[i] = this.W2S(contour[i]);
+        this.draw.AddPolyline(ref this.points[0], contour.Count, color, closed && contour.Count > 2 ? ImDrawFlags.Closed : ImDrawFlags.None, thickness);
     }
 
     private void FillConvex(IReadOnlyList<WPos> contour, uint color)
@@ -551,47 +440,6 @@ public sealed class ImGuiArena : Arena
         for (var i = 1; i < contour.Count - 1; ++i)
             this.draw.AddTriangleFilled(p0, this.W2S(contour[i]), this.W2S(contour[i + 1]), color);
         this.draw.Flags = aa;
-    }
-
-    private void FillDonut(WPos center, float inner, float outer, uint color)
-    {
-        const int seg = 48;
-        var step = Angle.TwoPI / seg;
-        var aa = this.SuspendAntiAliasedFill();
-        for (var i = 0; i < seg; ++i)
-        {
-            var a0 = new Angle(step * i).ToDirection();
-            var a1 = new Angle(step * (i + 1)).ToDirection();
-            var o0 = this.W2S(center + a0 * outer);
-            var o1 = this.W2S(center + a1 * outer);
-            var i0 = this.W2S(center + a0 * inner);
-            var i1 = this.W2S(center + a1 * inner);
-            this.draw.AddTriangleFilled(o0, o1, i1, color);
-            this.draw.AddTriangleFilled(o0, i1, i0, color);
-        }
-
-        this.draw.Flags = aa;
-    }
-
-    private void Polyline(IReadOnlyList<WPos> contour, uint color, float thickness, bool closed)
-    {
-        for (var i = 0; i < contour.Count - 1; ++i)
-            this.draw.AddLine(this.W2S(contour[i]), this.W2S(contour[i + 1]), color, thickness);
-        if (closed && contour.Count > 2)
-            this.draw.AddLine(this.W2S(contour[^1]), this.W2S(contour[0]), color, thickness);
-    }
-
-    private static List<WPos> RectPts(WPos origin, Angle rotation, float lenFront, float lenBack, float halfWidth)
-    {
-        var f = rotation.ToDirection();
-        var s = f.OrthoL();
-        return
-        [
-            origin + f * lenFront + s * halfWidth,
-            origin + f * lenFront - s * halfWidth,
-            origin - f * lenBack - s * halfWidth,
-            origin - f * lenBack + s * halfWidth,
-        ];
     }
 
     private static uint WithAlpha(uint color, byte alpha) => (color & 0x00FFFFFFu) | ((uint)alpha << 24);

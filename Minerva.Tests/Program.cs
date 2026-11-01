@@ -7213,6 +7213,136 @@ t.Section("A dashing boss: walk once it lands, not on every leg");
     t.True("a different target starts settled", settle.Settled(0x40000002ul, new WPos(40f, 0f), now.AddSeconds(2.1)));
 }
 
+t.Section("Radar zone meshes: the fast paths fill what Clipper2 does");
+{
+    // ZoneMeshes cuts zones to the field with Sutherland-Hodgman on convex fields and triangulates each shape its own
+    // way; the radar used to send everything through Clipper2. Every fast path is held against that, by area, over
+    // every field kind, shape and placement here.
+    var c = new WPos(100f, 100f);
+    (string Name, ArenaBounds Bounds, bool Convex)[] fields =
+    [
+        ("circle field", new ArenaBoundsCircle(20f), true),
+        ("square field", new ArenaBoundsSquare(20f), true),
+        ("square field turned 30 degrees", new ArenaBoundsSquare(20f, 30f.Degrees()), true),
+        ("rect field", new ArenaBoundsRect(15f, 25f), true),
+        ("32-gon custom field (Occult Crescent style)", new ArenaBoundsCustom([new Polygon(c, 22f, 32)]), true),
+        ("L-shaped polygon field (concave: Clipper2 path)", new ArenaBoundsPolygon(new WDir(-20, -20), new WDir(0, -20), new WDir(0, 0), new WDir(20, 0), new WDir(20, 20), new WDir(-20, 20)), false),
+        ("donut field (a hole: Clipper2 path)", new ArenaBoundsDonut(6f, 20f), false),
+    ];
+    (string Name, AOEShape Shape)[] shapes =
+    [
+        ("circle", new AOEShapeCircle(6f)),
+        ("big circle", new AOEShapeCircle(30f)),
+        ("donut", new AOEShapeDonut(4f, 12f)),
+        ("wide donut", new AOEShapeDonut(15f, 40f)),
+        ("cone", new AOEShapeCone(40f, 30f.Degrees())),
+        ("wide cone (concave)", new AOEShapeCone(25f, 150f.Degrees())),
+        ("tri-cone", new AOEShapeTriCone(20f, 45f.Degrees())),
+        ("donut sector", new AOEShapeDonutSector(8f, 20f, 45f.Degrees())),
+        ("rect", new AOEShapeRect(30f, 4f, 5f)),
+        ("rect with an offset", new AOEShapeRect(50f, 3f, 0f, 45f.Degrees())),
+        ("cross", new AOEShapeCross(25f, 3f)),
+        ("capsule", new AOEShapeCapsule(3f, 10f)),
+        ("arc capsule, one way", new AOEShapeArcCapsule(3f, 90f.Degrees(), c)),
+        ("arc capsule, the other way", new AOEShapeArcCapsule(4f, -120f.Degrees(), c)),
+    ];
+    WDir[] placements = [new(0f, 0f), new(3f, -2f), new(12f, 5f), new(-17f, 9f), new(0f, -19.5f), new(30f, 30f)];
+    float[] rotations = [0f, 37f, 145f, -90f];
+
+    var total = 0;
+    var cut = 0;
+    foreach (var (fname, bounds, convex) in fields)
+    {
+        var meshes = new ZoneMeshes();
+        meshes.BeginFrame(1, c, bounds, clip: true);
+        var misses = 0;
+        var strays = 0;
+        string? first = null;
+        foreach (var (sname, shape) in shapes)
+            foreach (var at in placements)
+                foreach (var deg in rotations)
+                {
+                    // an arc capsule starts on its orbit: place it there, at the placement's distance from the centre
+                    var origin = shape is AOEShapeArcCapsule ? c + new WDir(MathF.Max(at.Length(), 5f), 0f).Rotate(deg.Degrees()) : c + at;
+                    var fast = meshes.Build(shape, origin, deg.Degrees());
+                    var reference = meshes.BuildWithClipper(shape, origin, deg.Degrees());
+                    var a = fast.Area();
+                    var r = reference.Area();
+                    ++total;
+                    if (fast.Outlines.Any(o => !o.Closed))
+                        ++cut;
+                    if (MathF.Abs(a - r) > MathF.Max(0.005f * r, 0.02f))
+                    {
+                        ++misses;
+                        first ??= $"{sname} at +({at.X},{at.Z}) turned {deg}: {a:0.00} against {r:0.00}";
+                    }
+                    // on a convex field nothing drawn may leave it (a hair inward, for points on the edge itself)
+                    if (convex && fast.Vertices.Any(v => !bounds.Contains(c, c + (v * 0.999f))))
+                    {
+                        ++strays;
+                        first ??= $"{sname} at +({at.X},{at.Z}) turned {deg}: a vertex outside the field";
+                    }
+                }
+        t.True($"{fname}: every zone fills the area Clipper2 does{(first != null ? " -- first: " + first : "")}", misses == 0);
+        t.True($"{fname}: and none of it lies outside the field", strays == 0);
+    }
+    t.True($"{total} zone placements checked", total == fields.Length * shapes.Length * placements.Length * rotations.Length);
+    t.True("some were cut by the convex clip (open outline runs), so the fast clip was exercised", cut > 100);
+}
+
+t.Section("Radar zone meshes: outlines, clipping off, the frame cache");
+{
+    var c = new WPos(0f, 0f);
+    var field = new ArenaBoundsCircle(20f);
+    var meshes = new ZoneMeshes();
+    meshes.BeginFrame(1, c, field, clip: true);
+
+    var donut = meshes.Build(new AOEShapeDonut(4f, 10f), c, default);
+    t.True("a donut outlines as two closed circles, not one loop with a seam", donut.Outlines.Length == 2 && donut.Outlines.All(o => o.Closed));
+    t.Near("a donut's strip fills the ring", donut.Area(), MathF.PI * (100f - 16f), 1.5f);
+
+    var crossing = meshes.Build(new AOEShapeCapsule(3f, 10f), new WPos(15f, 0f), 90f.Degrees());
+    t.True("a capsule crossing a circular field is cut there (open outline runs)", crossing.Outlines.Length > 0 && crossing.Outlines.All(o => !o.Closed));
+    t.True("and keeps no vertex outside it", crossing.Vertices.All(v => v.Length() <= 20.001f));
+
+    var unclipped = new ZoneMeshes();
+    unclipped.BeginFrame(1, c, field, clip: false);
+    var whole = unclipped.Build(new AOEShapeCapsule(3f, 10f), new WPos(15f, 0f), 90f.Degrees());
+    t.True("with clipping off the same capsule runs past the edge", whole.Vertices.Any(v => v.Length() > 20.5f));
+    t.True("and fills more than the clipped one", whole.Area() > crossing.Area() + 5f);
+
+    var tri = meshes.GetTriangle(new WPos(0f, 0f), new WPos(40f, 0f), new WPos(0f, 40f));
+    t.True("a filled triangle is cut to the field too", tri.Vertices.All(v => v.Length() <= 20.001f) && tri.Area() < 0.5f * 40f * 40f);
+
+    // the cache: kept by value, while used, until the field changes
+    var cache = new ZoneMeshes();
+    cache.BeginFrame(10, c, field, clip: true);
+    var first = cache.Get(new AOEShapeCircle(6f), new WPos(5f, 5f), default);
+    t.True("a new circle object of the same radius at the same spot reuses the mesh (Arena.ZoneCircle makes one per call)",
+        ReferenceEquals(first, cache.Get(new AOEShapeCircle(6f), new WPos(5f, 5f), default)));
+    t.True("a different radius does not", !ReferenceEquals(first, cache.Get(new AOEShapeCircle(7f), new WPos(5f, 5f), default)));
+    t.True("nor a different spot", !ReferenceEquals(first, cache.Get(new AOEShapeCircle(6f), new WPos(5f, 6f), default)));
+    t.True("nor a different rotation, for a shape that has one", !ReferenceEquals(
+        cache.Get(new AOEShapeRect(10f, 2f), new WPos(5f, 5f), 10f.Degrees()), cache.Get(new AOEShapeRect(10f, 2f), new WPos(5f, 5f), 11f.Degrees())));
+    var kept = cache.CachedCount;
+    var custom = new AOEShapeCustom([new Circle(new WPos(3f, 3f), 4f)]);
+    cache.Get(custom, default, default);
+    t.Eq("a custom shape is never kept (it can be rewritten in place)", cache.CachedCount, kept);
+
+    cache.BeginFrame(10, c, field, clip: true);
+    t.Eq("beginning the same frame again (a hit-test pass) drops nothing", cache.CachedCount, kept);
+    cache.BeginFrame(11, c, field, clip: true);
+    cache.Get(new AOEShapeCircle(6f), new WPos(5f, 5f), default);
+    cache.BeginFrame(12, c, field, clip: true);
+    t.Eq("a frame later, only the mesh used in between is still kept", cache.CachedCount, 1);
+    t.True("and it is the same mesh", ReferenceEquals(first, cache.Get(new AOEShapeCircle(6f), new WPos(5f, 5f), default)));
+    cache.BeginFrame(13, c, new ArenaBoundsCircle(20f), clip: true);
+    t.Eq("a new bounds object drops everything", cache.CachedCount, 0);
+    cache.Get(new AOEShapeCircle(6f), new WPos(5f, 5f), default);
+    cache.BeginFrame(14, new WPos(1f, 0f), field, clip: true);
+    t.Eq("so does a new centre", cache.CachedCount, 0);
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
