@@ -59,10 +59,14 @@ sealed class ToxicBreathBoss(ModuleBase module) : Components.GenericAOEs(module)
     private readonly List<AOEInstance> aoes = [];
     private readonly AOEShapeCone shape = new(60.0f, 60.0f.Degrees());
 
+    // The breath's first hit lands about 2.7s after the cast bar ends (2.70, 2.70 and 2.78s, 2026-10-31), then five more
+    // a second apart. Timed to the bar's end, the dodge believed it had a second to leave a 120 degree cone and cut
+    // through the Poison Clouds to do it: Xia was hit by one at 157s. Timed 2.4s after the bar (see PoisonClouds for
+    // the replays; 2.0 and 1.5s were tried and kept the dodge closer to the clouds for no fewer hits).
     public override void OnCastStarted(Actor caster, ActorCastInfo spell) {
         if (spell.Action.ID == (uint)AID.ToxicBreathBoss) {
             var origin = Module.Center - Module.Bounds.Radius * spell.Rotation.ToDirection();
-            aoes.Add(new(shape, origin, spell.Rotation, Module.CastFinishAt(spell)));
+            aoes.Add(new(shape, origin, spell.Rotation, Module.CastFinishAt(spell, 2.4d)));
         }
     }
 
@@ -111,33 +115,62 @@ sealed class MagitekArmorPuddles(ModuleBase module) : Components.Voidzone(module
     }
 }
 
+// The clouds drift: each waits 0.5 to 1s, turns about, and goes straight at about 2 y/s for 5 to 17s, heading opposite
+// the way it faced on spawning (68 clouds measured, 2026-10-31); twenty and more are up at once. Drawn only where it is,
+// a cloud coming at the character was stepped clear of by a yalm, then caught again, over and over, against the walk
+// back into melee (the user: "he manually moved out of the way of them"; Xia, 2026-10-31).
+//
+// So the next 8 yalms of each cloud's path cost the dodge 8 yalms of walking to land in: it steps off the path, not
+// along it. A cost, not a forbidden zone as Wyvern's whirlwinds have: forbidden, twenty lanes boxed in the escape from
+// Toxic Breath and it took more ticks (9 against 6 in 18 replays). Replayed closed-loop with the melee walk, six runs
+// at three clearance leads, with Toxic Breath's timing: Toxic Breath ticks 6 -> 3, tenths of a second within 2y of a
+// cloud 161 -> 67, within 1y 21 -> 2, melee uptime 60.6 -> 63.0%.
 sealed class PoisonClouds(ModuleBase module) : Components.GenericAOEs(module) {
-    private AOEInstance[] aoes = [];
-    private readonly List<Actor> puddles = [];
+    private const float Speed = 2.0f;
+    private const int SecondsAhead = 4;
+    private const float LanePenalty = 4.0f;  // goal score: 2 yalms of walking each
+    private readonly List<AOEInstance> aoes = [];
+    private readonly List<(WPos origin, Angle heading)> lanes = [];
+    private readonly List<(Actor actor, WDir travel)> puddles = [];
     private readonly AOEShapeCapsule shape = new(2.0f, 2.5f);
+    private readonly AOEShapeCapsule laneShape = new(2.0f, Speed * SecondsAhead);
 
     public override void OnActorCreated(Actor actor) {
         if (actor.OID is (uint)OID.PoisonCloud) {
-            puddles.Add(actor);
+            puddles.Add((actor, -actor.Rotation.ToDirection()));
         }
     }
 
     public override void OnActorDestroyed(Actor actor) {
         if (actor.OID is (uint)OID.PoisonCloud) {
-            puddles.Remove(actor);
+            puddles.RemoveAll(p => p.actor == actor);
         }
     }
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) {
-        return aoes;
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(aoes);
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        base.AddAIHints(slot, actor, assignment, hints);
+        if (lanes.Count == 0) {
+            return;
+        }
+        var ahead = lanes.ToArray();
+        hints.GoalZones.Add(p => {
+            foreach (var (origin, heading) in ahead) {
+                if (laneShape.Check(p, origin, heading)) {
+                    return -LanePenalty;
+                }
+            }
+            return 0f;
+        });
     }
 
     public override void Update() {
-        var count = puddles.Count;
-        aoes = new AOEInstance[count];
-        for (var i = 0; i < count; i++) {
-            var puddle = puddles[i];
-            aoes[i] = new(shape, puddle.Position, puddle.Rotation, color: Colors.Danger);
+        aoes.Clear();
+        lanes.Clear();
+        foreach (var (puddle, travel) in puddles) {
+            aoes.Add(new(shape, puddle.Position, puddle.Rotation, color: Colors.Danger));
+            lanes.Add((puddle.Position, Angle.FromDirection(travel)));
         }
     }
 }
