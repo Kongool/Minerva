@@ -25,6 +25,11 @@ public static class Incapacitation
         (3007u, "petrified"),    // seen: Eye to Eye, 2026-09-05
         (1958u, "terrified"),
         (4235u, "rooted by your own Rage"),   // seen: Phantom Berserker's Rage, ten seconds, Forbidden Folios 2026-09-14
+        // seen: Lauda's Unseen Force, 2026-11-03: bound 7.0s, then petrified 1-2s. Unlisted, the walk to the Shockwave's
+        // end nub counted as stuck while bound, and walks stood down until too late to get there (20:42, both times).
+        (5555u, "bound"),
+        (4891u, "petrified"),
+        (3519u, "frozen"),       // seen: Chimera's Ram's Keeper ice, Deep Freeze, 10s, 2026-11-03
     ];
 
     /// <summary>The state this actor is stuck in ("stunned", "bound", ...), or null when it can move.</summary>

@@ -145,6 +145,12 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
             return;
         }
 
+        // Not while an Unseen Force push is coming: keeping the familiar out of the swing forbids a 100y cone from Lauda
+        // toward it, which covered the whole end the push has to start from (20:42, 2026-11-03).
+        if (Module.FindComponent<UnseenForce>()?.PushedBefore(actor, DateTime.MaxValue) == true) {
+            return;
+        }
+
         foreach (var (origin, target, angle) in OriginsAndTargets()) {
             if (actor != target) {
                 hints.AddForbiddenZone(Shape, origin.Position, angle, World.FutureTime(1.5d));
@@ -347,6 +353,7 @@ sealed class OverpoweringPointAim(ModuleBase module) : ModuleComponent(module) {
                 continue;
             }
 
+            List<(float Bearing, float Half)> cones = [];
             foreach (var thanatos in Module.Enemies((uint)OID.ThanatosIdlePiece)) {
                 if (thanatos.IsDeadOrDestroyed) {
                     continue;
@@ -360,7 +367,11 @@ sealed class OverpoweringPointAim(ModuleBase module) : ModuleComponent(module) {
                 }
 
                 // standing anywhere in this cone aims the source's line within reach of the Thanatos
-                aimedAtOne.Add(new SDCone(source.Position, 100.0f, Angle.FromDirection(toThanatos), Angle.Asin(reach / distance)));
+                cones.Add((Angle.FromDirection(toThanatos).Rad, Angle.Asin(reach / distance).Rad));
+            }
+
+            if (cones.Count > 0) {
+                aimedAtOne.Add(new SDSharedApexCones(source.Position, [.. cones]));
             }
         }
 
@@ -378,6 +389,32 @@ sealed class OverpoweringPointAim(ModuleBase module) : ModuleComponent(module) {
         if (tethers.Any(t => t.Target == actor.InstanceID)) {
             hints.Add("Aim the lines north or south, off the Thanatos on the walls");
         }
+    }
+}
+
+/// <summary>
+/// Cones that all start at one point, each a bearing and a half-angle, of unlimited reach. The bearing to a point is taken
+/// once and compared with each, where an SDCone per Thanatos rebuilt its edges for every point: about 40 of them cost 19us
+/// a point, the dodge measured the aim ~8,000 times a solve, and solves took 150ms (frame drops at 4:04 on 2026-11-03).
+/// Signed distance to the nearest cone edge (from the apex once that edge is more than 90 degrees round).
+/// </summary>
+sealed class SDSharedApexCones(WPos origin, (float Bearing, float Half)[] cones) : ShapeDistance {
+    public override float Distance(WPos p) {
+        var off = p - origin;
+        var d = off.Length();
+        if (d < 1e-4f) {
+            return 0f;
+        }
+
+        var bearing = MathF.Atan2(off.X, off.Z);   // Angle.FromDirection
+        var outside = float.MaxValue;               // radians outside the nearest cone, negative inside one
+        foreach (var (coneBearing, half) in cones) {
+            var diff = bearing - coneBearing;
+            diff -= MathF.Round(diff / Angle.TwoPI) * Angle.TwoPI;
+            outside = MathF.Min(outside, MathF.Abs(diff) - half);
+        }
+
+        return outside >= MathF.PI / 2f ? d : d * MathF.Sin(outside);
     }
 }
 
@@ -672,6 +709,9 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
             var start = ChooseEnd(slot, actor, expireAt);
             // everything but the nub is forbidden, at MaxValue: a stand-here instruction (AIHints.PositioningZones)
             hints.AddForbiddenZone(new SDInvertedCircle(start, EndRadius), DateTime.MaxValue);
+            // While real danger covers the nub, the instruction is set aside and the dodge went anywhere safe: 30y off
+            // under the 20:42 Combusting Blades, with 3.2s to walk back once they went off. The pull keeps it close.
+            hints.GoalZones.Add(AIHints.GoalProximity(start, 25.0f, 10.0f));
             if ((expireAt - World.CurrentTime).TotalSeconds <= TurnLeadSeconds) {
                 // the facing that pushes down the floor; every other heading is a forbidden arc, as for a gaze
                 var facing = PushFrom(start) - offset;
@@ -783,6 +823,55 @@ sealed class GuttlerGlutter(ModuleBase module) : Components.SimpleKnockbacks(mod
             if (Casters.Count > 0) {
                 Casters.RemoveAt(0);
             }
+        }
+    }
+
+    // The finisher pushes 20y straight away from Lauda. Korha stood 12.9y north of her and landed at (524.2,-450.6), off
+    // the floor, and the Burns finished her (20:42, 2026-11-03). From her centre a 20y push stays on the 20-by-50 floor only
+    // from a strip on her north-south line: 3-4y out lands 1-2y short of an end nub's tip, and the push spreads any
+    // sideways error 6-8 times, so the strip is 0.3y either side for the nub's 2.5. The user: "try for the strip".
+    // Only for the last seconds, since the swords at the ends have to die first (both alive cost 3,035 on the finisher).
+    private const double StripLeadSeconds = 4.5d;
+    private const float StripHalfWidth = 0.3f;
+    private const float LandShortOfTip = 1.5f;   // where in the nub the push should end, measured back from its tip
+    private const float LandTolerance = 0.5f;    // either side of that, along the line
+    private const float NubTipBeyondCentre = 2.5f;
+    private WPos? stripEnd;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        base.AddAIHints(slot, actor, assignment, hints);
+        stripEnd = null;
+        if (Casters.Count == 0) {
+            return;
+        }
+
+        var push = Casters[0];
+        if ((push.Activation - World.CurrentTime).TotalSeconds > StripLeadSeconds || IsImmune(slot, push.Activation)) {
+            return;
+        }
+
+        // the nearer end first, the other when Lauda stands too close to it for the strip to fit
+        var nearNorth = (actor.Position - MoltenMetalBait.NorthEnd).LengthSq() < (actor.Position - MoltenMetalBait.SouthEnd).LengthSq();
+        foreach (var end in nearNorth ? new[] { MoltenMetalBait.NorthEnd, MoltenMetalBait.SouthEnd } : new[] { MoltenMetalBait.SouthEnd, MoltenMetalBait.NorthEnd }) {
+            var toEnd = end - push.Origin;
+            var land = toEnd.Length() + NubTipBeyondCentre - LandShortOfTip;   // how far from Lauda the push should end
+            var from = land - push.Distance - LandTolerance;
+            if (from < 2.5f) {
+                continue;   // too near her centre: the push would spread the error more than the nub can take
+            }
+
+            var dir = toEnd.Normalized();
+            hints.AddForbiddenZone(new SDInvertedRect(push.Origin + (from * dir), dir, 2.0f * LandTolerance, 0.0f, StripHalfWidth), DateTime.MaxValue);
+            hints.GoalZones.Add(AIHints.GoalProximity(push.Origin + ((from + LandTolerance) * dir), 15.0f, 10.0f));
+            stripEnd = end;
+            return;
+        }
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints) {
+        base.AddHints(slot, actor, hints);
+        if (stripEnd is { } end) {
+            hints.Add($"Guttler Glutter: stand 3-4y {(end == MoltenMetalBait.NorthEnd ? "north" : "south")} of Lauda, on her centre line");
         }
     }
 }

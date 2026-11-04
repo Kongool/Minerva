@@ -920,7 +920,8 @@ public sealed class AIHints
         var soonest = float.MaxValue;
         foreach (var z in this.ForbiddenZones)
         {
-            if (!Touches(z, p, margin))
+            // a stand-here instruction is never danger (see ZoneTouches)
+            if (z.Activation == DateTime.MaxValue || !Touches(z, p, margin))
                 continue;
             if (leaving is { } start && Touches(z, start, leavingMargin ?? margin))
                 continue;
@@ -1216,7 +1217,8 @@ public sealed class AIHints
         for (var k = 0; k < count; ++k)
         {
             var z = this.ForbiddenZones[k];
-            if (!Touches(z, p, margin))
+            // a stand-here instruction is never danger (see ZoneTouches); its distance was measured and thrown away
+            if (z.Activation == DateTime.MaxValue || !Touches(z, p, margin))
                 continue;
 
             var seconds = z.Activation == default ? 0f : (float)(z.Activation - now).TotalSeconds;
@@ -1305,6 +1307,11 @@ public sealed class AIHints
         for (var k = 0; k < zones.Count; ++k)
         {
             var zone = zones[k];
+            // A stand-here instruction (PositioningZones) is never danger: every reader of these bits ignores a zone
+            // that is not live or risky, which it never is. It also has no bounding circle, so it was measured at every
+            // cell of both tables: 5,414 times a solve for Lauda's Overpowering Point aim, 2026-11-03.
+            if (zone.Activation == DateTime.MaxValue)
+                continue;
             var bit = 1ul << k;
             zone.CellRange(origin, cell, width, height, margin, out var x0, out var x1, out var z0, out var z1);
             for (var z = z0; z <= z1; ++z)

@@ -276,6 +276,35 @@ sealed class RamsKeeperIce(ModuleBase module) : Components.GenericAOEs(module)
     }
 
     public override void OnActorDestroyed(Actor actor) => puddles.RemoveAll(p => p.Ice == actor);
+
+    // The growing circle alone walked the player out a step at a time as it grew: 0.25y a frame from 208.7 on
+    // 2026-11-03 (19:06), until Dragon's Roar, cast by a boss 8.4y from the ice, left only ground inside it, and Korha
+    // was frozen at 17.6y. The user: "move outside the frost aura zone right away rather than inch out". So the player
+    // is also asked to stand clear of where it ends up, at once: 20y, which that pull bears out (frozen at 17.6y at
+    // 18.4s, never at 20.5-21y). Advice only: the growing circle stays the real danger, and a Roar that needs the
+    // ground still gets it.
+    private const float ClearOfCap = MaxRadius + 1f;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        if (puddles.Count == 0)
+            return;
+
+        var shapes = new ShapeDistance[puddles.Count + 1];
+        for (var i = 0; i < puddles.Count; ++i)
+            shapes[i] = new SDCircle(puddles[i].Ice.Position, ClearOfCap);
+        // Far ground is forbidden too, so the union reads as "stand anywhere but here", a stand-here instruction
+        // (AIHints.PositioningZones), rather than a bounded zone at MaxValue, which the dodge ignores.
+        shapes[^1] = new SDInvertedCircle(Module.Center, 1000f);
+        hints.AddForbiddenZone(new SDUnion(shapes), DateTime.MaxValue);
+    }
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc)
+    {
+        foreach (var (ice, _) in puddles)
+            Arena.AddCircle(ice.Position, MaxRadius, Colors.Danger);
+    }
 }
 
 sealed class ChimeraPieceStates : StateMachineBuilder

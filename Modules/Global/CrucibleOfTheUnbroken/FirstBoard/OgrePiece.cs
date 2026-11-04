@@ -38,6 +38,7 @@ public enum AID : uint
     BurningWard = 46918, // OgrePiece->self, 3.0s cast, single-target : Invincibility shield for OgrePiece
     ScorchedEarth = 46919, // WispPiece->self, no cast, range 60 circle
     ScorchedEarth1 = 49728, // GreatWispPiece->self, no cast, range 60 circle
+    StraightPunch = 46920, // OgrePiece->player, 5.0s cast (4.7 seen), single-target, range 100
     FireCall = 46921, // OgrePiece->self, 4.0s cast, single-target : Summons BallOfFire and tethers to player
     ArmOfPurgatory = 46922, // BallOfFire->self, 1.0s cast, range 10 circle
 
@@ -69,6 +70,10 @@ sealed class BurningWardPuddle(ModuleBase module) : Components.Voidzone(module, 
 
 sealed class WispAdds(ModuleBase module)
     : Components.AddsMulti(module, [(uint)OID.WispPiece, (uint)OID.GreatWispPiece], 1);
+
+// Unlisted until 2026-11-03 (19:34), when it killed Korha: 237 on 214 HP left, at 163.5, with every familiar dead. Announced
+// as a tankbuster so the rotation plugin can Snarl it onto a familiar, or keep a defensive for it.
+sealed class StraightPunch(ModuleBase module) : Components.SingleTargetCast(module, (uint)AID.StraightPunch);
 
 sealed class RaidWideFires(ModuleBase module)
     : Components.RaidwideCasts(module, [(uint)AID.Allfire, (uint)AID.ScorchedEarth, (uint)AID.ScorchedEarth1]);
@@ -126,6 +131,7 @@ sealed class OgrePieceStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<ScorchingSmite>()
             .ActivateOnEnter<RaidWideFires>()
+            .ActivateOnEnter<StraightPunch>()
             .ActivateOnEnter<Magma>()
             .ActivateOnEnter<Magma1>()
             .ActivateOnEnter<MagmaPuddle>()
