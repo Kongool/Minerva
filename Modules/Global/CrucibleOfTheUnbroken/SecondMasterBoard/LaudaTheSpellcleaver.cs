@@ -297,6 +297,76 @@ sealed class OverpoweringPointFake(ModuleBase module) : Components.GenericAOEs(m
 sealed class OverpoweringPoint(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.OverpoweringPoint2, (uint)AID.OverpoweringPoint3],
     new AOEShapeRect(60.0f, 3.0f));
 
+/// <summary>
+/// Overpowering Point aims at the tethered player. Everything tethered to them (Lauda and the two Possessive Blades, or
+/// the blades alone) fires a 60y line from where it stands toward where the player is when the tether drops, 5.0s
+/// after it appears. The lines run on past the floor, and any idle Thanatos on the side walls one touches wakes up and
+/// goes for the familiar. On 2026-11-03 four woke at 75s and killed Korha's Behemoth by 87.5s (the user: "aim things
+/// not towards the thantos pieces along the sides"). Thunderbolt's line passes through them without waking any.
+///
+/// <para>So the tethered player is kept off every direction, seen from each tether source, that points a line at a
+/// sleeping Thanatos. What is left is the north and south ends of the floor, the stretch BossmodReborn only draws.
+/// This is advice: real danger still wins.</para>
+/// </summary>
+sealed class OverpoweringPointAim(ModuleBase module) : ModuleComponent(module) {
+    // The line's half-width plus a yalm: recorded hits reached 4.07 off the line with a 1.4 hitbox, a miss was at 4.1.
+    private const float LineReach = 3.0f + 1.0f;
+    private const float LineLength = 60.0f;
+    private readonly List<(Actor Source, ulong Target)> tethers = [];
+
+    public override void OnTethered(Actor source, in ActorTetherInfo tether) {
+        if (tether.ID == (uint)TetherID.OverpoweringPointTether) {
+            tethers.Add((source, tether.Target));
+        }
+    }
+
+    public override void OnUntethered(Actor source, in ActorTetherInfo tether) {
+        if (tether.ID == (uint)TetherID.OverpoweringPointTether) {
+            tethers.RemoveAll(t => t.Source == source);
+        }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        List<ShapeDistance> aimedAtOne = [];
+        foreach (var (source, target) in tethers) {
+            if (target != actor.InstanceID) {
+                continue;
+            }
+
+            foreach (var thanatos in Module.Enemies((uint)OID.ThanatosIdlePiece)) {
+                if (thanatos.IsDeadOrDestroyed) {
+                    continue;
+                }
+
+                var toThanatos = thanatos.Position - source.Position;
+                var distance = toThanatos.Length();
+                var reach = LineReach + thanatos.HitboxRadius;
+                if (distance <= reach || distance > LineLength + thanatos.HitboxRadius) {
+                    continue;
+                }
+
+                // standing anywhere in this cone aims the source's line within reach of the Thanatos
+                aimedAtOne.Add(new SDCone(source.Position, 100.0f, Angle.FromDirection(toThanatos), Angle.Asin(reach / distance)));
+            }
+        }
+
+        if (aimedAtOne.Count == 0) {
+            return;
+        }
+
+        // Far ground is forbidden too, so the union reads as "stand anywhere but here", a stand-here instruction
+        // (AIHints.PositioningZones), rather than a bounded zone at MaxValue, which the dodge ignores.
+        aimedAtOne.Add(new SDInvertedCircle(Module.Center, 1000.0f));
+        hints.AddForbiddenZone(new SDUnion([.. aimedAtOne]), DateTime.MaxValue);
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints) {
+        if (tethers.Any(t => t.Target == actor.InstanceID)) {
+            hints.Add("Aim the lines north or south, off the Thanatos on the walls");
+        }
+    }
+}
+
 sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
     private readonly AOEShapeCircle yellowCircle = new(12.0f);
     private readonly AOEShapeRect yellowRect = new(2.5f, 2.5f, 2.5f);
@@ -440,7 +510,33 @@ sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
     }
 }
 
+/// <summary>
+/// Molten Metal: 5.4s after the mark, a 6y circle drops where the marked player stands and the Molten Blade teleports
+/// there to cast Beastly Flare, which reaches the whole floor and falls off with distance (Korha took 913 at 9.2y,
+/// 1,107 at 12y, 614-879 at 35-37y across this fight and Guttler's, 2026-10-31 and 2026-11-03). Korha dropped the
+/// second one in the middle, where no spot on the 50y floor is far from it.
+///
+/// <para>So the marked player is sent to the end nub nearer them when the mark appears: 5.4s covers the 25y to
+/// either nub from the middle but not the 45y to the far one. The far end is then 45y from the blade. Either nub is
+/// clear of the Overpowering Point aim, which runs at the same time in the second Molten Metal. BossmodReborn's own
+/// version of this hint is commented out; Guttler's is a hard zone at (520,-400). This is advice: real danger still
+/// wins.</para>
+/// </summary>
 sealed class MoltenMetalBait(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeCircle(6.0f), (uint)IconID.MoltenMetalIcon, centerAtTarget: true) {
+    // the centres of the two end nubs in BuildArena
+    private static readonly WPos NorthEnd = new(520.0f, -442.5f);
+    private static readonly WPos SouthEnd = new(520.0f, -397.5f);
+    private const float EndRadius = 2.5f;
+    private WPos end;
+
+    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID) {
+        base.OnEventIcon(actor, iconID, targetID);
+        if (iconID == IID) {
+            var target = World.Actors.Find(targetID) ?? actor;
+            end = (target.Position - NorthEnd).LengthSq() < (target.Position - SouthEnd).LengthSq() ? NorthEnd : SouthEnd;
+        }
+    }
+
     public override void OnCastStarted(Actor caster, ActorCastInfo spell) {
         if (spell.Action.ID == (uint)AID.MoltenMetalBaitCircle) {
             CurrentBaits.Clear();
@@ -456,16 +552,20 @@ sealed class MoltenMetalBait(ModuleBase module) : Components.BaitAwayIcon(module
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
-        if (CurrentBaits.Count == 0) {
+        if (!CurrentBaits.Any(b => b.Target == actor)) {
             return;
         }
 
-        //hints.AddForbiddenZone(new SDInvertedCircle(new WPos(520.0f, -400.0f), 2.0f));
+        // everything but the nub is forbidden, at MaxValue: a stand-here instruction (AIHints.PositioningZones)
+        hints.AddForbiddenZone(new SDInvertedCircle(end, EndRadius), DateTime.MaxValue);
     }
 }
 sealed class MoltenMetalBaitAOE(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.MoltenMetalBaitCircle, 6.0f);
 
-sealed class BeastlyFlare(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.BeastlyFlare, 30.0f) {
+// It reaches the whole floor and falls off with distance (both casts hit Korha, 2026-11-03; see MoltenMetalBait): drawn
+// and dodged as before, and announced as a raidwide so a rotation plugin hears it coming, as Guttler's is. The
+// announcement stands while Deadly Demesne hides the circle, since the hit lands either way.
+sealed class BeastlyFlare(ModuleBase module) : Components.ProximityAOEs(module, (uint)AID.BeastlyFlare, 30.0f) {
     private readonly DeadlyDemesne? deadlyDemesne = module.FindComponent<DeadlyDemesne>();
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) {
@@ -607,6 +707,7 @@ sealed class LaudaTheSpellcleaverStates : StateMachineBuilder {
             .ActivateOnEnter<Thunderbolt>()
             .ActivateOnEnter<OverpoweringPointFake>()
             .ActivateOnEnter<OverpoweringPoint>()
+            .ActivateOnEnter<OverpoweringPointAim>()
             .ActivateOnEnter<Gyrocleave>()
             .ActivateOnEnter<MoltenMetalBait>()
             .ActivateOnEnter<MoltenMetalBaitAOE>()
