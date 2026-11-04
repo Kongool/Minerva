@@ -657,6 +657,8 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
     private static readonly Angle FacingTolerance = 10.0f.Degrees();
     private const double TurnLeadSeconds = 2.5d;
     private const double AfterWindowSeconds = 6.0d;
+    // the Shockwave lands 0.1-0.3s after the status runs out; one that has not come by this is not coming
+    private const double StaleAfterSeconds = 1.0d;
     private WPos? chosenEnd;
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status) {
@@ -674,7 +676,8 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell) {
         if (spell.Action.ID == (uint)AID.Shockwave) {
-            if (knockbacks.Count > 0) {
+            // the one it landed on, not simply the oldest: an older entry may be someone the push never reached
+            if (knockbacks.RemoveAll(k => k.player.InstanceID == spell.MainTargetID) == 0 && knockbacks.Count > 0) {
                 knockbacks.RemoveAt(0);
             }
         }
@@ -701,6 +704,11 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
     // Replaces the base's landing check: it counts a landing inside anything going off within 3s as a hit, and the
     // Gutting landing is 2.5y from safety with 2.9s to walk it.
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        // A push that never came is dropped. Xia died to Doom (his Demonic Helm) 1.8s before his Shockwave on 2026-11-03
+        // (21:35): the entry stayed, and its facing arc, now overdue, read as a gaze landing this instant, so GazeHold kept
+        // him still for the next 60s, through Gyrocleave (866) and two Magical Combustions (1,001 and 813).
+        var now = World.CurrentTime;
+        knockbacks.RemoveAll(k => k.player.IsDead || now > k.expireAt.AddSeconds(StaleAfterSeconds));
         foreach (var (player, offset, expireAt) in knockbacks) {
             if (player != actor) {
                 continue;
@@ -712,7 +720,9 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
             // While real danger covers the nub, the instruction is set aside and the dodge went anywhere safe: 30y off
             // under the 20:42 Combusting Blades, with 3.2s to walk back once they went off. The pull keeps it close.
             hints.GoalZones.Add(AIHints.GoalProximity(start, 25.0f, 10.0f));
-            if ((expireAt - World.CurrentTime).TotalSeconds <= TurnLeadSeconds) {
+            // Held through the snapshot, which can come a little after the status runs out; an overdue arc holds every step,
+            // so the entry is dropped StaleAfterSeconds past (above) and the hold cannot outlast that.
+            if ((expireAt - now).TotalSeconds <= TurnLeadSeconds) {
                 // the facing that pushes down the floor; every other heading is a forbidden arc, as for a gaze
                 var facing = PushFrom(start) - offset;
                 hints.ForbiddenDirections.Add((facing + 180.0f.Degrees(), 180.0f.Degrees() - FacingTolerance, expireAt));

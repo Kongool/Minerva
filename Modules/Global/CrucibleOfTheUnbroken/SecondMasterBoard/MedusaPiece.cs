@@ -306,6 +306,22 @@ sealed class MedusaPieceStates : StateMachineBuilder
 [ModuleInfo(CFCID = 1092u, NameID = 14660u, PrimaryActorOID = (uint)OID.MedusaPiece, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Minerva (from recordings)")]
 public sealed class MedusaPiece(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(120f, 0f), new ArenaBoundsRect(20f, 20f))
 {
+    // Lamias before Medusa, and both Lamias alike: the rotation plugin then keeps their HP even so they die together and
+    // neither is left to Raise the other (Daedalus's CombatRetargetPolicy.BalancePick). That only acts once a Lamia is its
+    // target, and with no kill order here it stayed on Medusa and never balanced (the roommate's pull, 2026-11-03). Ties
+    // go to the target already held, so the balance's switches stand. The Cyclopes are left unranked: the gaze shatters them.
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var e in hints.PotentialTargets)
+            e.Priority = e.Actor.OID switch
+            {
+                // a dead one waiting to be raised, or one not summoned yet, is still in the list: not a target
+                (uint)OID.LamiaPiece when e.Actor.IsTargetable && !e.Actor.IsDead && e.Actor.HPMP.CurHP > 0 => 2,
+                (uint)OID.MedusaPiece => 1,
+                _ => e.Priority,
+            };
+    }
+
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {
         Arena.Actor(PrimaryActor);
