@@ -153,23 +153,82 @@ sealed class AddTrack(ModuleBase module) : Components.AddsMulti(module, [(uint)O
     }
 }
 
+/// <summary>
+/// Veil of Darkness hides Boogyman (untargetable, Concealed) until a dying Light Sprite's Diffuse Light touches it.
+/// The light is a 20y cone, 22.5 each side, along the sprite's facing when it dies, and a sprite faces its target: the
+/// player, or the familiar, which holds a sprite's attention from its spawn until the player has hit it a while.
+/// While hidden, the boss teleports 16y out from the centre every ~9.3s and Feral Leaps onto the player 4.1s later.
+///
+/// <para>On 2026-11-03 (18:59) it stayed hidden 59s, from 53.0 to 112.3: all three sprites of the first wave missed,
+/// and the second wave came 37s later. Of the nine sprite deaths in both pulls, the three that faced the player with
+/// the boss on that side revealed it; two faced the player from the wrong side (145 and 41 degrees off); four faced the
+/// familiar. BossmodReborn's goal here sent the player to the far side of the sprite from the boss.</para>
+///
+/// <para>So one sprite is picked to be finished: one already facing the player if any, else the one being worked on,
+/// else the nearest. It is raised above the other sprites (the module's priorities, which the rotation plugin follows),
+/// and the player is kept on the boss's side of it, inside a cone narrower than the light, so its light covers the
+/// boss when it dies facing them. A sprite facing the familiar still shines where the familiar stands. This is advice:
+/// real danger still wins.</para>
+/// </summary>
 sealed class RevealMainBoss(ModuleBase module) : ModuleComponent(module) {
-    private bool reveal => !Module.PrimaryActor.IsTargetable && Module.Enemies((uint)OID.LightSprite).Any(actor => !actor.IsDead);
+    // a little inside the light's 22.5, for the boss's own steps and the player's
+    private static readonly Angle StandWithin = 20.0f.Degrees();
+    private const float StandRange = 40.0f;
+    public Actor? Focus { get; private set; }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
-        if (!reveal) {
+        var boss = Module.PrimaryActor;
+        Actor? nearest = null, facingPlayer = null, targeted = null;
+        var keep = false;
+        var lightPending = false;
+        if (!boss.IsTargetable && !boss.IsDeadOrDestroyed) {
+            foreach (var sprite in Module.Enemies((uint)OID.LightSprite)) {
+                lightPending |= sprite.CastInfo?.Action.ID == (uint)AID.DiffuseLight;
+                if (sprite.IsDead) {
+                    continue;
+                }
+
+                keep |= sprite == Focus;
+                if (sprite.InstanceID == actor.TargetID) {
+                    targeted = sprite;
+                }
+
+                var d = (sprite.Position - actor.Position).LengthSq();
+                if (nearest == null || d < (nearest.Position - actor.Position).LengthSq()) {
+                    nearest = sprite;
+                }
+
+                if (sprite.TargetID == actor.InstanceID
+                    && (facingPlayer == null || d < (facingPlayer.Position - actor.Position).LengthSq())) {
+                    facingPlayer = sprite;
+                }
+            }
+        }
+
+        // the rotation plugin hard-targets the sprite raised for it, so the player's target is normally this one
+        Focus = facingPlayer ?? targeted ?? (keep ? Focus : nearest);
+        // A dead sprite's light is already aimed; walking to the next sprite now crosses it (dodgesim, 18:59 pull).
+        if (Focus == null || lightPending) {
             return;
         }
 
-        var lightSprites = Module.Enemies((uint)OID.LightSprite).FirstOrDefault(sprite => !sprite.IsDead);
-        if (lightSprites == null) {
-            return;
-        }
-
-        var spriteToBoss = lightSprites.Position - Module.PrimaryActor.Position;
-        hints.GoalZones.Add(AIHints.GoalSingleTarget(lightSprites.Position + 2.0f * spriteToBoss.Normalized(), 1.0f, 2.0f));
+        // everything outside the cone from the sprite toward the boss is forbidden, at MaxValue: a stand-here
+        // instruction (AIHints.PositioningZones)
+        hints.AddForbiddenZone(new SDInvertedCone(Focus.Position, StandRange, Angle.FromDirection(boss.Position - Focus.Position), StandWithin),
+            DateTime.MaxValue);
     }
 
+    public override void AddHints(int slot, Actor actor, TextHints hints) {
+        if (Focus != null) {
+            hints.Add("Kill the marked Light Sprite from Boogyman's side, so its light points at him");
+        }
+    }
+
+    public override void DrawArenaForeground(int pcSlot, Actor pc) {
+        if (Focus != null) {
+            Arena.AddCircle(Focus.Position, Focus.HitboxRadius + 0.5f, Colors.Safe);
+        }
+    }
 }
 
 sealed class BoogymanPieceStates : StateMachineBuilder {
@@ -190,14 +249,18 @@ sealed class BoogymanPieceStates : StateMachineBuilder {
 
 [ModuleInfo(CFCID = 1092u, NameID = 14638u, PrimaryActorOID = (uint)OID.BoogymanPiece, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 public sealed class BoogymanPiece(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(120f, -420f), new ArenaBoundsCircle(20f)) {
+    private RevealMainBoss? reveal;
+
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        // the sprite RevealMainBoss lined the player up for is finished before the other sprites
+        var focus = (reveal ??= FindComponent<RevealMainBoss>())?.Focus;
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i) {
             var e = hints.PotentialTargets[i];
             e.Priority = e.Actor.OID switch {
                 (uint)OID.BombPiece => 4,
                 (uint)OID.DeepeyePiece => 3,
-                (uint)OID.LightSprite => 2,
+                (uint)OID.LightSprite => e.Actor == focus ? 3 : 2,
                 (uint)OID.BoogymanPiece => 1,
                 _ => 0
             };

@@ -163,6 +163,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             var started = Stopwatch.GetTimestamp();
             this.sync.Update(framework.UpdateDelta);
+            this.CheckHooks(framework.UpdateDelta);
             started = this.Timed(FrameCost.Stage.Sync, started);
             this.modules.Update();
             started = this.Timed(FrameCost.Stage.Modules, started);
@@ -197,6 +198,54 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception ex)
         {
             Service.Log.Error(ex, "Minerva sync tick failed.");
+        }
+    }
+
+    // Game-hook health per fight (WorldStateGameSync.HookReport): counted from the start of combat, said when it ends.
+    private double combatSeconds;
+    private bool combatHadModule;
+    private bool hooksWarned;
+
+    /// <summary>
+    /// Say when a fight went by without the game hooks firing. Nothing errors when they do not -- polling carries on and
+    /// the dalamud.log a user was asked to search had nothing in it -- but every zone that clears when its attack lands
+    /// stays up (Xia's Boogyman, 2026-11-03). Logged for every fight of 10s or more with a module, and on chat once a
+    /// session when the hooks look broken.
+    /// </summary>
+    private void CheckHooks(TimeSpan dt)
+    {
+        if (this.World.Party.Player() is { InCombat: true })
+        {
+            if (this.combatSeconds == 0d)
+                this.sync.ResetHookCounts();
+            this.combatSeconds += dt.TotalSeconds;
+            this.combatHadModule |= this.modules.ActiveModule != null;
+            return;
+        }
+
+        if (this.combatSeconds == 0d)
+            return;
+        var fought = this.combatSeconds;
+        var hadModule = this.combatHadModule;
+        this.combatSeconds = 0d;
+        this.combatHadModule = false;
+        if (fought < 10d)
+            return;
+
+        var (summary, broken) = this.sync.HookReport();
+        if (!broken)
+        {
+            if (hadModule)
+                Service.Log.Information($"Minerva: game hooks over {fought:0}s of combat: {summary}.");
+            return;
+        }
+
+        Service.Log.Warning($"Minerva: game hooks NOT firing over {fought:0}s of combat: {summary}. Zones that clear when their attack lands will stay up.");
+        if (!this.hooksWarned)
+        {
+            this.hooksWarned = true;
+            Service.ChatGui.Print($"[Minerva] Game hooks are not firing on this client ({summary}). Zones that clear when their attack lands will stay up. "
+                + "Search dalamud.log for 'Minerva: game hooks'.");
         }
     }
 

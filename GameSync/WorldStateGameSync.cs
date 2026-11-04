@@ -100,7 +100,37 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.actorCastHook = this.TryHook<ActorCastDelegate>("40 53 57 48 81 EC ?? ?? ?? ?? 48 8B FA 8B D1", this.ActorCastDetour, "ActorCast");
         this.actionEffectHook = this.TryHookAddress<ActionEffectHandler.Delegates.Receive>(
             ActionEffectHandler.Addresses.Receive.Value, this.ActionEffectDetour, "ActionEffect");
+
+        // One line saying which hooks this client has, to search a log for whether or not anything failed above.
+        Service.Log.Information($"Minerva: game hooks installed: ActionEffect {Installed(this.actionEffectHook)}, ActorCast {Installed(this.actorCastHook)}, "
+            + $"ActorControl {Installed(this.actorControlHook)}, MapEffect {Installed(this.mapEffectHook)}, RSVData {Installed(this.rsvHook)}.");
     }
+
+    private static string Installed(object? hook) => hook != null ? "yes" : "NO";
+
+    // --- hook health: how often each hook fired this fight, against the cast bars polling saw (HookReport) ---
+    private int actionEffectFires, actorCastFires, actorControlFires, mapEffectFires, polledCastStarts;
+
+    /// <summary>Start counting hook calls afresh, at the start of a fight.</summary>
+    public void ResetHookCounts()
+        => this.actionEffectFires = this.actorCastFires = this.actorControlFires = this.mapEffectFires = this.polledCastStarts = 0;
+
+    /// <summary>
+    /// How each game hook did over the fight just ended. Polling works without them, which is how a client can play a
+    /// whole fight with none and nothing errors: Xia's Boogyman recording (2026-11-03) has no resolved action, director
+    /// update or map effect, and every cast aimed at (0,0,0), so no zone that clears when its attack lands ever cleared.
+    /// Broken when no action resolved at all, or cast bars were seen and the cast hook never fired.
+    /// </summary>
+    public (string Summary, bool Broken) HookReport()
+    {
+        var broken = this.actionEffectFires == 0 || (this.polledCastStarts > 0 && this.actorCastFires == 0);
+        var summary = $"ActionEffect {Fired(this.actionEffectHook, this.actionEffectFires)}, ActorCast {Fired(this.actorCastHook, this.actorCastFires)} "
+            + $"(cast bars polled {this.polledCastStarts}), ActorControl {Fired(this.actorControlHook, this.actorControlFires)}, "
+            + $"MapEffect {Fired(this.mapEffectHook, this.mapEffectFires)}";
+        return (summary, broken);
+    }
+
+    private static string Fired(object? hook, int fires) => hook != null ? fires.ToString() : "not installed";
 
     /// <summary>Install a hook at a known address (FFXIVClientStructs), guarded like <see cref="TryHook"/>.</summary>
     private Hook<T>? TryHookAddress<T>(nint address, T detour, string name) where T : Delegate
@@ -139,6 +169,9 @@ public sealed unsafe class WorldStateGameSync : IDisposable
         this.actorControlHook?.Dispose();
         this.mapEffectHook?.Dispose();
         this.rsvHook?.Dispose();
+        // these two were never disposed: Dalamud logged '"Minerva" is leaking 2 hooks!' on every reload
+        this.actorCastHook?.Dispose();
+        this.actionEffectHook?.Dispose();
     }
 
     /// <summary>Run one sync tick. Call from <c>IFramework.Update</c>.</summary>
@@ -546,6 +579,8 @@ public sealed unsafe class WorldStateGameSync : IDisposable
 
         if (cur == null)
             this.castPositions.Remove(act.InstanceID);
+        else if (prev == null || prev.Action != cur.Action)
+            ++this.polledCastStarts;
 
         this.ws.Execute(new ActorState.OpCastInfo(act.InstanceID, cur));
     }
@@ -651,6 +686,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     /// </summary>
     private void ActionEffectDetour(uint casterID, Character* casterObj, Vector3* targetPos, ActionEffectHandler.Header* header, ActionEffectHandler.TargetEffects* effects, GameObjectId* targets)
     {
+        ++this.actionEffectFires;
         // Read the packet BEFORE handing it on, as BossmodReborn does, so nothing the game's handler does to its buffers
         // can reach what we record. Whether reading afterwards ever mattered is not known: until recording format 4 the
         // aim was not written down, so no recording could say (Philia's Fierce Beating, 2026-10-02, where two hits came
@@ -723,6 +759,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
     /// </summary>
     private void ActorCastDetour(uint casterID, ActorCastPacket* packet)
     {
+        ++this.actorCastFires;
         try
         {
             if (packet != null)
@@ -743,6 +780,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
 
     private void ActorControlDetour(uint actorID, uint category, uint p1, uint p2, uint p3, uint p4, uint p5, uint p6, uint p7, uint p8, ulong targetID, byte replaying)
     {
+        ++this.actorControlFires;
         this.actorControlHook!.Original(actorID, category, p1, p2, p3, p4, p5, p6, p7, p8, targetID, replaying);
         switch (category)
         {
@@ -786,6 +824,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
 
     private void MapEffectDetour(nint self, uint index, ushort s1, ushort s2)
     {
+        ++this.mapEffectFires;
         this.mapEffectHook!.Original(self, index, s1, s2);
         this.globalOps.Add(new WorldState.OpMapEffect((byte)index, s1 | ((uint)s2 << 16)));
     }

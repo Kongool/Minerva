@@ -111,8 +111,22 @@ public enum TetherID : uint {
     IndefatigableBladeTether = 5, // 4D22->LaudaTheSpellcleaver
 }
 
-sealed class GluttonousGutting(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GluttonousGutting, new AOEShapeRect(50.0f, 20.0f));
-sealed class GluttonousGoring(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GluttonousGoring, 40.0f);
+// Both land 2.9-3.2s after an Unseen Force push, and the push is the way out of them (see UnseenForce). Until it has
+// happened, where the player stands now says nothing about where they will be, so these do not steer the pushed player.
+sealed class GluttonousGutting(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GluttonousGutting, new AOEShapeRect(50.0f, 20.0f)) {
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        if (Casters.Count == 0 || Module.FindComponent<UnseenForce>()?.PushedBefore(actor, Casters[0].Activation) != true) {
+            base.AddAIHints(slot, actor, assignment, hints);
+        }
+    }
+}
+sealed class GluttonousGoring(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GluttonousGoring, 40.0f) {
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        if (Casters.Count == 0 || Module.FindComponent<UnseenForce>()?.PushedBefore(actor, Casters[0].Activation) != true) {
+            base.AddAIHints(slot, actor, assignment, hints);
+        }
+    }
+}
 
 sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID.AutoAttack, new AOEShapeCone(9.0f, 55.0f.Degrees())) {
     private readonly BeastlyAura? beastlyAura = module.FindComponent<BeastlyAura>();
@@ -524,8 +538,8 @@ sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
 /// </summary>
 sealed class MoltenMetalBait(ModuleBase module) : Components.BaitAwayIcon(module, new AOEShapeCircle(6.0f), (uint)IconID.MoltenMetalIcon, centerAtTarget: true) {
     // the centres of the two end nubs in BuildArena
-    private static readonly WPos NorthEnd = new(520.0f, -442.5f);
-    private static readonly WPos SouthEnd = new(520.0f, -397.5f);
+    internal static readonly WPos NorthEnd = new(520.0f, -442.5f);
+    internal static readonly WPos SouthEnd = new(520.0f, -397.5f);
     private const float EndRadius = 2.5f;
     private WPos end;
 
@@ -583,16 +597,43 @@ sealed class MagicalCombustion : Components.SimpleAOEs {
     }
 }
 
+/// <summary>
+/// Unseen Force: the player is bound for 7s and turned to face the way Lauda faces, or the opposite way. When the
+/// status runs out (12s the first time, 17s after), Shockwave pushes them 40y along their facing, forward if they were
+/// turned Lauda's way, backward if not. That is BossmodReborn's rule, and all five Shockwaves of 2026-11-03 fit it.
+///
+/// <para>The floor is 50y long and 20 wide, so the push stays on it only from an end, pointed down the length. All five
+/// pushes left it, and every one was followed by Burns (3065, then 3066) from the ground around the floor. The push is
+/// also the way out of what follows. Gluttonous Gutting covers everything south of Lauda at the north end 2.9s later:
+/// from the south end the push lands 2.5y short of safety behind her. Gluttonous Goring (40y from her) is the reverse:
+/// from the north end the push lands 2.5y short of the south nub.</para>
+///
+/// <para>So the player is sent to whichever end nub lands them nearest to clear ground against what goes off in the
+/// six seconds after the push, or the nearer end when nothing does. For the last 2.5s their facing is held down the
+/// floor, through the turning used for gazes. Both are advice; real danger still wins.</para>
+/// </summary>
 sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module) {
     private readonly List<(Actor player, Angle offset, DateTime expireAt)> knockbacks = [];
     private const float knockbackDistance = 40.0f;
+    private const float EndRadius = 2.5f;
+    // 40y pushed 10 degrees off the length drifts 7y sideways: still on the 20y floor from the middle of a nub
+    private static readonly Angle FacingTolerance = 10.0f.Degrees();
+    private const double TurnLeadSeconds = 2.5d;
+    private const double AfterWindowSeconds = 6.0d;
+    private WPos? chosenEnd;
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status) {
         if (status.ID == (uint)SID.UnseenForce) {
             var opposed = Module.PrimaryActor.Rotation.ToDirection().Dot(actor.Rotation.ToDirection()) < 0;
-            knockbacks.Add((actor, opposed ? 180f.Degrees() : default, status.ExpireAt));
+            // A recording carries no status duration (ReplayParser): it ran 12.0s the first time and 17.0s after, all
+            // five times on 2026-11-03.
+            var expireAt = status.ExpireAt != default ? status.ExpireAt : World.FutureTime(gains == 0 ? 12.0d : 17.0d);
+            ++gains;
+            knockbacks.Add((actor, opposed ? 180f.Degrees() : default, expireAt));
         }
     }
+
+    private int gains;
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell) {
         if (spell.Action.ID == (uint)AID.Shockwave) {
@@ -618,6 +659,75 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
         }
 
         return [];
+    }
+
+    // Replaces the base's landing check: it counts a landing inside anything going off within 3s as a hit, and the
+    // Gutting landing is 2.5y from safety with 2.9s to walk it.
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        foreach (var (player, offset, expireAt) in knockbacks) {
+            if (player != actor) {
+                continue;
+            }
+
+            var start = ChooseEnd(slot, actor, expireAt);
+            // everything but the nub is forbidden, at MaxValue: a stand-here instruction (AIHints.PositioningZones)
+            hints.AddForbiddenZone(new SDInvertedCircle(start, EndRadius), DateTime.MaxValue);
+            if ((expireAt - World.CurrentTime).TotalSeconds <= TurnLeadSeconds) {
+                // the facing that pushes down the floor; every other heading is a forbidden arc, as for a gaze
+                var facing = PushFrom(start) - offset;
+                hints.ForbiddenDirections.Add((facing + 180.0f.Degrees(), 180.0f.Degrees() - FacingTolerance, expireAt));
+            }
+
+            return;
+        }
+
+        chosenEnd = null;
+    }
+
+    public override void AddHints(int slot, Actor actor, TextHints hints) {
+        base.AddHints(slot, actor, hints);
+        if (chosenEnd is { } end && knockbacks.Any(k => k.player == actor)) {
+            hints.Add($"Shockwave: stand at the {(end == MoltenMetalBait.NorthEnd ? "north" : "south")} end, pushed down the floor");
+        }
+    }
+
+    /// <summary>Will this player be pushed before <paramref name="time"/>?</summary>
+    public bool PushedBefore(Actor actor, DateTime time) => knockbacks.Any(k => k.player == actor && k.expireAt < time);
+
+    // from the north nub the push goes south (+z), from the south nub north
+    private static Angle PushFrom(WPos end) => end == MoltenMetalBait.NorthEnd ? 0.0f.Degrees() : 180.0f.Degrees();
+
+    private WPos ChooseEnd(int slot, Actor actor, DateTime shove) {
+        var north = Clearance(slot, actor, MoltenMetalBait.NorthEnd + knockbackDistance * PushFrom(MoltenMetalBait.NorthEnd).ToDirection(), shove);
+        var south = Clearance(slot, actor, MoltenMetalBait.SouthEnd + knockbackDistance * PushFrom(MoltenMetalBait.SouthEnd).ToDirection(), shove);
+        if (Math.Abs(north - south) > 1.0f) {
+            chosenEnd = north > south ? MoltenMetalBait.NorthEnd : MoltenMetalBait.SouthEnd;
+        } else {
+            chosenEnd ??= (actor.Position - MoltenMetalBait.NorthEnd).LengthSq() < (actor.Position - MoltenMetalBait.SouthEnd).LengthSq()
+                ? MoltenMetalBait.NorthEnd : MoltenMetalBait.SouthEnd;
+        }
+
+        return chosenEnd.Value;
+    }
+
+    // How far a landing is from leaving the worst zone going off within six seconds of the push: positive is clear,
+    // negative is the walk still needed. Clear of everything when nothing goes off then.
+    private float Clearance(int slot, Actor actor, WPos landing, DateTime shove) {
+        var worst = float.MaxValue;
+        foreach (var component in Module.Components) {
+            if (component is not Components.GenericAOEs aoes) {
+                continue;
+            }
+
+            foreach (ref readonly var aoe in aoes.ActiveAOEs(slot, actor)) {
+                var after = (aoe.Activation - shove).TotalSeconds;
+                if (aoe.Risky && after >= 0.0d && after <= AfterWindowSeconds) {
+                    worst = Math.Min(worst, (aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation)).Distance(landing));
+                }
+            }
+        }
+
+        return worst;
     }
 }
 
