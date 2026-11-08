@@ -369,7 +369,7 @@ public sealed class RouteGrid
             var furthest = -1;
             for (var j = back.Count - 1; j >= at; --j)
             {
-                if (this.Shortcut(from, fromCost, fromLength, back[j], crossed[j]))
+                if (this.Shortcut(from, fromCost, fromLength, back[j], crossed[j]) && this.StaysOnFloor(from, back[j]))
                 {
                     furthest = j;
                     break;
@@ -440,6 +440,14 @@ public sealed class RouteGrid
         // steps. A real crossing of a puddle is many cells deep and still loses.
         return straight <= (this.cost[toIndex] - fromCost) + (this.cell * dearest);
     }
+
+    /// <summary>Does the straight line from <paramref name="from"/> to the path cell <paramref name="toIndex"/> stay on the
+    /// floor itself? The grid knows the floor only at cell centres, so a line it finds walkable can still clip a corner of
+    /// the floor by up to half a cell. Lauda, 2026-11-05 10:35: a leg cut 0.09y into the corner of a notch whose edge is
+    /// fire, and Korha took Burns there. A route kept from frame to frame is held to the same test
+    /// (<see cref="ArenaPathfinder.RouteStaysOnFloor"/>), which such a leg failed.</summary>
+    private bool StaysOnFloor(WPos from, int toIndex)
+        => ArenaPathfinder.RouteStaysOnFloor(this.hints, from, [this.Center(toIndex % this.w, toIndex / this.w)]);
 
     /// <summary>Is the straight line between these two points clear of anything solid?</summary>
     public bool Walkable(WPos from, WPos to)

@@ -362,8 +362,8 @@ public sealed class ArenaBoundsPolygon(params WDir[] offsets) : ArenaBounds(MaxA
 /// A mesh arena composed of absolute-world <see cref="Shape"/>s: the field is inside any of the
 /// <c>UnionShapes</c> and outside every <c>DifferenceShape</c> (holes/pits). Matches BossmodReborn's
 /// <c>ArenaBoundsCustom</c> constructor (BSD-3; see THIRD-PARTY-NOTICES.txt) so DT arena definitions paste
-/// in unchanged. Containment is exact (analytic per shape); Minerva has no polygon clipper, so the drawn
-/// boundary is the largest union operand's outline (the difference operands draw as an inner contour).
+/// in unchanged. Containment is exact (analytic per shape). <see cref="Contour"/> is only the largest union
+/// operand's outline; the radar draws and masks the combined floor (<see cref="Polygon"/>, via ZoneMeshes).
 /// Because the operands carry absolute coordinates, the arena center passed by the module is ignored here.
 /// </summary>
 public sealed class ArenaBoundsCustom : ArenaBounds
@@ -435,18 +435,33 @@ public sealed class ArenaBoundsCustom : ArenaBounds
 
     public override IReadOnlyList<WPos> Contour(WPos center) => LargestShape(this.UnionShapes).ContourWorld();
 
-    /// <summary>Each union polygon shrunk about its own centre, the holes left where they are. Only for a floor built
-    /// from <see cref="Polygon"/>s, which is every custom Occult Crescent arena; anything else comes back unchanged.</summary>
+    /// <summary>The floor's edge pulled in, the holes left where they are. A floor built from <see cref="Polygon"/>s,
+    /// which is every custom Occult Crescent arena, shrinks each about its own centre. Any other floor shrinks as one
+    /// outline: shrinking its pieces one by one would cut apart pieces that only touch, as Lauda's side nubs touch the
+    /// rectangle they hang off. Until 2026-11-05 such a floor came back unchanged, so a margin on it did nothing.</summary>
     public override ArenaBounds Inset(float margin)
     {
         var union = new Shape[this.UnionShapes.Length];
-        for (var i = 0; i < union.Length; ++i)
+        var polygons = true;
+        for (var i = 0; i < union.Length && polygons; ++i)
         {
-            if (this.UnionShapes[i] is not Polygon p)
-                return this;
-            union[i] = new Polygon(p.Center, MathF.Max(p.Radius - margin, 0f), p.Edges, p.Rotation);
+            if (this.UnionShapes[i] is Polygon p)
+                union[i] = new Polygon(p.Center, MathF.Max(p.Radius - margin, 0f), p.Edges, p.Rotation);
+            else
+                polygons = false;
         }
-        return new ArenaBoundsCustom(union, this.DifferenceShapes, MapResolution: this.MapResolution) { IsCircle = this.IsCircle };
+        if (polygons)
+            return new ArenaBoundsCustom(union, this.DifferenceShapes, MapResolution: this.MapResolution) { IsCircle = this.IsCircle };
+
+        var outlines = new List<Shape>();
+        var holes = new List<Shape>(this.DifferenceShapes);
+        foreach (var part in PolygonClipper.GetCombinedPolygon(this.Center, this.UnionShapes).Offset(-margin).Parts)
+        {
+            outlines.Add(new PolygonCustomRel(part.Exterior.ToArray(), this.Center));
+            for (var h = 0; h < part.HoleStarts.Count; ++h)
+                holes.Add(new PolygonCustomRel(part.Interior(h).ToArray(), this.Center));
+        }
+        return outlines.Count == 0 ? this : new ArenaBoundsCustom([.. outlines], [.. holes], MapResolution: this.MapResolution);
     }
 
     public override IReadOnlyList<IReadOnlyList<WPos>> Obstacles(WPos center)

@@ -151,6 +151,21 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
             return;
         }
 
+        // Nor while Guttler Glutter's push is lined up, for the same reason: the cone covered the strip on Lauda's centre
+        // line that keeps the push on the floor. Korha, 2026-11-05 06:37: the familiar appeared between her and Lauda as
+        // the cast bar ended (214.23), the dodge walked her 6y east out of the strip, and the push 1.05s later threw her
+        // off the east side (Burns).
+        if (Module.FindComponent<GuttlerGlutter>()?.HoldingStrip == true) {
+            return;
+        }
+
+        // Nor while Overpowering Point is aimed at the player: the cone covered the end of the floor the lines have to be
+        // aimed from. Saar, 2026-11-07 18:04:47: Lauda teleported to the centre with the Mandragora 2y south of her, the
+        // cone walked Saar off the south end, Gyrocleave sent her on to the west nub, and both lines woke a Thanatos.
+        if (Module.FindComponent<OverpoweringPointAim>()?.Aiming(actor) == true) {
+            return;
+        }
+
         foreach (var (origin, target, angle) in OriginsAndTargets()) {
             if (actor != target) {
                 hints.AddForbiddenZone(Shape, origin.Position, angle, World.FutureTime(1.5d));
@@ -346,6 +361,9 @@ sealed class OverpoweringPointAim(ModuleBase module) : ModuleComponent(module) {
         }
     }
 
+    /// <summary>Whether an Overpowering Point tether is on <paramref name="actor"/>.</summary>
+    public bool Aiming(Actor actor) => tethers.Any(t => t.Target == actor.InstanceID);
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
         List<ShapeDistance> aimedAtOne = [];
         foreach (var (source, target) in tethers) {
@@ -383,10 +401,17 @@ sealed class OverpoweringPointAim(ModuleBase module) : ModuleComponent(module) {
         // (AIHints.PositioningZones), rather than a bounded zone at MaxValue, which the dodge ignores.
         aimedAtOne.Add(new SDInvertedCircle(Module.Center, 1000.0f));
         hints.AddForbiddenZone(new SDUnion([.. aimedAtOne]), DateTime.MaxValue);
+
+        // Where the player stands when the tether drops is all that counts, so the spot is held until the last moment
+        // the walk out still makes it, not given up as soon as something it stands in comes within the horizon. Saar,
+        // 2026-11-07: Gyrocleave (the whole main floor, 6.9s) started 3.1s before the drop, the dodge went to the west
+        // nub at once, and the lines fired west. From the south end the nub is a 1.7s walk; the lines land 2.1s after
+        // the drop and the Gyrocleave 3.8s after.
+        hints.HoldPositioningLate = true;
     }
 
     public override void AddHints(int slot, Actor actor, TextHints hints) {
-        if (tethers.Any(t => t.Target == actor.InstanceID)) {
+        if (Aiming(actor)) {
             hints.Add("Aim the lines north or south, off the Thanatos on the walls");
         }
     }
@@ -424,6 +449,20 @@ sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
     private readonly AOEShapeCross greenCross = new(15.0f, 5.0f);
     private readonly AOEShapeRect greenRect = new(5.0f, 5.0f, 5.0f);
     private const float riskyWindow = 6.0f;
+
+    // A marker's parts go off at set times after it arms (animation 0x10002 or 0x10010), the earliest of 25 sets in
+    // Korha's pulls of 2026-11-05:
+    //  - the cage closes at 3.55-3.71s (Fetters: C12F green, C132 yellow), and keeps catching anyone who walks in until it opens;
+    //  - the yellow circle lands at 11.04-11.52s, the green cross at 12.11-12.21s.
+    // The first colour arms 0.3-0.7s after it appears, the second 7.5s after. BossmodReborn times them all from the
+    // appearance (the cages at 11-12s). The dodge looks 5s ahead, so:
+    //  - a cage closed on Korha (06:59), and two Rush lines and Life Claim's cross killed her in it;
+    //  - the second colour's circles went "live" 7.5s before they existed, and the whole floor read as danger. The way out
+    //    of a Molten Metal circle then went through a yellow cage (16:41, 297.55), and Cage of Molten Metal took her to 1,289.
+    private const double CageClosesAfterArm = 3.5d;
+    private const double CircleLandsAfterArm = 11.0d;
+    private const double CrossLandsAfterArm = 12.1d;
+    private const double ArmsAfterAppearing = 0.3d;   // until a marker arms: as the first colour does
     private readonly Rush? rush = module.FindComponent<Rush>();
 
     // All AOEs are separate due to how the aoes can either spawn in from renderflag only or EAnim
@@ -447,14 +486,14 @@ sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
         }
 
         if (actor.OID == (uint)OID.DeadlyDemesneGreen) {
-            greenAOEs.Add(new(greenCross, actor.Position, actor.Rotation, World.FutureTime(12.1f)));
-            greenCages.Add(new(greenRect, actor.Position, actor.Rotation, World.FutureTime(12.0f), color: Colors.Danger));
+            greenAOEs.Add(new(greenCross, actor.Position, actor.Rotation, World.FutureTime(ArmsAfterAppearing + CrossLandsAfterArm), actorID: actor.InstanceID));
+            greenCages.Add(new(greenRect, actor.Position, actor.Rotation, World.FutureTime(ArmsAfterAppearing + CageClosesAfterArm), color: Colors.Danger, actorID: actor.InstanceID));
             SortHelpers.SortAOEByActivation(greenAOEs);
         }
 
         if (actor.OID == (uint)OID.DeadlyDemesneYellow) {
-            yellowAOEs.Add(new(yellowCircle, actor.Position, actor.Rotation, World.FutureTime(11.1f)));
-            yellowCages.Add(new(yellowRect, actor.Position, actor.Rotation, World.FutureTime(11.0f), color: Colors.Danger));
+            yellowAOEs.Add(new(yellowCircle, actor.Position, actor.Rotation, World.FutureTime(ArmsAfterAppearing + CircleLandsAfterArm), actorID: actor.InstanceID));
+            yellowCages.Add(new(yellowRect, actor.Position, actor.Rotation, World.FutureTime(ArmsAfterAppearing + CageClosesAfterArm), color: Colors.Danger, actorID: actor.InstanceID));
             SortHelpers.SortAOEByActivation(yellowAOEs);
         }
     }
@@ -462,6 +501,13 @@ sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
     public override void OnActorEAnim(Actor actor, uint state) {
         if (actor.OID != (uint)OID.DeadlyDemesneGreen && actor.OID != (uint)OID.DeadlyDemesneYellow) {
             return;
+        }
+
+        // armed: time its parts from now
+        if (state is 65538 or 65552) {
+            var green = actor.OID == (uint)OID.DeadlyDemesneGreen;
+            Restamp(green ? greenCages : yellowCages, actor, CageClosesAfterArm);
+            Restamp(green ? greenAOEs : yellowAOEs, actor, green ? CrossLandsAfterArm : CircleLandsAfterArm);
         }
 
         if (state == 65538 && colourFirst == ColourType.NONE) {
@@ -481,6 +527,15 @@ sealed class DeadlyDemesne(ModuleBase module) : Components.GenericAOEs(module) {
 
             if (actor.OID == (uint)OID.DeadlyDemesneYellow) {
                 yellowCages.RemoveAt(0);
+            }
+        }
+    }
+
+    private void Restamp(List<AOEInstance> list, Actor marker, double seconds) {
+        var span = CollectionsMarshal.AsSpan(list);
+        for (var i = 0; i < span.Length; ++i) {
+            if (span[i].ActorID == marker.InstanceID) {
+                span[i].Activation = World.FutureTime(seconds);
             }
         }
     }
@@ -648,11 +703,18 @@ sealed class MagicalCombustion : Components.SimpleAOEs {
 /// <para>So the player is sent to whichever end nub lands them nearest to clear ground against what goes off in the
 /// six seconds after the push, or the nearer end when nothing does. For the last 2.5s their facing is held down the
 /// floor, through the turning used for gazes. Both are advice; real danger still wins.</para>
+///
+/// <para>While something going off before the push still covers the nub, the player waits where the nub can be walked
+/// to once it clears (see StagingRadius).</para>
 /// </summary>
 sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module) {
     private readonly List<(Actor player, Angle offset, DateTime expireAt)> knockbacks = [];
     private const float knockbackDistance = 40.0f;
     private const float EndRadius = 2.5f;
+    // The walk in has to end before the last 0.6s, when gazes stop all movement (GazeHold). The rest is room for the
+    // route bending round the floor, and for circles going off late: the 2026-11-04 Combustions took 5.06s on a 4.7s
+    // cast bar.
+    private const double StagingSpareSeconds = 1.5d;
     // 40y pushed 10 degrees off the length drifts 7y sideways: still on the 20y floor from the middle of a nub
     private static readonly Angle FacingTolerance = 10.0f.Degrees();
     private const double TurnLeadSeconds = 2.5d;
@@ -716,7 +778,7 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
 
             var start = ChooseEnd(slot, actor, expireAt);
             // everything but the nub is forbidden, at MaxValue: a stand-here instruction (AIHints.PositioningZones)
-            hints.AddForbiddenZone(new SDInvertedCircle(start, EndRadius), DateTime.MaxValue);
+            hints.AddForbiddenZone(new SDInvertedCircle(start, StagingRadius(slot, actor, start, expireAt)), DateTime.MaxValue);
             // While real danger covers the nub, the instruction is set aside and the dodge went anywhere safe: 30y off
             // under the 20:42 Combusting Blades, with 3.2s to walk back once they went off. The pull keeps it close.
             hints.GoalZones.Add(AIHints.GoalProximity(start, 25.0f, 10.0f));
@@ -758,6 +820,35 @@ sealed class UnseenForce(ModuleBase module) : Components.GenericKnockback(module
         }
 
         return chosenEnd.Value;
+    }
+
+    // How far from the start the player may wait: the nub itself, or, while something going off before the push still
+    // reaches it, as far as can be walked between that going off and the push. Korha, 2026-11-04 16:44: six Magical
+    // Combustions covered the north nub and the middle until 3s before her second push. With only the nub asked for,
+    // the instruction was set aside and the dodge waited in the south-west corner, 37y off. She was 16y short when the
+    // push came and went off the south end. The north-west corner, 12y from the nub, was clear and within reach.
+    private float StagingRadius(int slot, Actor actor, WPos start, DateTime shove) {
+        var now = World.CurrentTime;
+        var clears = DateTime.MinValue;
+        foreach (var component in Module.Components) {
+            if (component is not Components.GenericAOEs aoes) {
+                continue;
+            }
+
+            foreach (ref readonly var aoe in aoes.ActiveAOEs(slot, actor)) {
+                if (aoe.Risky && aoe.Activation > now && aoe.Activation < shove && aoe.Activation > clears
+                    && (aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation)).Distance(start) < EndRadius) {
+                    clears = aoe.Activation;
+                }
+            }
+        }
+
+        if (clears == DateTime.MinValue) {
+            return EndRadius;
+        }
+
+        var walk = Math.Max((shove - clears).TotalSeconds - StagingSpareSeconds, 0.0d);
+        return EndRadius + ((float)walk * ArenaPathfinder.DefaultMoveSpeed);
     }
 
     // How far a landing is from leaving the worst zone going off within six seconds of the push: positive is clear,
@@ -848,6 +939,10 @@ sealed class GuttlerGlutter(ModuleBase module) : Components.SimpleKnockbacks(mod
     private const float NubTipBeyondCentre = 2.5f;
     private WPos? stripEnd;
 
+    /// <summary>Is the player being held to the strip this frame? Set by this component's AddAIHints, which runs before the
+    /// cleave's (AutoAttack is activated last).</summary>
+    public bool HoldingStrip => stripEnd != null;
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
         base.AddAIHints(slot, actor, assignment, hints);
         stripEnd = null;
@@ -907,6 +1002,10 @@ sealed class Gyrocleave(ModuleBase module) : Components.SimpleAOEs(module, (uint
     }
 }
 
+// A woken Thanatos's Infernal Pain: range 40 from the wall, so the whole floor. Unlisted (BossmodReborn has no component
+// either), so SecondsUntilRaidwide never counted it down; it hit Saar for 406 and a Vulnerability Up (2026-11-07 18:05).
+sealed class InfernalPain(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.InfernalPain);
+
 sealed class LaudaTheSpellcleaverStates : StateMachineBuilder {
     public LaudaTheSpellcleaverStates(ModuleBase module) : base(module) {
         TrivialPhase()
@@ -927,12 +1026,18 @@ sealed class LaudaTheSpellcleaverStates : StateMachineBuilder {
             .ActivateOnEnter<UnseenForce>()
             .ActivateOnEnter<SearingAxe>()
             .ActivateOnEnter<GuttlerGlutter>()
+            .ActivateOnEnter<InfernalPain>()
             .ActivateOnEnter<AutoAttack>();
     }
 }
 
 [ModuleInfo(CFCID = 1092u, NameID = 14693u, PrimaryActorOID = (uint)OID.LaudaTheSpellcleaver, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "Equilius (ported from BMR)")]
 public sealed class LaudaTheSpellcleaver: ModuleBase {
+    // The floor's edge is fire (Burns), and it burns at the edge itself. Korha, 2026-11-05 10:35, 249.23: a route from the
+    // north-west nub to the south-west one passed 0.06y from the corner of the notch between them and she took Burns.
+    // Two more Burns, at 257.44 and in the 07:40 pull, came from walks back to Lauda straight across that notch.
+    protected override float BarrierMargin => 1.0f;
+
     protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
         var count = hints.PotentialTargets.Count;
         for (var i = 0; i < count; ++i) {

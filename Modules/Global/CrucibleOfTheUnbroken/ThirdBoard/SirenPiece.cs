@@ -99,8 +99,12 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
     }
 }
 
+// Timed from the teleport: the first of the 12 pulses lands 2.30-2.49s after it (49 sets, Korha 10-27 to 11-05). Untimed,
+// the cone did not count as a pending mechanic, so the auto-attack cleave kept the familiar out of the swing with a 100y
+// cone, and the only ground clear of both was across this one. Korha, 11-05 19:13: walked through it, two pulses, 331 HP.
 sealed class UnmooringMelody(ModuleBase module) : Components.GenericAOEs(module)
 {
+    private const double FirstPulseAfterTeleport = 2.3d;
     private readonly List<AOEInstance> aoes = [];
     private readonly AOEShapeCone shape = new(50.0f, 45.0f.Degrees());
 
@@ -108,7 +112,7 @@ sealed class UnmooringMelody(ModuleBase module) : Components.GenericAOEs(module)
     {
         if (spell.Action.ID == (uint)AID.Teleport)
         {
-            aoes.Add(new(shape, spell.TargetXZ, Angle.FromDirection(Module.Center - spell.TargetXZ)));
+            aoes.Add(new(shape, spell.TargetXZ, Angle.FromDirection(Module.Center - spell.TargetXZ), World.FutureTime(FirstPulseAfterTeleport)));
         }
 
         if (spell.Action.ID == (uint)AID.UnmooringMelody1)

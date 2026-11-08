@@ -14,7 +14,7 @@ using System.Runtime.CompilerServices;
 namespace Minerva;
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInComplexPolygonAwayFromOrigin : ShapeDistance
+public sealed class SDKnockbackInComplexPolygonAwayFromOrigin : SDYesNo
 {
     public SDKnockbackInComplexPolygonAwayFromOrigin(WPos Center, WPos Origin, float Distance, RelSimplifiedComplexPolygon Polygon)
     {
@@ -39,7 +39,7 @@ public sealed class SDKnockbackInComplexPolygonAwayFromOrigin : ShapeDistance
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInComplexPolygonFixedDirection : ShapeDistance
+public sealed class SDKnockbackInComplexPolygonFixedDirection : SDYesNo
 {
     public SDKnockbackInComplexPolygonFixedDirection(WPos Center, WDir Direction, RelSimplifiedComplexPolygon Polygon)
     {
@@ -62,7 +62,7 @@ public sealed class SDKnockbackInComplexPolygonFixedDirection : ShapeDistance
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusAOEAABBSquares : ShapeDistance
+public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusAOEAABBSquares : SDYesNo
 {
     public SDKnockbackInComplexPolygonAwayFromOriginPlusAOEAABBSquares(WPos Center, WPos Origin, float Distance, RelSimplifiedComplexPolygon Polygon, WPos[] AOEs, float HalfWidth, int Length)
     {
@@ -110,7 +110,7 @@ public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusAOEAABBSquares 
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusAOECircles : ShapeDistance
+public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusAOECircles : SDYesNo
 {
     public SDKnockbackInComplexPolygonAwayFromOriginPlusAOECircles(WPos Center, WPos Origin, float Distance, RelSimplifiedComplexPolygon Polygon, WPos[] AOEs, float Radius, int Length)
     {
@@ -158,7 +158,7 @@ public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusAOECircles : Sh
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusIntersectionTest : ShapeDistance
+public sealed class SDKnockbackInComplexPolygonAwayFromOriginPlusIntersectionTest : SDYesNo
 {
     public SDKnockbackInComplexPolygonAwayFromOriginPlusIntersectionTest(WPos Center, WPos Origin, float Distance, RelSimplifiedComplexPolygon Polygon)
     {

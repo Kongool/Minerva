@@ -214,6 +214,22 @@ public sealed class AIManager
         this.hints.MarkInvincibleByStatus();
 
         var now = this.world.CurrentTime;
+
+        // Dead: nothing to dodge and nowhere to walk. Korha, Ogre Piece 2026-11-07 17:38: after her death the uptime walk
+        // kept heading for the Ogre, and StuckWalk logged it twice. The hints above stay built for the radar. The walk
+        // state is dropped too, so a raise starts fresh rather than as a walk that has not moved since the death.
+        if (pc.IsDead)
+        {
+            this.movement.Stop();
+            this.uptimeTargetId = 0ul;
+            this.PullTargetId = 0ul;
+            this.bandWalk.Reset();
+            this.committedTarget = null;
+            this.committedRoute = null;
+            this.stuckWalk.Observe(false, pc.Position, now);
+            this.Publish(this.Decide(false, false, default, DodgeReason.None, DodgeBlocker.None, false));
+            return;
+        }
         this.MustNotAct = this.hints.MustNotAct(now);
         this.MustNotMove = this.hints.MustNotMove(now);
         this.SecondsUntilMustNotAct = Countdown(this.hints.NextMustNotAct(now), now);
@@ -1471,10 +1487,12 @@ public sealed class AIManager
             // of a Liquid Hell pool, drifted toward the end point and went through it. The same route is handed on
             // unchanged, so the follower keeps walking it.
             var ahead = this.committedRoute is { Count: > 0 } route ? ArenaPathfinder.RouteAhead(this.committedFrom, route, pc.Position) : null;
+            // and still on the floor from where the character now is, which a knockback can change (RouteStaysOnFloor)
+            var onFloor = ArenaPathfinder.RouteStaysOnFloor(this.hints, pc.Position, ahead is { Count: > 0 } ? ahead : [prev]);
             var clear = ahead is { Count: > 0 }
                 ? ArenaPathfinder.RouteIsClear(this.hints, pc.Position, ahead, now, margin, moveSpeed)
                 : this.WayStillClear(pc.Position, prev, now, margin, moveSpeed);
-            if (!this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev) && clear)
+            if (!this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev) && clear && onFloor)
                 return this.Held(pc, prev, ahead);
 
             // Something changed -- but a fresh answer every frame is not a dodge, it is a character
@@ -1482,7 +1500,7 @@ public sealed class AIManager
             // sent it twenty yalms east, then south, then back, a new target every 0.3s, and it was still
             // oscillating where it started when the cast landed. So hold the destination for a moment
             // longer unless the ground underfoot is the thing that is about to kill us, which always wins.
-            if (this.world.CurrentTime - this.committedAt < TimeSpan.FromSeconds(MinCommitSeconds)
+            if (onFloor && this.world.CurrentTime - this.committedAt < TimeSpan.FromSeconds(MinCommitSeconds)
                 && !this.hints.InImminentDanger(pc.Position, deadline, margin)
                 && !this.hints.InImminentDanger(prev, deadline, margin) && !this.hints.Misplaced(prev))
                 return this.Held(pc, prev, ahead);

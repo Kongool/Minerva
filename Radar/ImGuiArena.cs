@@ -262,6 +262,13 @@ public sealed unsafe class ImGuiArena : Arena
 
     public override void DrawBoundary()
     {
+        if (this.Bounds is ArenaBoundsCustom)
+        {
+            // the combined floor; a custom arena's own Contour is only its largest piece
+            foreach (var ring in this.meshes.FieldOutlines())
+                this.PolylineRel(ring.Points, default, Colors.Border, 2f, closed: true);
+            return;
+        }
         this.Polyline(this.Bounds.Contour(this.Center), Colors.Border, 2f, closed: true);
         var inner = this.Bounds.InnerContour(this.Center);
         if (inner != null)
@@ -321,6 +328,14 @@ public sealed unsafe class ImGuiArena : Arena
         // paints straight over them — a playback toolbar disappears under the very mask meant to tidy the
         // field. Confine it to the drawing canvas; the blow-up can then be as generous as it likes.
         this.draw.PushClipRect(this.canvasTopLeft, this.canvasTopLeft + this.canvasSize, true);
+        if (this.Bounds is ArenaBoundsCustom)
+        {
+            // a custom floor need not be visible whole from its centre (Lauda's nubs), so the mask is cut from the
+            // floor itself; half the canvas diagonal reaches every corner at any rotation
+            this.DrawMesh(this.meshes.OutsideField((this.canvasSize.Length() * 0.5f / this.scale) + 1f), background, outline: false);
+            this.draw.PopClipRect();
+            return;
+        }
         var aa = this.SuspendAntiAliasedFill();
         var contour = this.Bounds.Contour(this.Center);
         if (contour.Count >= 3)

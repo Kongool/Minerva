@@ -63,6 +63,9 @@ public sealed class ZoneMeshes
     private WDir[]? fieldRing;
     private float fieldSign;
     private float fieldInradiusSq;
+    private Outline[]? fieldOutlines;
+    private Mesh? outsideMesh;
+    private float outsideReach;
 
     // scratch
     private readonly List<WDir> scratchVerts = [];
@@ -91,6 +94,8 @@ public sealed class ZoneMeshes
             this.fieldOperand = null;
             this.fieldClassified = false;
             this.fieldRing = null;
+            this.fieldOutlines = null;
+            this.outsideMesh = null;
         }
 
         if (frameId == this.frame)
@@ -624,8 +629,10 @@ public sealed class ZoneMeshes
     // --------------------------------------------------------------------------------------------- Clipper2
 
     private Mesh FromOperand(PolygonClipper.Operand subject, bool cut)
+        => MeshOf(cut ? this.clipper.Intersect(subject, this.FieldOperand()) : this.clipper.Simplify(subject));
+
+    private static Mesh MeshOf(RelSimplifiedComplexPolygon result)
     {
-        var result = cut ? this.clipper.Intersect(subject, this.FieldOperand()) : this.clipper.Simplify(subject);
         var verts = new List<WDir>();
         var idx = new List<int>();
         foreach (var t in result.Triangulate())
@@ -647,12 +654,48 @@ public sealed class ZoneMeshes
         return new Mesh([.. verts], [.. idx], [.. outlines]);
     }
 
+    /// <summary>
+    /// Every ring of the field, offsets from the arena centre: its outer edge, its holes, each separate platform. The
+    /// radar's border for a custom arena, whose own <c>Contour</c> is only its largest piece: Lauda's floor is a 20x40
+    /// rectangle with six 5y nubs, and the nubs were filled with danger but never outlined (2026-11-04).
+    /// </summary>
+    public Outline[] FieldOutlines()
+    {
+        if (this.fieldOutlines != null)
+            return this.fieldOutlines;
+        var outlines = new List<Outline>();
+        foreach (var part in this.FieldPolygon().Parts)
+        {
+            outlines.Add(new(part.Exterior.ToArray(), true));
+            for (var h = 0; h < part.HoleStarts.Count; ++h)
+                outlines.Add(new(part.Interior(h).ToArray(), true));
+        }
+        return this.fieldOutlines = [.. outlines];
+    }
+
+    /// <summary>
+    /// Everything off the field within a square reaching <paramref name="reach"/> from the centre, as triangles: what the
+    /// radar paints over to hide the overspill. Pushing each boundary edge straight out from the centre only works when
+    /// the centre can see all of the floor, and on Lauda's it cannot: a nub's side edge, pushed out, covered part of the
+    /// nub behind it. Kept until the field changes or a longer reach is asked for.
+    /// </summary>
+    public Mesh OutsideField(float reach)
+    {
+        if (this.outsideMesh != null && reach <= this.outsideReach)
+            return this.outsideMesh;
+        reach *= 2f; // a window dragged a little larger then reuses it rather than rebuilding every frame
+        WDir[] square = [new(-reach, -reach), new(reach, -reach), new(reach, reach), new(-reach, reach)];
+        this.outsideReach = reach;
+        return this.outsideMesh = MeshOf(this.clipper.Difference(new PolygonClipper.Operand(square), this.FieldOperand()));
+    }
+
     /// <summary>The field for Clipper2: the outer contour minus the donut hole and any pillars, built with the clipper
     /// so hole orientation is its problem.</summary>
     private PolygonClipper.Operand FieldOperand()
+        => this.fieldOperand ??= new PolygonClipper.Operand(this.FieldPolygon());
+
+    private RelSimplifiedComplexPolygon FieldPolygon()
     {
-        if (this.fieldOperand != null)
-            return this.fieldOperand;
         var bounds = this.bounds ?? new ArenaBoundsCircle(20f);
         RelSimplifiedComplexPolygon field;
         if (bounds is ArenaBoundsCustom custom && custom.Center.AlmostEqual(this.center, 0.1f))
@@ -676,7 +719,7 @@ public sealed class ZoneMeshes
             }
             field = any ? this.clipper.Difference(outer, cutouts) : this.clipper.Simplify(outer);
         }
-        return this.fieldOperand = new PolygonClipper.Operand(field);
+        return field;
     }
 
     private WDir[] Offsets(IReadOnlyList<WPos> contour)

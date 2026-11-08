@@ -1266,6 +1266,22 @@ t.Section("Auto-dodge pathfinding");
         blocked.AddForbiddenZone(new AOEShapeRect(40f, 4f), new WPos(80f, 112f), 90f.Degrees(), now.AddSeconds(1.5d));
         var held = ArenaPathfinder.Solve(blocked, now, goal: melee);
         t.True("and stands still rather than crossing one that is about to fire", !held.NeedToMove);
+
+        // Ground already live never clears, so where the module asks (AIHints.WalkBackAroundLiveGround) it is walked
+        // round, not waited out. Loosefrox, 2026-11-07 (replayed): the line back to the boss crossed a quicksand pit, and
+        // the character stood 22s behind it.
+        AIHints Pit(bool around)
+        {
+            var h = new AIHints { Center = boss, Bounds = new ArenaBoundsSquare(30f), PlayerPosition = knocked, WalkBackAroundLiveGround = around };
+            h.AddForbiddenZone(new SDCircle(new WPos(100f, 112f), 4f));
+            return h;
+        }
+        var pit = Pit(true);
+        var round = ArenaPathfinder.Solve(pit, now, goal: melee, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
+        t.True($"and a live pit across the way is walked round where the module asks ({round.Steer.X:0.0},{round.Steer.Z:0.0})",
+            round.NeedToMove && round.Route is { Count: > 1 } && ArenaPathfinder.RouteIsClear(pit, knocked, round.Route, now, 0f, ArenaPathfinder.DefaultMoveSpeed));
+        t.True("and stood behind where it does not, as before",
+            !ArenaPathfinder.Solve(Pit(false), now, goal: melee, moveSpeed: ArenaPathfinder.DefaultMoveSpeed).NeedToMove);
     }
 
     // The way out of an AOE must not be blocked by that same AOE. Elm Gigas, 2026-09-06: the commitment
@@ -1477,6 +1493,27 @@ t.Section("Auto-dodge pathfinding");
         var escape = ArenaPathfinder.Solve(clash, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed);
         t.True($"and a positioning spot under a real AOE never costs the dodge ({escape.Target.X:0.0},{escape.Target.Z:0.0})",
             escape.NeedToMove && escape.Found && (escape.Target - spotAt).Length() > 6f);
+
+        // A spot the module wants held late (AIHints.HoldPositioningLate) is kept while the walk out still makes it, lead
+        // included, rather than dropped as soon as what it stands in comes within the horizon. The Chewchum bomb push
+        // (2026-11-07): the spot behind the bomb is inside Sand Breath, and the horizon left two seconds of six to push in.
+        AIHints Late(double landsIn, bool hold)
+        {
+            var h = new AIHints { Center = arena, Bounds = new ArenaBoundsCircle(20f), PlayerPosition = arena, HoldPositioningLate = hold };
+            h.AddForbiddenZone(new SDInvertedCircle(arena, 0.8f), DateTime.MaxValue);
+            h.AddForbiddenZone(new AOEShapeCircle(8f), arena, default, now.AddSeconds(landsIn));
+            return h;
+        }
+        SafeSpot LateSolve(AIHints h) => ArenaPathfinder.Solve(h, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+        var unheld = LateSolve(Late(4d, false));
+        t.True($"without it, a spot inside a circle landing in 4s is left at once ({unheld.Target.X:0.0},{unheld.Target.Z:0.0})",
+            unheld.NeedToMove && (unheld.Target - arena).Length() > 8f);
+        var kept = LateSolve(Late(4d, true));
+        t.True($"held late, it is kept while the 9y walk out (1.5s) still fits after the lead and a half-second hold ({kept.Target.X:0.0},{kept.Target.Z:0.0})",
+            !kept.NeedToMove || (kept.Target - arena).Length() < 0.8f);
+        var tooLate = LateSolve(Late(2.5d, true));
+        t.True($"and left once it does not: 2.5s out, 1s lead and 0.5s hold leave 1s for 1.5s of walking ({tooLate.Target.X:0.0},{tooLate.Target.Z:0.0})",
+            tooLate.NeedToMove && (tooLate.Target - arena).Length() > 8f);
     }
 
     // Seven modules copied BossmodReborn's orb soak: a one-yalm box half a yalm ahead of each orb. Even read as
@@ -6050,6 +6087,35 @@ t.Section("Pending effects");
     t.True("landing in the tornado is forbidden too", sd.Distance(new WPos(10f, -8f)) <= 0f);
 }
 
+// ---- A yes/no knockback guard holds no margin: read as a distance, the default margin of 1 forbade the whole floor ----
+// Durga's Thermobaric Charge: a 40y push away from where it drops, guarded at 39y on a 40-by-40 floor. Safe ground
+// answers 1, and 1 is within a margin of 1.0 (Saar's, the roommate's, the default), so every point read as touching
+// (2026-11-03; Korha's 0.9 hid it).
+{
+    var ygNow = new DateTime(2026, 11, 3, 22, 0, 0);
+    var ygCenter = new WPos(120f, 0f);
+    var ygOrigin = new WPos(136.7f, 16.7f);            // dropped in the south-east corner
+    var ygAcross = new WPos(134.3f, 14.3f);            // a step off it toward the middle: pushed across the floor
+    var ygWall = new WPos(137.7f, 17.7f);              // the wall side of it: pushed into the corner
+    var ygGuard = new SDKnockbackInAABBRectAwayFromOrigin(ygCenter, ygOrigin, 39f, 20f, 20f);
+    t.True("pushed across, the 39y push stays on the floor", ygGuard.Distance(ygAcross) > 0f);
+    t.True("pushed into the corner, it does not", ygGuard.Distance(ygWall) <= 0f);
+
+    var ygHints = new AIHints();
+    ygHints.AddForbiddenZone(ygGuard, ygNow.AddSeconds(2));
+    t.False("at the default margin of 1, the spot that pushes across is not danger",
+        ygHints.DangerAt(ygAcross, ygNow.AddSeconds(5), ygNow, 1f).Risky);
+    t.True("and the wall side still is", ygHints.DangerAt(ygWall, ygNow.AddSeconds(5), ygNow, 1f).Risky);
+
+    // the 0/1 family (Knockback/), which says 1 for safe ground as well
+    var ygSquare = new SDKnockbackInAABBSquareAwayFromOrigin(ygCenter, ygOrigin, 39f, 20f);
+    var ygSquareHints = new AIHints();
+    ygSquareHints.AddForbiddenZone(ygSquare, ygNow.AddSeconds(2));
+    t.False("a 0/1 guard's safe ground is not danger at margin 1 either",
+        ygSquareHints.DangerAt(ygAcross, ygNow.AddSeconds(5), ygNow, 1f).Risky);
+    t.True("and its fatal ground is", ygSquareHints.DangerAt(ygWall, ygNow.AddSeconds(5), ygNow, 1f).Risky);
+}
+
 // ---- A zone's bounding circle holds the whole shape, and nothing outside it is nearer than the circle ----
 // Elm Gigas, 2026-10-19: the solver measured 36 zones against every cell of its grid, most of them small capsules a
 // long way off. The circle lets it skip those, which is only sound if both of these hold for every shape that names one.
@@ -7341,6 +7407,105 @@ t.Section("Radar zone meshes: outlines, clipping off, the frame cache");
     cache.Get(new AOEShapeCircle(6f), new WPos(5f, 5f), default);
     cache.BeginFrame(14, new WPos(1f, 0f), field, clip: true);
     t.Eq("so does a new centre", cache.CachedCount, 0);
+}
+
+t.Section("A kept route must stay on the floor from where a knockback left you");
+{
+    // Lauda, 2026-11-04 16:44: the route into the lower east nub was planned from the north end, where the straight line
+    // is clean; Unseen Force pushed Korha 40y to the south end, the line was kept, and from there it crossed the fire in
+    // the notch between the east nubs (Burns).
+    var floor = new ArenaBoundsCustom([
+        new Rectangle(new(520f, -420f), 10f, 20f),
+        new Rectangle(new(520f, -397.5f), 2.5f, 2.5f), new Rectangle(new(520f, -442.5f), 2.5f, 2.5f),
+        new Rectangle(new(508f, -412.5f), 2.5f, 2.5f), new Rectangle(new(508f, -422.5f), 2.5f, 2.5f),
+        new Rectangle(new(532f, -417.5f), 2.5f, 2.5f), new Rectangle(new(532f, -427.5f), 2.5f, 2.5f),
+    ]);
+    var kh = new AIHints { Center = floor.Center, Bounds = floor };
+    var nub = new WPos(531.875f, -426.125f);
+    t.True("from the north end, the line into the lower east nub stays on the floor", ArenaPathfinder.RouteStaysOnFloor(kh, new WPos(519.96f, -440.61f), [nub]));
+    t.True("from the south end, where the push left her, it crosses the notch", !ArenaPathfinder.RouteStaysOnFloor(kh, new WPos(520.02f, -400.6f), [nub]));
+    t.True("the same walk by a corner at the rectangle's edge stays on", ArenaPathfinder.RouteStaysOnFloor(kh, new WPos(520.02f, -400.6f), [new WPos(529.5f, -425.5f), nub]));
+    t.True("a character already off the floor is not held to it", ArenaPathfinder.RouteStaysOnFloor(kh, new WPos(531f, -423f), [nub]));
+}
+
+t.Section("Lauda's fire edge: a yalm in from it, and no walk or route corner crosses it");
+{
+    var floor = new ArenaBoundsCustom([
+        new Rectangle(new(520f, -420f), 10f, 20f),
+        new Rectangle(new(520f, -397.5f), 2.5f, 2.5f), new Rectangle(new(520f, -442.5f), 2.5f, 2.5f),
+        new Rectangle(new(508f, -412.5f), 2.5f, 2.5f), new Rectangle(new(508f, -422.5f), 2.5f, 2.5f),
+        new Rectangle(new(532f, -417.5f), 2.5f, 2.5f), new Rectangle(new(532f, -427.5f), 2.5f, 2.5f),
+    ]);
+    var c = floor.Center;
+    var inset = floor.Inset(1f);
+    t.True("a floor of rectangles is inset, not handed back unchanged", !ReferenceEquals(inset, floor));
+    t.True("the inset keeps the middle and both ends the pushes start from", inset.Contains(c, new WPos(520f, -420f))
+        && inset.Contains(c, new WPos(520f, -442.5f)) && inset.Contains(c, new WPos(520f, -397.5f)));
+    t.True("and the side nubs, still joined to the rectangle", inset.Contains(c, new WPos(508f, -412.5f)) && inset.Contains(c, new WPos(510.5f, -412.5f)));
+    t.True("a yalm in from a nub's outer edge", inset.Contains(c, new WPos(506.8f, -412.5f)) && !inset.Contains(c, new WPos(506.2f, -412.5f)));
+    t.True("and from the rectangle's edge between two nubs", inset.Contains(c, new WPos(528.6f, -422.5f)) && !inset.Contains(c, new WPos(529.4f, -422.5f)));
+    t.True("and off the corner of the notch between the west nubs", !inset.Contains(c, new WPos(510.5f, -420.5f)));
+
+    // 07:40, 216.86: from the south-west nub, the walk back into melee went straight at a spot past the notch.
+    var from = new WPos(507f, -412f);
+    var uh = new AIHints { Center = c, Bounds = floor, PlayerPosition = from };
+    var back = ArenaPathfinder.Solve(uh, new DateTime(2026, 11, 5), goal: new UptimeGoal(new WPos(512f, -427f), default, 3f));
+    t.True("the walk back to the boss goes somewhere", back.NeedToMove && back.Found);
+    t.True("where the straight line there crosses the notch", !ArenaPathfinder.RouteStaysOnFloor(uh, from, [back.Target]));
+    t.True("so it is routed round, on the floor", back.Route is { Count: > 1 } r && ArenaPathfinder.RouteStaysOnFloor(uh, from, r));
+
+    // 10:35, 249.23: from the north-west nub to the south-west one, a leg passed 0.06y from the notch's corner.
+    var nw = new WPos(508.53f, -421.25f);
+    var rh = new AIHints { Center = c, Bounds = floor, PlayerPosition = nw };
+    var route = new RouteGrid(rh, new DateTime(2026, 11, 5), nw, 1f, 0f).Route(nw, new WPos(507.875f, -413.875f));
+    t.True("a route between the west nubs keeps every leg on the floor", ArenaPathfinder.RouteStaysOnFloor(rh, nw, route));
+}
+
+t.Section("Radar border and mask follow a custom floor's every piece");
+{
+    // Lauda the Spellcleaver's floor: a 20x40 rectangle with six 5y nubs. The radar outlined only the rectangle (a
+    // custom arena's Contour is its largest piece), and its mask pushed each edge out from the centre, which on this
+    // floor covers part of a nub (2026-11-04).
+    var lauda = new ArenaBoundsCustom([
+        new Rectangle(new(520f, -420f), 10f, 20f),
+        new Rectangle(new(520f, -397.5f), 2.5f, 2.5f), new Rectangle(new(520f, -442.5f), 2.5f, 2.5f),
+        new Rectangle(new(508f, -412.5f), 2.5f, 2.5f), new Rectangle(new(508f, -422.5f), 2.5f, 2.5f),
+        new Rectangle(new(532f, -417.5f), 2.5f, 2.5f), new Rectangle(new(532f, -427.5f), 2.5f, 2.5f),
+    ]);
+    var meshes = new ZoneMeshes();
+    meshes.BeginFrame(1, lauda.Center, lauda, clip: true);
+    var rings = meshes.FieldOutlines();
+    t.Eq("the floor outlines as one ring", rings.Length, 1);
+    var area = 0f;
+    var ring = rings[0].Points;
+    for (var i = 0; i < ring.Length; ++i)
+        area += ring[i].Cross(ring[(i + 1) % ring.Length]) * 0.5f;
+    // the end nubs stand clear of the rectangle; the side ones overlap it by half a yalm
+    t.Near("and that ring holds the rectangle and all six nubs", MathF.Abs(area), 800f + (2f * 25f) + (4f * 4.5f * 5f), 0.5f);
+    t.True("it reaches the west nubs, past the rectangle's edge", ring.Any(v => v.X < -14f));
+
+    var mask = meshes.OutsideField(60f);
+    var mesh = mask.Vertices;
+    t.Near("the mask is the square less the floor", mask.Area(), (240f * 240f) - 940f, 2f);
+    bool Covered(WDir p)
+    {
+        for (var i = 0; i + 2 < mask.Indices.Length; i += 3)
+        {
+            var a = mesh[mask.Indices[i]];
+            var b = mesh[mask.Indices[i + 1]];
+            var c = mesh[mask.Indices[i + 2]];
+            var d1 = (b - a).Cross(p - a);
+            var d2 = (c - b).Cross(p - b);
+            var d3 = (a - c).Cross(p - c);
+            if ((d1 >= 0f && d2 >= 0f && d3 >= 0f) || (d1 <= 0f && d2 <= 0f && d3 <= 0f))
+                return true;
+        }
+        return false;
+    }
+    var centre = lauda.Center;
+    t.True("a point inside the west nub is left showing", !Covered(new WPos(506f, -414.5f) - centre));
+    t.True("the notch between the west nubs is masked", Covered(new WPos(507f, -417.5f) - centre));
+    t.True("asking for a shorter reach keeps the mesh", ReferenceEquals(mask, meshes.OutsideField(50f)));
 }
 
 return t.Report();

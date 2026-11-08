@@ -515,6 +515,17 @@ public sealed class SDShapeCheck(AOEShape shape, WPos origin, Angle rotation) : 
     public override float Distance(WPos p) => shape.Check(p, origin, rotation) ? -1f : 1f;
 }
 
+/// <summary>
+/// A yes/no answer rather than a distance: the knockback guards ("standing here, the push lands you off the floor"),
+/// which return a fixed value for fatal ground (0 or -1) and another for safe ground (1). The number says nothing about
+/// how far either is, so a safety margin cannot be read off it, and the solver only counts the inside
+/// (<see cref="AIHints.Touches"/>). Read as a distance, a safe 1 sat within any margin of 1 or more: at the default
+/// margin of exactly 1.0 the whole floor read as forbidden and the guard steered nothing (Durga's Thermobaric Charge,
+/// Saar and the roommate, 2026-11-03; Korha's 0.9 hid it). The guards build their own margin in, as in BossmodReborn: a
+/// 39y check for a 40y push.
+/// </summary>
+public abstract class SDYesNo : ShapeDistance;
+
 // Knockback-resolution SDFs now live in Automation/Knockback/, ported from BossmodReborn with their real
 // implementations. They used to be stubs here that returned "nothing forbidden" for every point, which kept
 // ported modules compiling but meant the auto-dodge was told a knockback could never put you anywhere fatal
@@ -527,7 +538,7 @@ public sealed class SDShapeCheck(AOEShape shape, WPos origin, Angle rotation) : 
 /// meaningful distance, since being one yard from the edge after the push is as alive as being ten. The
 /// direction carries the distance and is not normalised — the caster scales it.</para>
 /// </summary>
-public sealed class SDKnockbackInAABBRectFixedDirection(WPos center, WDir direction, float halfWidth, float halfHeight) : ShapeDistance
+public sealed class SDKnockbackInAABBRectFixedDirection(WPos center, WDir direction, float halfWidth, float halfHeight) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -536,7 +547,7 @@ public sealed class SDKnockbackInAABBRectFixedDirection(WPos center, WDir direct
 }
 
 /// <summary>Same, for a square arena that may be rotated off the axes.</summary>
-public sealed class SDKnockbackInSquareFixedDirection(WPos center, WDir direction, float halfWidth, Angle rotation) : ShapeDistance
+public sealed class SDKnockbackInSquareFixedDirection(WPos center, WDir direction, float halfWidth, Angle rotation) : SDYesNo
 {
     private readonly WDir axis = rotation.ToDirection();
 
@@ -550,7 +561,7 @@ public sealed class SDKnockbackInSquareFixedDirection(WPos center, WDir directio
 /// caller reuses one buffer across frames.
 /// </summary>
 public sealed class SDKnockbackInAABBRectFixedDirectionPlusAOECircles(
-    WPos center, WDir direction, float halfWidth, float halfHeight, WPos[] origins, float radius, int length) : ShapeDistance
+    WPos center, WDir direction, float halfWidth, float halfHeight, WPos[] origins, float radius, int length) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -574,7 +585,7 @@ public sealed class SDKnockbackInAABBRectFixedDirectionPlusAOECircles(
 /// <paramref name="safeWalls"/> are live — the caller reuses one buffer across frames.</para>
 /// </summary>
 public sealed class SDKnockbackFixedDirectionAgainstSafewalls(
-    WDir direction, Components.GenericKnockback.SafeWall[] safeWalls, float distance, int length) : ShapeDistance
+    WDir direction, Components.GenericKnockback.SafeWall[] safeWalls, float distance, int length) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -698,7 +709,7 @@ public sealed class SDComplexPolygonInvertedContains(RelSimplifiedComplexPolygon
 // BMR's 0f verbatim would make every point read as contained and forbid the entire arena, silently.
 
 /// <summary>Forbids ground from which a knockback away from an origin would leave an axis-aligned box.</summary>
-public sealed class SDKnockbackInAABBRectAwayFromOrigin(WPos center, WPos origin, float distance, float halfWidth, float halfHeight) : ShapeDistance
+public sealed class SDKnockbackInAABBRectAwayFromOrigin(WPos center, WPos origin, float distance, float halfWidth, float halfHeight) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -710,7 +721,7 @@ public sealed class SDKnockbackInAABBRectAwayFromOrigin(WPos center, WPos origin
 /// A knockback that pushes north or south depending on which side of the arena centre you stand — the
 /// "blown to your own half" shape. Forbids ground from which that push leaves the box.
 /// </summary>
-public sealed class SDKnockbackInAABBRectLeftRightAlongZAxis(WPos center, float distance, float halfWidth, float halfHeight) : ShapeDistance
+public sealed class SDKnockbackInAABBRectLeftRightAlongZAxis(WPos center, float distance, float halfWidth, float halfHeight) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -722,7 +733,7 @@ public sealed class SDKnockbackInAABBRectLeftRightAlongZAxis(WPos center, float 
 /// BossmodReborn's X-axis twin of <see cref="SDKnockbackInAABBRectLeftRightAlongZAxis"/>, ported as it is written
 /// there: the side is chosen by Z and the push runs along X. Forbids ground from which that push leaves the box.
 /// </summary>
-public sealed class SDKnockbackInAABBRectLeftRightAlongXAxis(WPos center, float distance, float halfWidth, float halfHeight) : ShapeDistance
+public sealed class SDKnockbackInAABBRectLeftRightAlongXAxis(WPos center, float distance, float halfWidth, float halfHeight) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -733,7 +744,7 @@ public sealed class SDKnockbackInAABBRectLeftRightAlongXAxis(WPos center, float 
 /// <summary>The same, with rectangular AOEs you must also not be pushed into.</summary>
 public sealed class SDKnockbackInAABBRectLeftRightAlongZAxisPlusAOERects(
     WPos center, float distance, float halfWidth, float halfHeight,
-    (WPos Origin, WDir Direction)[] aoes, float lengthFront, float rectHalfWidth, int length) : ShapeDistance
+    (WPos Origin, WDir Direction)[] aoes, float lengthFront, float rectHalfWidth, int length) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -755,7 +766,7 @@ public sealed class SDKnockbackInAABBRectLeftRightAlongZAxisPlusAOERects(
 /// </summary>
 public sealed class SDKnockbackFixedDirectionAgainstSafewallsPlusRectAOE(
     WDir direction, Components.GenericKnockback.SafeWall[] safeWalls, float distance, int length,
-    WPos rectOrigin, WDir rectDirection, float lengthFront, float halfWidth) : ShapeDistance
+    WPos rectOrigin, WDir rectDirection, float lengthFront, float halfWidth) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -834,7 +845,7 @@ public sealed class SDInvertedTri : ShapeDistance
 /// tested at the landing point because those are what you end up standing in.</para>
 /// </summary>
 public sealed class SDKnockbackTowardsOriginPlusAOECirclesPlusAABBSquareIntersection(
-    WPos center, float distance, WPos[] aoes, float radius, WPos centerTile, float tileHalfWidth, int length) : ShapeDistance
+    WPos center, float distance, WPos[] aoes, float radius, WPos centerTile, float tileHalfWidth, int length) : SDYesNo
 {
     public override float Distance(WPos p)
     {
@@ -862,7 +873,7 @@ public sealed class SDKnockbackTowardsOriginPlusAOECirclesPlusAABBSquareIntersec
 /// </summary>
 public sealed class SDKnockbackWithWallsAwayFromOriginMultiAimIntoDonuts(
     (WPos Origin, WDir Direction)[] knockbacks, int lengthKnockbacks, float rectLengthFront, float rectHalfWidth,
-    float distance, WPos[] donutOrigins, float donutInnerRadius, int lengthDonuts) : ShapeDistance
+    float distance, WPos[] donutOrigins, float donutInnerRadius, int lengthDonuts) : SDYesNo
 {
     public override float Distance(WPos p)
     {

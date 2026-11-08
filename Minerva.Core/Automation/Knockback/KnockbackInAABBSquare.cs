@@ -14,7 +14,7 @@ using System.Runtime.CompilerServices;
 namespace Minerva;
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareLeftRightAlongXAxisPlusAOECircles(WPos Center, float Distance, float HalfWidth, WPos[] AOEs, float Radius, int Length) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareLeftRightAlongXAxisPlusAOECircles(WPos Center, float Distance, float HalfWidth, WPos[] AOEs, float Radius, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly float originX = Center.X;
@@ -50,7 +50,7 @@ public sealed class SDKnockbackInAABBSquareLeftRightAlongXAxisPlusAOECircles(WPo
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareLeftRightAlongZAxisTowardsGoal(WPos Center, float Distance, float HalfWidth, WPos GoalPos, float GoalRadius) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareLeftRightAlongZAxisTowardsGoal(WPos Center, float Distance, float HalfWidth, WPos GoalPos, float GoalRadius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly float originZ = Center.Z;
@@ -77,7 +77,7 @@ public sealed class SDKnockbackInAABBSquareLeftRightAlongZAxisTowardsGoal(WPos C
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareLeftRightAlongXAxisTowardsGoal(WPos Center, float Distance, float HalfWidth, WPos GoalPos, float GoalRadius) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareLeftRightAlongXAxisTowardsGoal(WPos Center, float Distance, float HalfWidth, WPos GoalPos, float GoalRadius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly float originX = Center.X;
@@ -104,7 +104,7 @@ public sealed class SDKnockbackInAABBSquareLeftRightAlongXAxisTowardsGoal(WPos C
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOrigin(WPos Center, WPos Origin, float Distance, float HalfWidth) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOrigin(WPos Center, WPos Origin, float Distance, float HalfWidth) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -120,7 +120,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOrigin(WPos Center, WPos Orig
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusRectAOE(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos RectOrigin, WDir RectDirection, float LengthFront, float RectHalfWidth) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusRectAOE(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos RectOrigin, WDir RectDirection, float LengthFront, float RectHalfWidth) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -144,7 +144,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusRectAOE(WPos Center
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOriginIntoCircle(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos CircleOrigin, float Radius) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOriginIntoCircle(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos CircleOrigin, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -166,7 +166,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOriginIntoCircle(WPos Center,
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareFixedDirection(WPos Center, WDir Direction, float HalfWidth) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareFixedDirection(WPos Center, WDir Direction, float HalfWidth) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction; // direction includes distance, not normalized
@@ -181,7 +181,7 @@ public sealed class SDKnockbackInAABBSquareFixedDirection(WPos Center, WDir Dire
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareFixedDirectionPlusAOECircle(WPos Center, WDir Direction, float HalfWidth, WPos CircleOrigin, float Radius) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareFixedDirectionPlusAOECircle(WPos Center, WDir Direction, float HalfWidth, WPos CircleOrigin, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction; // direction includes distance, not normalized
@@ -202,7 +202,7 @@ public sealed class SDKnockbackInAABBSquareFixedDirectionPlusAOECircle(WPos Cent
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareFixedDirectionPlusAOECircles(WPos Center, WDir Direction, float HalfWidth, WPos[] Origins, float Radius, int Length) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareFixedDirectionPlusAOECircles(WPos Center, WDir Direction, float HalfWidth, WPos[] Origins, float Radius, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction; // direction includes distance, not normalized
@@ -236,7 +236,7 @@ public sealed class SDKnockbackInAABBSquareFixedDirectionPlusAOECircles(WPos Cen
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareFixedDirectionIntoCircle(WPos Center, WDir Direction, float HalfWidth, WPos CircleOrigin, float Radius) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareFixedDirectionIntoCircle(WPos Center, WDir Direction, float HalfWidth, WPos CircleOrigin, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction; // direction includes distance, not normalized
@@ -257,7 +257,7 @@ public sealed class SDKnockbackInAABBSquareFixedDirectionIntoCircle(WPos Center,
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadii(WPos Center, WPos Origin, float Distance, float HalfWidth, (WPos Origin, float Radius)[] AOEs, int Length) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadii(WPos Center, WPos Origin, float Distance, float HalfWidth, (WPos Origin, float Radius)[] AOEs, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -292,7 +292,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadi
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadiiPlusAvoidShape(WPos Center, WPos Origin, float Distance, float HalfWidth, (WPos Origin, float Radius)[] AOEs, int Length, ShapeDistance Shape) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadiiPlusAvoidShape(WPos Center, WPos Origin, float Distance, float HalfWidth, (WPos Origin, float Radius)[] AOEs, int Length, ShapeDistance Shape) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -333,7 +333,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECirclesMixedRadi
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECircles(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos[] AOEs, float Radius, int Length) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECircles(WPos Center, WPos Origin, float Distance, float HalfWidth, WPos[] AOEs, float Radius, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -368,7 +368,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOECircles(WPos Cen
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOERects(WPos Center, WPos Origin, float Distance, float HalfWidth, (WPos Origin, WDir Direction)[] AOEs, float LengthFront, float RectHalfWidth, int Length) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOERects(WPos Center, WPos Origin, float Distance, float HalfWidth, (WPos Origin, WDir Direction)[] AOEs, float LengthFront, float RectHalfWidth, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -405,7 +405,7 @@ public sealed class SDKnockbackInAABBSquareAwayFromOriginPlusAOERects(WPos Cente
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInAABBSquareFixedDirectionPlusMixedAOEs(WPos Center, WDir Direction, float HalfWidth, AOEInstance[] AOEs, int Length) : ShapeDistance
+public sealed class SDKnockbackInAABBSquareFixedDirectionPlusMixedAOEs(WPos Center, WDir Direction, float HalfWidth, AOEInstance[] AOEs, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction; // direction includes distance, not normalized

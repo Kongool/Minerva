@@ -14,7 +14,7 @@ using System.Runtime.CompilerServices;
 namespace Minerva;
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOrigin(WPos Center, WPos Origin, float Distance, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOrigin(WPos Center, WPos Origin, float Distance, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -34,7 +34,7 @@ public sealed class SDKnockbackInCircleAwayFromOrigin(WPos Center, WPos Origin, 
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginMixedAOEs(WPos Center, WPos Origin, float Distance, float Radius, AOEInstance[] AOEs, int Length) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginMixedAOEs(WPos Center, WPos Origin, float Distance, float Radius, AOEInstance[] AOEs, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -69,7 +69,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginMixedAOEs(WPos Center, WPos
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginPlusAOERects(WPos Center, WPos Origin, float Distance, float Radius, (WPos Origin, WDir Direction)[] AOEs, float LengthFront, float HalfWidth, int Length) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginPlusAOERects(WPos Center, WPos Origin, float Distance, float Radius, (WPos Origin, WDir Direction)[] AOEs, float LengthFront, float HalfWidth, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -106,7 +106,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginPlusAOERects(WPos Center, W
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleFixedDirection(WPos Center, WDir Direction, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleFixedDirection(WPos Center, WDir Direction, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction;
@@ -127,7 +127,7 @@ public sealed class SDKnockbackInCircleFixedDirection(WPos Center, WDir Directio
 /// from where it comes from.
 /// </summary>
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleFixedDirectionMixedAOEs(WPos Center, WDir Direction, float Radius, AOEInstance[] AOEs, int Length) : ShapeDistance
+public sealed class SDKnockbackInCircleFixedDirectionMixedAOEs(WPos Center, WDir Direction, float Radius, AOEInstance[] AOEs, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WDir direction = Direction;
@@ -152,7 +152,7 @@ public sealed class SDKnockbackInCircleFixedDirectionMixedAOEs(WPos Center, WDir
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginPlusMixedAOEsPlusSingleCircleIntersection(WPos Center, WPos Origin, float Radius, float Distance, SDUnion AOEs, WPos CircleOrigin, float CircleRadius, bool Pull) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginPlusMixedAOEsPlusSingleCircleIntersection(WPos Center, WPos Origin, float Radius, float Distance, SDUnion AOEs, WPos CircleOrigin, float CircleRadius, bool Pull) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -193,7 +193,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginPlusMixedAOEsPlusSingleCirc
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleFixedDirectionAndAwayFromOrigin(WPos Center, WPos Origin, WDir Direction, float Distance, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleFixedDirectionAndAwayFromOrigin(WPos Center, WPos Origin, WDir Direction, float Distance, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -210,7 +210,7 @@ public sealed class SDKnockbackInCircleFixedDirectionAndAwayFromOrigin(WPos Cent
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginIntoDirection(WPos Center, WPos Origin, float Distance, float ArenaRadius, WDir Direction, Angle Tolerance) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginIntoDirection(WPos Center, WPos Origin, float Distance, float ArenaRadius, WDir Direction, Angle Tolerance) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -231,7 +231,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginIntoDirection(WPos Center, 
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginMulti3(WPos Center, Components.GenericKnockback.Knockback[] Knockbacks, float Distance, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginMulti3(WPos Center, Components.GenericKnockback.Knockback[] Knockbacks, float Distance, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly Components.GenericKnockback.Knockback[] knockbacks = Knockbacks;
@@ -265,7 +265,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginMulti3(WPos Center, Compone
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginMulti2(WPos Center, Components.GenericKnockback.Knockback[] Knockbacks, float Distance, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginMulti2(WPos Center, Components.GenericKnockback.Knockback[] Knockbacks, float Distance, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly Components.GenericKnockback.Knockback[] knockbacks = Knockbacks;
@@ -293,7 +293,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginMulti2(WPos Center, Compone
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginPlusAOECircles(WPos Center, WPos Origin, float Distance, float Radius, WPos[] AOEs, float AOERadius, int Length) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginPlusAOECircles(WPos Center, WPos Origin, float Distance, float Radius, WPos[] AOEs, float AOERadius, int Length) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;
@@ -327,7 +327,7 @@ public sealed class SDKnockbackInCircleAwayFromOriginPlusAOECircles(WPos Center,
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackFixedDirectionIntoCircle(WDir Direction, WPos CircleOrigin, float Radius) : ShapeDistance
+public sealed class SDKnockbackFixedDirectionIntoCircle(WDir Direction, WPos CircleOrigin, float Radius) : SDYesNo
 {
     private readonly WDir direction = Direction; // direction includes distance, not normalized
     private readonly WPos circleOrigin = CircleOrigin;
@@ -342,7 +342,7 @@ public sealed class SDKnockbackFixedDirectionIntoCircle(WDir Direction, WPos Cir
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleLeftRightAlongZAxis(WPos Center, float Distance, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleLeftRightAlongZAxis(WPos Center, float Distance, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly float originZ = Center.Z;
@@ -366,7 +366,7 @@ public sealed class SDKnockbackInCircleLeftRightAlongZAxis(WPos Center, float Di
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleLeftRightAlongXAxis(WPos Center, float Distance, float Radius) : ShapeDistance
+public sealed class SDKnockbackInCircleLeftRightAlongXAxis(WPos Center, float Distance, float Radius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly float originX = Center.X;
@@ -390,7 +390,7 @@ public sealed class SDKnockbackInCircleLeftRightAlongXAxis(WPos Center, float Di
 }
 
 [SkipLocalsInit]
-public sealed class SDKnockbackInCircleAwayFromOriginIntoCircle(WPos Center, WPos Origin, float Distance, float Radius, WPos CircleOrigin, float CircleRadius) : ShapeDistance
+public sealed class SDKnockbackInCircleAwayFromOriginIntoCircle(WPos Center, WPos Origin, float Distance, float Radius, WPos CircleOrigin, float CircleRadius) : SDYesNo
 {
     private readonly WPos center = Center;
     private readonly WPos origin = Origin;

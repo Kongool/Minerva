@@ -516,6 +516,11 @@ public static class ArenaPathfinder
         if (firstStage is { } stage)
             return Doorway(hints, firstStageAt, deadline, now, player, cellSize, safetyMargin, moveSpeed) ?? stage;
 
+        // A spot the module wants held late (AIHints.HoldPositioningLate) is kept while the walk out still makes it.
+        if (hints.HoldPositioningLate && hints.PositioningZones.Count != 0 && !hints.PositioningSuspended
+            && HoldPositioningLate(hints, deadline, solveNow, now, player, cellSize, safetyMargin, goal, moveSpeed) is { } held)
+            return held;
+
         // A positioning instruction is advice, danger is not. If nothing honours both, answer the danger
         // alone, as though the module had never asked: a spot to stand on is never worth a hit.
         if (hints.PositioningZones.Count != 0 && !hints.PositioningSuspended)
@@ -561,6 +566,46 @@ public static class ArenaPathfinder
             return new SafeSpot(true, true, clear, (clear - player).Normalized());
 
         return new SafeSpot(true, false, player, default); // nowhere in the arena is clear
+    }
+
+    /// <summary>How much longer a late hold must be able to wait and still get out. Every frame re-solves, so this is the
+    /// slack between the last frame that holds and the walk out starting.</summary>
+    private const float LateHoldStep = 0.5f;
+
+    /// <summary>
+    /// Hold the module's positioning spot (<see cref="AIHints.HoldPositioningLate"/>) if, after waiting there
+    /// <see cref="LateHoldStep"/> more (and the lead), a clean walk still reaches ground clear of everything a little past
+    /// the horizon before what the spot stands in lands. Null when it does not: the caller then drops the instruction and
+    /// leaves now.
+    /// </summary>
+    private static SafeSpot? HoldPositioningLate(AIHints hints, DateTime deadline, DateTime solveNow, DateTime now, WPos player, float cellSize, float margin, UptimeGoal? goal, float moveSpeed)
+    {
+        if (moveSpeed <= 0f)
+            return null;
+        // where to hold: on the spot, clear of everything that lands before the walk out would start
+        var leaveAt = solveNow.AddSeconds(LateHoldStep);
+        if (!TryNearestSafe(hints, leaveAt, solveNow, now, player, cellSize, margin, goal, moveSpeed, float.MaxValue, out var spot))
+            return null;
+        var held = Settle(hints, leaveAt, player, spot, cellSize, margin);
+        var at = held.NeedToMove ? held.Target : player;
+        var start = leaveAt.AddSeconds(held.NeedToMove ? (at - player).Length() / moveSpeed : 0f);
+
+        // the way out, planned as though the instruction were gone
+        hints.PositioningSuspended = true;
+        try
+        {
+            var escapeBy = deadline.AddSeconds(LookPastHorizon);
+            var budget = TimeUntilDanger(hints, at, escapeBy, start);
+            if (budget == float.MaxValue)
+                return held;                                    // nothing lands on the spot at all
+            if (budget <= 0f || !TryNearestSafe(hints, escapeBy, start, now, at, cellSize, margin, goal, moveSpeed, budget, out var exit))
+                return null;
+            return RouteIsClear(hints, at, exit, start, margin, moveSpeed) ? held : null;
+        }
+        finally
+        {
+            hints.PositioningSuspended = false;
+        }
     }
 
     /// <summary>The nearest ground clear of everything landing by <paramref name="deadline"/>, by straight distance,
@@ -1031,15 +1076,54 @@ public static class ArenaPathfinder
         if (pick is not { } back)
             return SafeSpot.Stay;
 
+        // The walk is a straight line, which on a floor with notches in it can cross outside ground: Lauda, 2026-11-05,
+        // Korha twice walked back to the boss across the fire in the notch between the west nubs and took Burns (07:40,
+        // 10:35). Where the line leaves the floor, go the way round the grid finds.
+        if (back.NeedToMove && back.Found && !RouteStaysOnFloor(hints, player, [back.Target]))
+        {
+            var route = GridFor(hints, deadline, player, cellSize, margin, now, moveSpeed, now).Route(player, back.Target);
+            back = back with { Direction = (route[0] - player).Normalized(), Waypoint = route[0], Route = route };
+        }
+
         // Uptime is never worth walking through a telegraph. The destination was already filtered for
         // safety, but nothing looked at the ground in between, so the walk back to the boss after a
         // knockback went straight through an AOE (reported 2026-09-06, and the Elm Gigas Topaz Ray at
         // 224.1s is the same thing). Standing still costs a few seconds of damage; the crossing costs the
         // pull. The next frame re-solves, so as soon as the way clears the walk resumes on its own.
         if (back.NeedToMove && back.Found && now != default
-            && !hints.WalkIsClear(player, back.Target, now, margin, moveSpeed))
+            && !RouteIsClear(hints, player, back, now, margin, moveSpeed))
+        {
+            // A telegraph across the way is waited out, but ground already live never clears: where the module asks
+            // (AIHints.WalkBackAroundLiveGround), take the way round it, if that is clear.
+            if (hints.WalkBackAroundLiveGround && back.Route == null && CrossesLiveGround(hints, player, back.Target, now, margin)
+                && GridFor(hints, deadline, player, cellSize, margin, now, moveSpeed, now).Route(player, back.Target) is { Count: > 0 } round)
+            {
+                // Judged on half the margin: the grid keeps the whole margin at its cells, and the straight legs between
+                // corners cut a little inside it (0.96 of 1 past the pit, replayed), which no hitbox reaches.
+                var detour = back with { Direction = (round[0] - player).Normalized(), Waypoint = round[0], Route = round };
+                if (RouteIsClear(hints, player, detour, now, margin * 0.5f, moveSpeed))
+                    return detour;
+            }
             return SafeSpot.Stay;
+        }
         return back;
+    }
+
+    /// <summary>Does the straight walk pass within <paramref name="margin"/> of ground that is already live (untimed, or
+    /// past its time)? Waiting does not clear that, as it does a telegraph.</summary>
+    private static bool CrossesLiveGround(AIHints hints, WPos from, WPos to, DateTime now, float margin)
+    {
+        var delta = to - from;
+        var steps = Math.Max(1, (int)MathF.Ceiling(delta.Length() / 0.5f));
+        foreach (var z in hints.ForbiddenZones)
+        {
+            if (z.Activation > now)
+                continue;
+            for (var i = 0; i <= steps; ++i)
+                if (z.ShapeDistance.Distance(from + (delta * ((float)i / steps))) <= margin)
+                    return true;
+        }
+        return false;
     }
 
     /// <summary>How strictly a regain pass reads the positional.</summary>
@@ -1158,6 +1242,38 @@ public static class ArenaPathfinder
         for (var i = leg; i < route.Count; ++i)
             ahead.Add(route[i]);
         return ahead;
+    }
+
+    /// <summary>How far apart <see cref="RouteStaysOnFloor"/> samples a leg: a quarter of the finest grid cell.</summary>
+    private const float FloorSampleYalms = 0.25f;
+
+    /// <summary>
+    /// Does every leg of <paramref name="route"/>, walked from <paramref name="player"/>, stay on the floor and out of
+    /// obstacles? A route the solver plans does, since the grid it is planned on has the floor's shape. A route kept
+    /// from an earlier frame was planned from somewhere else, and a knockback can move the walker to where the next leg
+    /// crosses outside ground. Lauda, 2026-11-04: planned from the north end, a straight line into the lower east nub;
+    /// a 40y push to the south end, the line kept, and from there it crossed the fire in the notch between the east
+    /// nubs (Burns). From off the floor nothing is asked: every way back in crosses outside ground.
+    /// </summary>
+    public static bool RouteStaysOnFloor(AIHints hints, WPos player, IReadOnlyList<WPos> route)
+    {
+        if (!hints.Bounds.Contains(hints.Center, player) || hints.InObstacle(player))
+            return true;
+        var from = player;
+        foreach (var corner in route)
+        {
+            var d = corner - from;
+            var steps = (int)MathF.Ceiling(d.Length() / FloorSampleYalms);
+            for (var s = 1; s <= steps; ++s)
+            {
+                var p = from + (d * ((float)s / steps));
+                if (!hints.Bounds.Contains(hints.Center, p) || hints.InObstacle(p))
+                    return false;
+            }
+            from = corner;
+        }
+
+        return true;
     }
 
     private static float DistanceToSegment(WPos p, WPos a, WPos b)

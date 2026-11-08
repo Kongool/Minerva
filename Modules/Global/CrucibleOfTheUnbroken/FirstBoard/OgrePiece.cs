@@ -78,6 +78,45 @@ sealed class StraightPunch(ModuleBase module) : Components.SingleTargetCast(modu
 sealed class RaidWideFires(ModuleBase module)
     : Components.RaidwideCasts(module, [(uint)AID.Allfire, (uint)AID.ScorchedEarth, (uint)AID.ScorchedEarth1]);
 
+// Each Wisp that reaches the Ogre blasts the whole arena (Scorched Earth, no cast bar). A wave blasts all at once,
+// 19.12-19.54s after its first Wisp appears however far each starts (26 waves, 2026-10-22 to 11-07). RaidWideFires only
+// hears cast bars, so nothing counted down to it, and Korha's two Great Wisp blasts in Third Degree (319 and 342, 11-07
+// 17:38) came unannounced. Announced from the spawn, at the earliest seen, while any Wisp of the wave lives.
+sealed class ScorchedEarthAhead(ModuleBase module) : ModuleComponent(module)
+{
+    private const double BlastAfterSeconds = 19.1d;
+    /// <summary>A Wisp seen this soon after another belongs to its wave (one was seen 0.3s after its wave-mates).</summary>
+    private const double SameWaveSeconds = 2d;
+    private readonly List<(Actor Wisp, DateTime Blast)> wisps = [];
+
+    public override void OnActorCreated(Actor actor)
+    {
+        if (actor.OID is not ((uint)OID.WispPiece or (uint)OID.GreatWispPiece))
+            return;
+        var blast = World.FutureTime(BlastAfterSeconds);
+        foreach (var (_, wave) in wisps)
+            if (wave < blast && (blast - wave).TotalSeconds < SameWaveSeconds)
+                blast = wave;
+        wisps.Add((actor, blast));
+    }
+
+    public override void OnActorDestroyed(Actor actor) => wisps.RemoveAll(w => w.Wisp == actor);
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is (uint)AID.ScorchedEarth or (uint)AID.ScorchedEarth1)
+            wisps.RemoveAll(w => w.Wisp == caster);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        foreach (var (wisp, blast) in wisps)
+            if (!wisp.IsDeadOrDestroyed)
+                hints.AddPredictedDamage(Raid.WithSlot().Mask(), blast, AIHints.PredictedDamageType.Raidwide,
+                    wisp.OID == (uint)OID.GreatWispPiece ? (uint)AID.ScorchedEarth1 : (uint)AID.ScorchedEarth);
+    }
+}
+
 // Ball of Fire will be treated as a moving void zone in order to avoid it blowing up on pc. May need to increase size if it isn't enough room to avoid.
 sealed class BallOfFireVoidZone(ModuleBase module) : Components.Voidzone(module, 6.0f, m => m.Enemies((uint)OID.BallOfFire).Where(z => z.EventState != 7));
 
@@ -131,6 +170,7 @@ sealed class OgrePieceStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<ScorchingSmite>()
             .ActivateOnEnter<RaidWideFires>()
+            .ActivateOnEnter<ScorchedEarthAhead>()
             .ActivateOnEnter<StraightPunch>()
             .ActivateOnEnter<Magma>()
             .ActivateOnEnter<Magma1>()

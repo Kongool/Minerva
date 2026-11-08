@@ -233,6 +233,8 @@ public sealed class AIHints
         this.SpareBounds = null;
         this.PositioningZones.Clear();
         this.PositioningSuspended = false;
+        this.HoldPositioningLate = false;
+        this.WalkBackAroundLiveGround = false;
         this.UptimeHeld = false;
         this.GoalZones.Clear();
         this.ForbiddenDirections.Clear();
@@ -303,6 +305,23 @@ public sealed class AIHints
     /// and the real danger: a spot to stand on is never worth a hit.
     /// </summary>
     public bool PositioningSuspended;
+
+    /// <summary>
+    /// The module's positioning spot is worth holding until the last moment that still leaves time to get out, not only
+    /// until what it stands in comes within the dodge's horizon. Opt-in, per frame; <see cref="Clear"/> resets it. The
+    /// Chewchum bomb push (2026-11-07): the spot to push a bomb from is inside Sand Breath, and leaving at the horizon
+    /// kept the player there two seconds of the six the bombs can be hit.
+    /// </summary>
+    public bool HoldPositioningLate;
+
+    /// <summary>
+    /// The walk back to uptime takes the way round ground that is already live (untimed or overdue) instead of standing
+    /// behind it. Opt-in, per frame; <see cref="Clear"/> resets it. Loosefrox's quicksand pits (2026-11-07, replayed): out
+    /// of Sand Breath after a bomb push, the line back crossed a pit and the character stood 22s behind it. Not on for
+    /// every fight: on Borgny's poison trails it bought 10 points of uptime but more hits from the cone at ~160s
+    /// (27 pulls replayed), which is the user's call.
+    /// </summary>
+    public bool WalkBackAroundLiveGround;
 
     /// <summary>
     /// The module says chasing the target is pointless right now: dodge, but make no walk for uptime. A boss that
@@ -578,7 +597,7 @@ public sealed class AIHints
     /// </remarks>
     private static float EscapeDistance(ShapeDistance z, WPos p, float margin)
     {
-        if (z is not SDShapeCheck)
+        if (z is not (SDShapeCheck or SDYesNo))
         {
             var d = z.Distance(p);
             return d > margin ? 0f : MathF.Max(margin - d, 0f);
@@ -949,6 +968,9 @@ public sealed class AIHints
     {
         if (z.Beyond(at, margin))
             return false;
+        // a yes/no answer has no distance to hold a margin against: only the inside counts (see SDYesNo)
+        if (z.ShapeDistance is SDYesNo)
+            return z.ShapeDistance.Distance(at) <= 0f;
         if (z.ShapeDistance is not SDShapeCheck)
             return z.ShapeDistance.Distance(at) <= margin;
         if (z.Contains(at))
@@ -1014,7 +1036,7 @@ public sealed class AIHints
         var room = cap;
         foreach (var z in this.ForbiddenZones)
         {
-            if (z.Activation > deadline || z.ShapeDistance is SDShapeCheck || z.Beyond(p, room))
+            if (z.Activation > deadline || z.ShapeDistance is SDShapeCheck or SDYesNo || z.Beyond(p, room))
                 continue;
             var d = z.ShapeDistance.Distance(p);
             if (d < room)
