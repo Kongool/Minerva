@@ -82,8 +82,26 @@ sealed class MissileBait(ModuleBase module) : Components.GenericBaitProximity(mo
     }
 }
 
+// Held until the drop's own cast starts, not the boss's: the drop is placed where the bait stands up to 0.72s after the
+// boss's cast ends, always before the drop's cast appears (89 drops). Let go at the boss's cast, Saar walked back toward
+// the boss and dropped it 4.4y off the corner, which leaves a push only a few degrees either side of the diagonal that
+// stays on the floor (2026-11-07).
 sealed class ThermobaricChargeBait(ModuleBase module) : Components.BaitAwayIcon(module, 2.0f, (uint)IconID.ThermobaricChargeLockOn,
-    (uint)AID.ThermobaricChargeBoss) {
+    (uint)AID.ThermobaricCharge) {
+
+    // the drop's cast starts about 5.1s after the icon (the bait's activation); one not come by this is not coming
+    private const double StaleAfterSeconds = 2.0d;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell) {
+        if (spell.Action.ID == (uint)AID.ThermobaricCharge && CurrentBaits.Count != 0) {
+            CurrentBaits.RemoveAt(0);
+        }
+    }
+
+    public override void Update() {
+        base.Update();
+        CurrentBaits.RemoveAll(b => World.CurrentTime > b.Activation.AddSeconds(StaleAfterSeconds));
+    }
 
     private readonly WPos[] positions = [
         new(138.0f, -18.0f), // NE
@@ -136,20 +154,47 @@ sealed class ThermobaricChargeBait(ModuleBase module) : Components.BaitAwayIcon(
         hints.AddForbiddenZone(new SDInvertedCircle(bestPosition, 1.0f));
     }
 }
+// 40y straight away from the drop. The push starts 0.50-0.56s after the cast ends (88 pushes, Saar's and Korha's,
+// 2026-11-01 to 11-07), but the base list lets the caster go when the cast ends. So the guard was gone for that half
+// second, and the walk back to the boss ran 2.5y down the push line. 12 of Saar's 23 pushes ended past the wall and bled
+// him (2026-11-07). The guard now holds until the push starts. It is judged with the real 40y (BossmodReborn's 39 was a
+// yalm short), and 1y short of the wall, since the bleed starts at the wall (0.5y past it bled him at 18:41).
 sealed class ThermobaricChargeKnockback(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.ThermobaricCharge, 40.0f) {
+    private const double PushStartsAfterSeconds = 0.5d;
+    // just past the latest push seen (0.56s): held any longer, the guard is still up mid-push and calls the landing danger
+    private const double HoldAfterCastSeconds = 0.6d;
+    private const float WallMargin = 1.0f;
+    // on the drop itself the push has no direction to judge; Korha steps 2-3y in from her corner
+    private const float OffDropRadius = 1.5f;
+    private (WPos Origin, DateTime Push, DateTime Until)? held;
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast) {
+        if (cast.Action.ID == WatchedAction) {
+            held = (cast.LocXZ != default ? cast.LocXZ : caster.Position, World.FutureTime(PushStartsAfterSeconds), World.FutureTime(HoldAfterCastSeconds));
+        }
+        base.OnCastFinished(caster, cast);
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
-        if (Casters.Count == 0) {
+        WPos origin;
+        DateTime activation;
+        if (Casters.Count != 0) {
+            origin = Casters[0].Origin;
+            activation = Casters[0].Activation;
+        } else if (held is { } h && World.CurrentTime < h.Until) {
+            origin = h.Origin;
+            activation = h.Push;
+        } else {
             return;
         }
-
-        var knockback = Casters[0];
-        var activation = Casters[0].Activation;
 
         if (IsImmune(slot, activation)) {
             return;
         }
 
-        hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, knockback.Origin, 39.0f, 20.0f, 20.0f), activation);
+        var half = 20.0f - WallMargin;
+        hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, origin, 40.0f, half, half), activation);
+        hints.AddForbiddenZone(new SDCircle(origin, OffDropRadius), activation);
     }
 }
 

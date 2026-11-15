@@ -51,6 +51,9 @@ sealed class DeathSpiral(ModuleBase module) : Components.SimpleAOEs(module, (uin
 // guard; at 02:43, behind him by chance, all 14 hits landed from the rear. He faced her familiar every time. Now, while a
 // front guard is up or being cast and he is not facing her: stand behind him (a positioning instruction, so the dodge goes
 // at once), and once she is there he is the target.
+// But only once the Bishop is dead: the Bishop dies first, then the Knight (the user, 2026-11-15). Walked behind the
+// guarded Knight while the Bishop lived, Korha swapped between them seven times in two minutes (14:22, Third Degree).
+// On a degree the familiar holds the Knight meanwhile.
 sealed class ForwardGuard(ModuleBase module) : Components.DirectionalParry(module, [(uint)OID.BoneKnight])
 {
     /// <summary>How far round from straight behind counts as behind him: his rear quarter, as the game's positionals count
@@ -63,9 +66,9 @@ sealed class ForwardGuard(ModuleBase module) : Components.DirectionalParry(modul
         foreach (var (id, state) in ActorStates)
             if ((((state | (state >> 4)) & (int)Side.Front) != 0) && World.Actors.Find(id) is { IsDeadOrDestroyed: false } k)
                 knight = k;
-        if (knight == null || knight.TargetID == actor.InstanceID)
+        if (knight == null || knight.TargetID == actor.InstanceID || !Module.PrimaryActor.IsDeadOrDestroyed)
         {
-            // nothing guarded, or he turns with her: no side to go to, so as before -- off him while she is in front
+            // nothing guarded, he turns with her, or the Bishop is still up: as before -- off him while she is in front
             base.AddAIHints(slot, actor, assignment, hints);
             return;
         }
@@ -196,6 +199,13 @@ sealed class BoneBishopStates : StateMachineBuilder
 [ModuleInfo(CFCID = 1088u, NameID = 14532u, PrimaryActorOID = (uint)OID.BoneBishop, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "wen (ported from BMR)")]
 public sealed class BoneBishop(WorldState ws, Actor primary) : ModuleBase(ws, primary, new(120f, -420f), new ArenaBoundsCircle(20f))
 {
+    // The Bishop first (see ForwardGuard). Once he is dead, the module ranks the Knight as the survivor.
+    protected override void CalculateModuleAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (!PrimaryActor.IsDeadOrDestroyed)
+            hints.SetPriority(PrimaryActor, 1);
+    }
+
     protected override void DrawEnemies(int pcSlot, Actor pc)
     {
         Arena.Actor(PrimaryActor);
