@@ -1041,6 +1041,9 @@ public sealed class AIManager
                         this.knownVoids.RemoveAt(i);
             }
         }
+        // last, so ground that filled and started over partway through the loop (KnownGround.Observe) still has the
+        // character's own cell this frame
+        this.knownGround.Observe(pc.Position);
     }
 
     /// <summary>How many times a frame we will ask the floor and re-solve before giving up and holding.</summary>

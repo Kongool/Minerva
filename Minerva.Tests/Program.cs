@@ -1851,6 +1851,15 @@ t.Section("Auto-dodge pathfinding");
     t.True("the next cell over is not", !ground.Contains(new WPos(103f, 100f)));
     ground.Reset();
     t.True("a zone change forgets it", !ground.Contains(new WPos(101f, 101f)) && ground.Count == 0);
+    // full, it starts over rather than stop learning: Occult Crescent 2026-11-15, an hour into one zone the ground under
+    // every toon read as wall outside a fight
+    for (var i = 0; i < KnownGround.MaxCells; ++i)
+        ground.Observe(new WPos(-10000f + (2f * (i % 1000)), -10000f + (2f * (i / 1000))));
+    t.True("filled to its cap", ground.Count == KnownGround.MaxCells);
+    ground.Observe(new WPos(645f, 658f));
+    t.True("new ground past the cap is still learned", ground.Contains(new WPos(645f, 658f)) && ground.Near(new WPos(645.5f, 658.5f)));
+    t.True("and the old is let go", ground.Count == 1);
+
 
     // a guessed donut's hole errs small: too large paints lethal ground safe and killed a samurai on the
     // Orthochimera's Dragon's Voice (30y donut, real hole <= 9.9, old estimate 12), 2026-09-06

@@ -491,18 +491,15 @@ public sealed class ReplayService : IDisposable
     }
 
     /// <summary>Saved recordings, newest first (so an accidental record toggle can't hide an older one).</summary>
-    /// <summary>What the folder holds: how many recordings and how much disk, for the window that offers to trim it.</summary>
-    public (int Count, long Bytes) RecordingsOnDisk()
+    /// <summary>How many recordings, how much disk, and how many predate the current recorder, from one pass over the
+    /// folder (the Record page's line under the list).</summary>
+    public (int Count, long Bytes, int Obsolete) DiskSummary()
     {
-        var count = 0;
+        var entries = this.OnDisk();
         var bytes = 0L;
-        foreach (var e in this.OnDisk())
-        {
-            ++count;
+        foreach (var e in entries)
             bytes += e.Bytes;
-        }
-
-        return (count, bytes);
+        return (entries.Count, bytes, ReplayRetention.CountObsolete(entries, ReplayRecorder.Revision));
     }
 
     /// <summary>
@@ -568,7 +565,7 @@ public sealed class ReplayService : IDisposable
             foreach (var path in Directory.GetFiles(this.directory, "minerva-*.log"))
             {
                 var info = new FileInfo(path);
-                entries.Add(new ReplayRetention.Entry(path, info.Length, info.LastWriteTimeUtc, RevisionOf(path)));
+                entries.Add(new ReplayRetention.Entry(path, info.Length, info.LastWriteTimeUtc, this.KnownRevisionOf(path, info)));
             }
         }
         catch (Exception ex)
@@ -577,6 +574,24 @@ public sealed class ReplayService : IDisposable
         }
 
         return entries;
+    }
+
+    // A finished recording's revision never changes, and reading it opens the file: read once per file, again only if
+    // the file has changed since. Korha, 2026-11-15: 1,854 recordings, every one opened twice a frame while the Record
+    // page was up, and the game ran frame by frame.
+    private readonly Dictionary<string, (long Bytes, DateTime Modified, int Revision)> revisions = [];
+
+    private int KnownRevisionOf(string path, FileInfo info)
+    {
+        lock (this.revisions)
+        {
+            if (this.revisions.TryGetValue(path, out var known) && known.Bytes == info.Length && known.Modified == info.LastWriteTimeUtc)
+                return known.Revision;
+        }
+        var revision = RevisionOf(path);
+        lock (this.revisions)
+            this.revisions[path] = (info.Length, info.LastWriteTimeUtc, revision);
+        return revision;
     }
 
     /// <summary>The recorder revision that wrote a log, from its first line alone -- the file may be hundreds of MB.</summary>
@@ -592,9 +607,6 @@ public sealed class ReplayService : IDisposable
             return 0;
         }
     }
-
-    /// <summary>How many recordings predate what the recorder captures today.</summary>
-    public int ObsoleteOnDisk() => ReplayRetention.CountObsolete(this.OnDisk(), ReplayRecorder.Revision);
 
     public IReadOnlyList<string> ListRecordings()
     {

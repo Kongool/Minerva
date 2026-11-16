@@ -19,10 +19,17 @@ public sealed class KnownGround
 
     public void Reset() => this.cells.Clear();
 
+    /// <summary>
+    /// Full, the ground starts over from where everyone stands now. It used to stop learning instead, and in one long
+    /// visit to an open zone everything not stood on before the cap stayed solid. Occult Crescent, 2026-11-15: about an
+    /// hour in (after Eye to Eye), the ground under every toon read as wall outside a fight, and the dodge ran them
+    /// about looking for the floor; with a module loaded its own arena replaces this, so fights were fine.
+    /// </summary>
     public void Observe(WPos p)
     {
-        if (this.cells.Count < MaxCells)
-            this.cells.Add(Key(p));
+        if (this.cells.Count >= MaxCells)
+            this.cells.Clear();
+        this.cells.Add(Key(p));
     }
 
     /// <summary>Has anyone stood in this cell?</summary>

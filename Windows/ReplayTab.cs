@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -24,6 +25,22 @@ public sealed class ReplayTab
     private string? previewReport;
 
     public ReplayTab(ReplayService replay) => this.replay = replay;
+
+    // The folder can hold well over a thousand recordings. Listed and counted on every frame, the page ran the game frame
+    // by frame (Korha, 2026-11-15, 1,854 recordings): scanned every few seconds instead, and at once after a purge.
+    private const double DiskRescanSeconds = 5d;
+    private DateTime diskScannedAt;
+    private IReadOnlyList<string> recordings = [];
+    private (int Count, long Bytes, int Obsolete) disk;
+
+    private void RescanDisk(bool now = false)
+    {
+        if (!now && DateTime.UtcNow - this.diskScannedAt < TimeSpan.FromSeconds(DiskRescanSeconds))
+            return;
+        this.diskScannedAt = DateTime.UtcNow;
+        this.recordings = this.replay.ListRecordings();
+        this.disk = this.replay.DiskSummary();
+    }
 
     public void Draw()
     {
@@ -77,10 +94,10 @@ public sealed class ReplayTab
         if (ImGui.BeginChild("##recordings", new Vector2(0f, MathF.Max(listHeight, 60f)), true))
         {
             var current = this.replay.PlaybackPath ?? string.Empty;
-            var recordings = this.replay.ListRecordings();
-            if (recordings.Count == 0)
+            this.RescanDisk();
+            if (this.recordings.Count == 0)
                 ImGui.TextDisabled("None yet.");
-            foreach (var path in recordings)
+            foreach (var path in this.recordings)
             {
                 if (ImGui.Selectable($"{Display(path)}##{path}", path == current))
                     this.Load(path);
@@ -103,8 +120,8 @@ public sealed class ReplayTab
     /// </summary>
     private void DrawHousekeeping(Configuration cfg)
     {
-        var (count, bytes) = this.replay.RecordingsOnDisk();
-        var obsolete = this.replay.ObsoleteOnDisk();
+        this.RescanDisk();
+        var (count, bytes, obsolete) = this.disk;
         ImGui.Spacing();
         ImGui.TextDisabled(ReplayRetention.Describe(count, bytes) + (obsolete > 0 ? $"; {obsolete} predate the current recorder" : ""));
 
@@ -135,7 +152,10 @@ public sealed class ReplayTab
         UiKit.Tip("Over the cap, the oldest go first.");
 
         if (ImGui.Button("Purge now"))
+        {
             this.purgeResult = this.replay.Purge(byHand: true);   // the only path that may retire obsolete recordings
+            this.RescanDisk(now: true);
+        }
         UiKit.Tip(cfg.ReplayKeepDays == 0 && cfg.ReplayMaxTotalMB == 0
             ? "Nothing to do until one of the limits above is set. The newest recording, and the one being written, are never deleted."
             : "Applies the limits above right now. The newest recording, and the one being written, are never deleted.");
