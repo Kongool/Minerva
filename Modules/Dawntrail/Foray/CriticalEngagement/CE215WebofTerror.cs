@@ -161,6 +161,11 @@ sealed class ArachnidFunnel(ModuleBase module) : Components.GenericAOEs(module)
 
 sealed class Conformity(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Conformity, new AOEShapeCone(50f, 22.5f.Degrees()));
 
+// The daughters' cones from their own 2.7s casts. ConformityAdds predicts them earlier from how each daughter turns, but
+// when the prediction misses, nothing was drawn at all: Saar, 2026-11-15 21:08, a vuln at 111.1s and the death at 261.8s,
+// both "no zone for it" while the cast bar was up.
+sealed class ConformityAddsCast(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Conformity1, new AOEShapeCone(50f, 22.5f.Degrees()));
+
 sealed class ConformityAdds(ModuleBase module) : Components.GenericAOEs(module)
 {
     // any pattern to how adds move after being assigned status?
@@ -350,6 +355,7 @@ sealed class CE215WebofTerrorStates : StateMachineBuilder
             .ActivateOnEnter<VenomEruption>()
             .ActivateOnEnter<Conformity>()
             .ActivateOnEnter<ConformityAdds>()
+            .ActivateOnEnter<ConformityAddsCast>()
             .ActivateOnEnter<BedrockUplift>();
             //.ActivateOnEnter<Debug>();
     }

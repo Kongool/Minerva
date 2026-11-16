@@ -10,8 +10,12 @@ public sealed class KnownGround
 {
     public const float Cell = 2f;
 
-    /// <summary>A whole deep-dungeon floor set at two yalms is well under this; the cap only bounds a leak.</summary>
-    public const int MaxCells = 32768;
+    /// <summary>
+    /// The cap only bounds memory, about 40 bytes a cell (10 MB here). 32,768 filled in about 70 minutes of one Occult
+    /// Crescent visit (2026-11-15), every player and enemy in sight observed every frame; eight times that outlasts an
+    /// evening, and if it does fill, <see cref="Observe"/> starts over rather than stop learning.
+    /// </summary>
+    public const int MaxCells = 262144;
 
     private readonly HashSet<(int X, int Z)> cells = [];
 
