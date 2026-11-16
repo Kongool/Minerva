@@ -115,6 +115,46 @@ sealed class TopazRay(ModuleBase module) : Components.SimpleAOEGroups(module, [(
     public readonly List<Actor> Actors = [];
     private RubyReflection? rubyreflection;
     private bool intercept;
+    private readonly List<AOEInstance> withChosen = [];
+
+    // The chosen stones jump into place and hold still until they fire, 3 to 21s later, but the rays only get a cast
+    // bar 2.7s out. Their circles are drawn from the moment they are chosen, as a warning only (not dodged), so the
+    // radar shows where the ground will fire; the Stampede push reads the same stones to keep its landing off them.
+    // Atlas Carbuncle, 2026-11-15: the rays' casts started 0.5s before the push landed both toons on one.
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        var cast = base.ActiveAOEs(slot, actor);
+        if (Actors.Count == 0)
+        {
+            return cast;
+        }
+        withChosen.Clear();
+        foreach (ref readonly var aoe in cast)
+        {
+            withChosen.Add(aoe);
+        }
+        foreach (var stone in Actors)
+        {
+            if (stone.IsDestroyed)
+            {
+                continue;
+            }
+            var casting = false;
+            foreach (ref readonly var aoe in cast)
+            {
+                if (aoe.ActorID == stone.InstanceID)
+                {
+                    casting = true;
+                    break;
+                }
+            }
+            if (!casting)
+            {
+                withChosen.Add(new(Shape, stone.Position, default, default, Colors.AOE, risky: false, actorID: stone.InstanceID));
+            }
+        }
+        return CollectionsMarshal.AsSpan(withChosen);
+    }
 
     public override void OnActorPlayActionTimelineEvent(Actor actor, ushort id)
     {
@@ -335,8 +375,25 @@ sealed class SpinebreakingStampede(ModuleBase module) : Components.GenericKnockb
                 }
                 break;
             case (uint)AID.SpinebreakingStampedeCircle:
-                _kbs.Clear();
+                // the push starts up to 0.48s after this (14 Atlas pulls, 2026-09-25 to 11-15): hold the guard past it
+                if (_kbs.Count != 0 && circleHeldUntil == default)
+                {
+                    circleHeldUntil = World.FutureTime(CircleHoldSeconds);
+                }
                 break;
+        }
+    }
+
+    private const double CircleHoldSeconds = 0.6d;
+    private DateTime circleHeldUntil;
+
+    public override void Update()
+    {
+        base.Update();
+        if (circleHeldUntil != default && World.CurrentTime >= circleHeldUntil)
+        {
+            _kbs.Clear();
+            circleHeldUntil = default;
         }
     }
 
@@ -345,6 +402,12 @@ sealed class SpinebreakingStampede(ModuleBase module) : Components.GenericKnockb
         var kbs = CollectionsMarshal.AsSpan(_kbs);
         var len = kbs.Length;
         if (len == 0)
+        {
+            return;
+        }
+        // held past its event, the guard stands down once the push has the player: every start that lands on the floor is
+        // within 14y of the origin, and the push adds 30
+        if (circleHeldUntil != default && (actor.Position - kbs[len - 1].Origin).LengthSq() > 20f * 20f)
         {
             return;
         }
@@ -387,7 +450,84 @@ sealed class SpinebreakingStampede(ModuleBase module) : Components.GenericKnockb
 
                     break;
                 }
-                void AddAwayFromOrigin(WPos origin, DateTime activation) => hints.AddForbiddenZone(new SDKnockbackInAABBSquareAwayFromOrigin(Center, origin, 30f, 19f), activation);
+                void AddAwayFromOrigin(WPos origin, DateTime activation) => hints.AddForbiddenZone(LandingGuard(actor, origin, activation), activation);
+        }
+    }
+
+    // The circle push lands 0.5s after the Topaz Rays start casting and about 2.5s before they fire, and the stones are
+    // in place 18s before that. Atlas Carbuncle, 2026-11-15: the push was exactly 30y away from (238,332) and dropped
+    // Korha 4.2y and Saar 2.0y from one stone, both hit (Saar for 64% of her HP). The landing is kept off the chosen
+    // stones too: the ray's 4y, the player's 0.5y, and 0.5y for where the push really ends (a yalm off at the start is
+    // about four at the landing). Only when some start the player can reach in time lands clear, a yalm wide so the grid
+    // can hold it; otherwise the floor alone, as before, since a push off the floor is worse than a ray.
+    private const float StoneLandingRadius = 5f;
+    private const float PocketCell = 0.5f;
+    private TopazRay? topaz;
+    private (WPos Origin, DateTime Activation, int Stones) pocketKey;
+    private readonly List<WPos> pockets = [];
+
+    private ShapeDistance LandingGuard(Actor actor, WPos origin, DateTime activation)
+    {
+        topaz ??= Module.FindComponent<TopazRay>();
+        var stones = topaz == null ? [] : topaz.Actors.Where(s => !s.IsDestroyed).Select(s => s.Position).ToArray();
+        if (stones.Length != 0)
+        {
+            if (pocketKey != (origin, activation, stones.Length))
+            {
+                pocketKey = (origin, activation, stones.Length);
+                FindPockets(origin, stones);
+            }
+            // a yalm at least: held past its event, the push is due now
+            var reach = MathF.Max((float)(activation - World.CurrentTime).TotalSeconds * ArenaPathfinder.DefaultMoveSpeed, 1f);
+            foreach (var p in pockets)
+            {
+                if ((p - actor.Position).LengthSq() <= reach * reach)
+                {
+                    return new SDKnockbackInAABBSquareAwayFromOriginPlusAOECircles(Center, origin, 30f, 19f, stones, StoneLandingRadius, stones.Length);
+                }
+            }
+        }
+        return new SDKnockbackInAABBSquareAwayFromOrigin(Center, origin, 30f, 19f);
+    }
+
+    // Starts whose landing is on the floor and clear of every stone, with the four neighbours half a yalm away clear too.
+    // Only starts within 14y of the origin can land on a 19y half-width square after a 30y push.
+    private void FindPockets(WPos origin, WPos[] stones)
+    {
+        pockets.Clear();
+        const float span = 14f;
+        for (var x = -span; x <= span; x += PocketCell)
+        {
+            for (var z = -span; z <= span; z += PocketCell)
+            {
+                var p = origin + new WDir(x, z);
+                if (Lands(p) && Lands(p + new WDir(PocketCell, 0f)) && Lands(p - new WDir(PocketCell, 0f))
+                    && Lands(p + new WDir(0f, PocketCell)) && Lands(p - new WDir(0f, PocketCell)))
+                {
+                    pockets.Add(p);
+                }
+            }
+        }
+
+        bool Lands(WPos start)
+        {
+            if (!start.InSquare(Center, 19f) || (start - origin).LengthSq() < 0.01f)
+            {
+                return false;
+            }
+            var landing = start + 30f * (start - origin).Normalized();
+            if (!landing.InSquare(Center, 19f))
+            {
+                return false;
+            }
+            foreach (var s in stones)
+            {
+                if (landing.InCircle(s, StoneLandingRadius))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }
