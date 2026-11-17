@@ -706,7 +706,10 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             globalSequence = header->GlobalSequence;
             resolved = [];
             var raw = (ulong*)effects;
-            var numTargets = Math.Min((int)header->NumTargets, 16); // defensive: the packet is fixed-size
+            // The packet comes in 1, 8, 16, 24 and 32-target sizes and the header says how many it holds (BossmodReborn
+            // reads them all). Clamped at 16 until 2026-11-16: a Void Garm's Dragon's Voice in Eureka Anemos hit at least
+            // 20 and listed 16, none of the four toons it hit 16y out.
+            var numTargets = Math.Min((int)header->NumTargets, 32);
             for (var i = 0; i < numTargets; ++i)
             {
                 var slots = new ulong[ActorCastEvent.Target.MaxEffects];

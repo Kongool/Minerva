@@ -108,8 +108,8 @@ public sealed class AutoHints
             return;
         }
 
-        // a large enemy's cone or line starts at its edge, not its centre
-        var reach = hint.Kind is ShapeKind.Cone or ShapeKind.Rect ? caster.HitboxRadius : 0f;
+        // a large enemy's cone or line starts at its edge, not its centre, and so does a circle the sheet measures from it
+        var reach = hint.Kind is ShapeKind.Cone or ShapeKind.Rect || hint.FromCasterEdge ? caster.HitboxRadius : 0f;
         if (hint with { Radius = hint.Radius + reach } is var sized && sized.ToShape() is { } shape)
         {
             var origin = cast.LocXZ != default ? cast.LocXZ : caster.Position;

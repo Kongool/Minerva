@@ -45,7 +45,12 @@ public static class CastTypeShapes
         return castType switch
         {
             1 => new ShapeHint(ShapeKind.SingleTarget),
-            2 or 5 => new ShapeHint(ShapeKind.Circle, Radius: effectRange),
+            2 => new ShapeHint(ShapeKind.Circle, Radius: effectRange),
+
+            // a circle round the caster that starts at its edge: 6 on the sheet is 6 + R. Mapped like 2 until 2026-11-16,
+            // so every one was drawn short by the mob's radius: Gardenkeeper's Neck Splinter (6 + 2.55) stopped the dodge
+            // at 7.2y and hit. BossmodReborn's GuessShape adds the caster's hitbox for 5.
+            5 => new ShapeHint(ShapeKind.Circle, Radius: effectRange, FromCasterEdge: true),
 
             // BMR leaves 6 commented as "custom shapes". A circle is the common case and the best guess
             // available, but it is a guess, so it goes out with a TODO rather than silently.

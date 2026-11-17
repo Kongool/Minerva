@@ -21,6 +21,8 @@ public enum ShapeKind
 /// implied by the data are left at 0 with <see cref="NeedsReview"/> set, so the generator emits a
 /// TODO rather than a wrong value. This is the seam between game-data lookups (plugin) and the
 /// game-free generator (core).
+/// <para><paramref name="FromCasterEdge"/>: the radius is measured from the caster's edge, not its centre, so the
+/// caster's hitbox radius adds to it (the sheet's CastType 5, a circle drawn as "range 6+R").</para>
 /// </summary>
 public readonly record struct ShapeHint(
     ShapeKind Kind,
@@ -28,7 +30,8 @@ public readonly record struct ShapeHint(
     float HalfAngleDeg = 0f,
     float HalfWidth = 0f,
     float InnerRadius = 0f,
-    bool NeedsReview = false)
+    bool NeedsReview = false,
+    bool FromCasterEdge = false)
 {
     public static readonly ShapeHint Unknown = new(ShapeKind.Unknown, NeedsReview: true);
 

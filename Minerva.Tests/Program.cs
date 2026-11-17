@@ -1904,6 +1904,24 @@ t.Section("Auto-dodge pathfinding");
     t.True("guesser draws a cone", Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Cone, Radius: 12f, HalfAngleDeg: 45f)));
     t.True("guesser skips a raidwide-sized circle", !Minerva.Automation.AutoHints.Draws(new Minerva.Generation.ShapeHint(Minerva.Generation.ShapeKind.Circle, Radius: 30f)));
 
+    // Eureka Anemos, 2026-11-16: Gardenkeeper's Neck Splinter is the sheet's CastType 5, "6" measured from the mob's
+    // edge (R2.55). Drawn as a 6y circle, the dodge stopped Korha 7.2y from it and the hit landed.
+    {
+        var ek = new WorldState(qpf: 10_000_000, gameVersion: "test");
+        ek.Execute(new WorldState.OpFrameStart(Frame(ek, 0), TimeSpan.Zero));
+        const ulong keeper = 0x400000003, small = 0x400000004;
+        ek.Execute(new ActorState.OpCreate(keeper, 0x200B, 0, "Gardenkeeper", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 2.55f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+        ek.Execute(new ActorState.OpCreate(small, 0x200C, 0, "Imp", 0, ActorType.Enemy, new Vector4(50, 0, 0, 0), 2.55f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+        var guess = new Minerva.Automation.AutoHints(ek, new StubShapeResolver());
+        ek.Execute(new ActorState.OpCastInfo(keeper, new ActorCastInfo { Action = ActionID.MakeSpell(10569u), TotalTime = 3f, Rotation = default }));
+        ek.Execute(new ActorState.OpCastInfo(small, new ActorCastInfo { Action = ActionID.MakeSpell(102u), TotalTime = 3f, Rotation = default }));
+        var h = new AIHints { Center = new WPos(25f, 0f), Bounds = new ArenaBoundsCircle(60f) };
+        guess.AddForbiddenZones(h);
+        t.True("a circle measured from the caster's edge reaches past its sheet range by the caster's radius",
+            !h.IsPositionSafe(new WPos(7.2f, 0f)) && h.IsPositionSafe(new WPos(0f, 9f)));
+        t.True("a plain circle of the same range does not", h.IsPositionSafe(new WPos(57.2f, 0f)) && !h.IsPositionSafe(new WPos(55.5f, 0f)));
+    }
+
     // Pilgrim's Traverse, 2026-10-17: the sheet's Right-sided Shockwave is a 180-degree cone with no side, so the guess
     // drew it in front of the mob. A zone module's corrections draw it on the mob's right and, once it lands, the hit
     // that follows on its left, until that one lands too.
@@ -4208,6 +4226,7 @@ t.Section("CastType maps to the right shape");
     t.Eq("1 is single-target", R(1).Kind, Minerva.Generation.ShapeKind.SingleTarget);
     t.Eq("2 is a circle", R(2).Kind, Minerva.Generation.ShapeKind.Circle);
     t.Eq("5 is a circle", R(5).Kind, Minerva.Generation.ShapeKind.Circle);
+    t.True("5 is measured from the caster's edge, 2 from its centre", R(5).FromCasterEdge && !R(2).FromCasterEdge);
     t.Eq("7 is a circle, not a rect", R(7).Kind, Minerva.Generation.ShapeKind.Circle);
     t.Eq("4 is a rect", R(4).Kind, Minerva.Generation.ShapeKind.Rect);
     t.Eq("12 is a rect", R(12).Kind, Minerva.Generation.ShapeKind.Rect);
@@ -7848,6 +7867,7 @@ sealed class StubShapeResolver : Minerva.Generation.IShapeResolver
         101u => new(Minerva.Generation.ShapeKind.Cone, Radius: 60f, HalfAngleDeg: 15f),
         102u => new(Minerva.Generation.ShapeKind.Circle, Radius: 6f),
         42214u => new(Minerva.Generation.ShapeKind.Cone, Radius: 30f, HalfAngleDeg: 90f),  // Right-sided Shockwave: the sheet gives no side
+        10569u => new(Minerva.Generation.ShapeKind.Circle, Radius: 6f, FromCasterEdge: true), // Neck Splinter: CastType 5, 6 + R
         104u => new(Minerva.Generation.ShapeKind.Circle, Radius: 5f),                 // spread radius
         106u => new(Minerva.Generation.ShapeKind.Circle, Radius: 4f),                 // icon-spread radius
         107u => new(Minerva.Generation.ShapeKind.Circle, Radius: 10f),
