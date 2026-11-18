@@ -70,6 +70,8 @@ public sealed class AIManager
     private readonly HashSet<uint> announcedEncounters = []; // open encounters already written to the log, once each
     private DateTime sprintAskedUntil; // DodgeSprint.Holds: an ask for Sprint stands until then
     private readonly StuckWalk stuckWalk = new();
+    private readonly MeshWalk meshWalk = new();          // the mesh's way round walls, for walks not dodging anything
+    private readonly QuestBattle.IQuestNavigation? mesh; // the navmesh's pathfinder, null when not installed
 
     public SafeSpot Current { get; private set; } = SafeSpot.Stay;
 
@@ -129,12 +131,13 @@ public sealed class AIManager
     /// <summary>The installed movement controller (real or null-object), for status/diagnostics.</summary>
     public IMovementController Movement => this.movement;
 
-    public AIManager(WorldState world, ModuleManager modules, Configuration config, IMovementController? movement = null, Minerva.Generation.IShapeResolver? shapes = null)
+    public AIManager(WorldState world, ModuleManager modules, Configuration config, IMovementController? movement = null, Minerva.Generation.IShapeResolver? shapes = null, QuestBattle.IQuestNavigation? mesh = null)
     {
         this.world = world;
         this.modules = modules;
         this.config = config;
         this.movement = movement ?? new NullMovementController();
+        this.mesh = mesh;
         this.autoHints = shapes != null ? new AutoHints(world, shapes) : null;
     }
 
@@ -454,10 +457,38 @@ public sealed class AIManager
             travelling = pc.CastInfo == null;
         }
 
-        if (this.stuckWalk.Observe(steering && this.movement is not NullMovementController, pc.Position, now))
-            Service.Log.Information($"Minerva: the walk to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckWalk.NoProgressSeconds}s; uptime walks stand down for {StuckWalk.StandDownSeconds}s so the rotation can cast.");
+        // A walk that is not dodging anything has no AOE to bend around, so the solve hands over a straight line, and
+        // nothing here knows about walls (MeshWalk: Korha against a rock in Eureka Anemos, 2026-11-17). The mesh does:
+        // walk its route when it goes round something and that way is clear. Dodges keep the route they were solved
+        // with -- it is shaped by the AOEs, and the mesh knows nothing of them.
+        var reason = this.ReasonFor(pc, goal, now.AddSeconds(horizon + lead), margin);
+        var meshEligible = steering && this.mesh != null && this.movement is MovementController { UsingNavmesh: true }
+            && this.Current.Route is not { Count: > 1 }
+            && reason is DodgeReason.Uptime or DodgeReason.Positional or DodgeReason.Positioning;
+        IReadOnlyList<Vector3>? meshRoute = null;
+        if (meshEligible)
+        {
+            meshRoute = this.meshWalk.Route(pc.PosRot.XYZ(), this.Current.Target, now, this.mesh!.Pathfind);
+            if (meshRoute != null && !MeshWalk.Clear(this.hints, pc.Position, meshRoute, now, margin, moveSpeed))
+                meshRoute = null;
+        }
 
-        if (steering)
+        if (this.stuckWalk.Observe(steering && this.movement is not NullMovementController, pc.Position, now))
+        {
+            // A straight walk that stuck is asked of the mesh once, from where the character stands, before it stands
+            // down; one the mesh was already walking, or a second stick on the same destination, stands down as before.
+            if (meshEligible && meshRoute == null && this.meshWalk.Replan())
+            {
+                this.stuckWalk.Resume();
+                Service.Log.Information($"Minerva: the walk to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckWalk.NoProgressSeconds}s; asking the navmesh for a way round from ({pc.Position.X:0.0},{pc.Position.Z:0.0}).");
+            }
+            else
+                Service.Log.Information($"Minerva: the walk to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckWalk.NoProgressSeconds}s; uptime walks stand down for {StuckWalk.StandDownSeconds}s so the rotation can cast.");
+        }
+
+        if (steering && meshRoute != null)
+            this.movement.Travel(meshRoute);
+        else if (steering)
             // Steer is where to head this frame (used when we drive directly); Route is the whole path,
             // for a navmesh follower that walks what it is given rather than being steered.
             this.movement.MoveTo(this.Current.Steer, this.Current.Route);
@@ -490,8 +521,7 @@ public sealed class AIManager
             dodging && DodgeSprint.Wanted(DodgeSprint.EscapeDistance(pc.Position, this.Current), this.hints.SecondsUntilDangerAt(pc.Position, now, margin), moveSpeed),
             dodging, now, ref this.sprintAskedUntil);
 
-        this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target,
-            this.ReasonFor(pc, goal, now.AddSeconds(horizon + lead), margin), blocker, steering));
+        this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target, reason, blocker, steering));
     }
 
     /// <summary>

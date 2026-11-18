@@ -62,7 +62,9 @@ public sealed class Plugin : IDalamudPlugin
         // body, so before Create<Service>() — and this reaches Service.PluginInterface, which is still
         // null at that point. That threw inside the plugin's own ctor and Dalamud refused to load it.
         this.roster = new Automation.DaedalusRosterIPC();
-        this.ai = new AIManager(this.World, this.modules, this.Config, this.movement, new Minerva.Generation.LuminaShapeResolver());
+        // one pathfinder for quest battle walks and for the AI's walks round walls (MeshWalk)
+        var mesh = new QuestNavigation(() => this.Config.Navmesh);
+        this.ai = new AIManager(this.World, this.modules, this.Config, this.movement, new Minerva.Generation.LuminaShapeResolver(), mesh);
         this.ai.Roster = this.roster;
         this.replay = new ReplayService(this.World, this.modules, this.Config);
         this.Presets = new DodgePresets(this.Config);
@@ -136,7 +138,7 @@ public sealed class Plugin : IDalamudPlugin
         ModuleBase.ErrorSink = static msg => Service.Log.Warning($"[ModuleError] {msg}");
 
         // quest battle scripts: the mesh to walk a solo duty with, a log, and the game's condition flags they wait on
-        Minerva.QuestBattle.QuestBattle.Navigation = new QuestNavigation(() => this.Config.Navmesh);
+        Minerva.QuestBattle.QuestBattle.Navigation = mesh;
         Minerva.QuestBattle.QuestBattle.LogSink = static msg => Service.Log.Information($"Minerva: {msg}");
         Service.Condition.ConditionChange += this.OnConditionChange;
         ClientState.RecastQuery = GameData.RecastRemaining;

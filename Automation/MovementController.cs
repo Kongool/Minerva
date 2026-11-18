@@ -230,8 +230,9 @@ public sealed unsafe class MovementController : IMovementController, IDisposable
     }
 
     /// <summary>
-    /// Walk a quest battle's route. Unlike a dodge route it keeps every point's height: it crosses stairs and
-    /// floors, and the follower walks what it is given. Without a navmesh the raw hook steers at the next point.
+    /// Walk a quest battle's route, or the mesh's way round a wall (MeshWalk). Unlike a dodge route it keeps every
+    /// point's height: it crosses stairs and floors, and the follower walks what it is given. Without a navmesh the
+    /// raw hook steers at the next point.
     /// </summary>
     public void Travel(IReadOnlyList<Vector3> path)
     {

@@ -7050,6 +7050,84 @@ t.Section("A walk that does not move the character stands down");
     t.True("a walk that moves is never stuck", !walked && !m.StandingDown(t0.AddSeconds(2)));
     var idle = new StuckWalk();
     t.True("standing still with no walk issued is not stuck", !idle.Observe(false, here, t0) && !idle.Observe(false, here, t0.AddSeconds(5)));
+
+    var resumed = new StuckWalk();
+    resumed.Observe(true, here, t0);
+    resumed.Observe(true, here, t0.AddSeconds(1.6));
+    resumed.Resume();
+    t.True("a stand-down called off for another way there is over", !resumed.StandingDown(t0.AddSeconds(1.7)));
+    t.True("and that way is timed afresh", !resumed.Observe(true, here, t0.AddSeconds(2.5)) && resumed.Observe(true, here, t0.AddSeconds(3.2)));
+}
+
+// Korha, Eureka Anemos 2026-11-17: uptime walks to (25.9,-407.1) and (23.8,-412.3) from the south side of rock
+// z3fa_t1_rck01 ran straight into its south face. The route is the one Mnemosyne's findpath gives for the first walk.
+t.Section("A walk that is not a dodge goes round a wall the way the navmesh does");
+{
+    var t0 = new DateTime(2026, 11, 17, 19, 31, 0, DateTimeKind.Utc);
+    var korha = new Vector3(20.6f, 30.3f, -415.7f);
+    var dest = new WPos(25.9f, -407.1f);
+    List<Vector3> east = [new(20.6f, 31f, -415.9f), new(21.1f, 31f, -417f), new(22.9f, 31f, -416.7f), new(26.1f, 31f, -414.2f),
+        new(26.7f, 31f, -413.4f), new(27f, 31f, -411.1f), new(25.9f, 31f, -407.1f)];
+    var asked = 0;
+    var answer = new TaskCompletionSource<List<Vector3>>();
+    Vector3 askedTo = default;
+    Task<List<Vector3>>? Ask(Vector3 from, Vector3 to) { ++asked; askedTo = to; return answer.Task; }
+
+    var w = new MeshWalk();
+    t.True("while the mesh is thinking, the walk steers the chord", w.Route(korha, dest, t0, Ask) == null && !w.Walking && asked == 1);
+    t.True("asked at the character's height, for the mesh to put on its floor", askedTo == new Vector3(25.9f, 30.3f, -407.1f));
+    t.True("and is asked once, not every frame", w.Route(korha, dest, t0.AddSeconds(0.1), Ask) == null && asked == 1);
+    answer.SetResult(east);
+    var route = w.Route(korha, dest, t0.AddSeconds(0.2), Ask);
+    t.True($"then walks the mesh's way east round the rock ({route?.Count} points)", route is { Count: 7 } && route[3] == east[3] && w.Walking);
+    t.True("with its heights", route![^1].Y == 31f);
+
+    var past = new Vector3(26.4f, 31f, -413.8f); // between the 4th and 5th waypoint
+    var ahead = w.Route(past, dest, t0.AddSeconds(2), Ask);
+    t.True($"the corners passed are dropped ({ahead?.Count} left)", ahead is { Count: 3 } && ahead[0] == east[4]);
+    t.True("round the corner, the rest is the chord and the steer takes it", w.Route(new Vector3(27f, 31f, -410.8f), dest, t0.AddSeconds(2.5), Ask) == null);
+    t.True("nothing was asked again along the way", asked == 1);
+
+    w.Route(korha, dest + new WDir(1f, 0f), t0.AddSeconds(3), Ask);
+    t.True("a destination that moves a yalm keeps its route", asked == 1);
+    answer = new TaskCompletionSource<List<Vector3>>();
+    var moved = w.Route(korha, dest + new WDir(4f, 0f), t0.AddSeconds(3.1), Ask);
+    t.True("one that moves four is asked again, and the old route is walked meanwhile", asked == 2 && moved is { Count: 7 });
+    t.True("a character a long way off the route is not walked back to it", w.Route(new Vector3(10f, 31f, -430f), dest + new WDir(4f, 0f), t0.AddSeconds(3.2), Ask) == null);
+
+    // a mesh that goes straight, a short walk, and a walk that stuck
+    var s = new MeshWalk();
+    var straightAsks = 0;
+    Task<List<Vector3>>? Straight(Vector3 from, Vector3 to) { ++straightAsks; return Task.FromResult(new List<Vector3> { from, (from + to) / 2, to }); }
+    s.Route(korha, dest, t0, Straight);
+    t.True("a mesh route along the chord leaves the walk to the steer", s.Route(korha, dest, t0.AddSeconds(0.1), Straight) == null);
+    var near = new WPos(21.6f, -414.7f);
+    var n = new MeshWalk();
+    n.Route(korha, near, t0, Straight);
+    t.True("so does a walk under two yalms", n.Route(korha, near, t0.AddSeconds(0.1), Straight) == null);
+    t.True("a walk that stuck asks again at once", n.Replan() && n.Route(korha, near, t0.AddSeconds(0.2), Straight) is { Count: 2 } && n.Walking);
+    t.True("but only once for the same destination: a second stick stands down", !n.Replan());
+    n.Route(korha, near + new WDir(5f, 0f), t0.AddSeconds(2), Straight);
+    t.True("a new destination is a new walk", n.Replan());
+
+    var none = new MeshWalk();
+    var noneAsks = 0;
+    Task<List<Vector3>>? NoMesh(Vector3 from, Vector3 to) { ++noneAsks; return null; }
+    t.True("with no mesh to ask, the chord", none.Route(korha, dest, t0, NoMesh) == null && none.Route(korha, dest, t0.AddSeconds(0.5), NoMesh) == null && noneAsks == 1);
+    none.Route(korha, dest, t0.AddSeconds(1.1), NoMesh);
+    t.True("and it is asked again a second later, in case the mesh was still loading", noneAsks == 2);
+
+    // safety: the mesh knows walls, not AOEs or the arena; known ground is the one floor stand-in it overrules
+    var h = new AIHints { Center = new WPos(20f, -411f), Bounds = new ArenaBoundsCircle(30f) };
+    var stood = new KnownGround();
+    stood.Observe(new WPos(korha.X, korha.Z));
+    h.WalkableGround = stood;
+    var from2 = new WPos(korha.X, korha.Z);
+    t.True("ground nobody has stood on does not stop a mesh route", MeshWalk.Clear(h, from2, east, t0, 0.5f, 6f) && h.WalkableGround == stood);
+    h.AddForbiddenZone(new SDCircle(new WPos(26.5f, -413.8f), 2f), t0.AddSeconds(1));
+    t.True("an AOE on the corner when the walk gets there does", !MeshWalk.Clear(h, from2, east, t0, 0.5f, 6f));
+    var far = new AIHints { Center = new WPos(20f, -425f), Bounds = new ArenaBoundsCircle(12f) };
+    t.True("and so does leaving the arena", !MeshWalk.Clear(far, from2, east, t0, 0.5f, 6f));
 }
 
 // 2026-10-04: Minerva asked for Sprint dozens of times and Daedalus pressed it twice. The ask was a threshold the walk

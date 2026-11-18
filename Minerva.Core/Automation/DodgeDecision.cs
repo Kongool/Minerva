@@ -87,6 +87,10 @@ public sealed class StuckWalk
         this.since = now;
         return true;
     }
+
+    /// <summary>Call off the stand-down just begun: the walk gets another way there (<see cref="MeshWalk.Replan"/>).
+    /// Progress is still timed from now, so a way that does not move the character either stands down in turn.</summary>
+    public void Resume() => this.until = default;
 }
 
 /// <summary>
@@ -140,7 +144,8 @@ public enum Mover : byte
     NavSteer = 2,
     /// <summary>The navmesh plugin walking a handed-over path.</summary>
     NavPath = 3,
-    /// <summary>The navmesh plugin walking a quest battle's route, heights and all.</summary>
+    /// <summary>The navmesh plugin walking a route with heights: a quest battle's, or the mesh's way round a wall
+    /// (<see cref="MeshWalk"/>).</summary>
     NavTravel = 4,
 }
 

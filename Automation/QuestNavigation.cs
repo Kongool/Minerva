@@ -6,8 +6,8 @@ using Dalamud.Plugin.Ipc;
 namespace Minerva.Automation;
 
 /// <summary>
-/// The navmesh's pathfinder, for quest battle scripts walking a solo duty (<see cref="QuestBattle.QuestBattle"/>):
-/// Ariadne's <c>Nav.Pathfind</c>, else vnavmesh's. Separate from <see cref="NavmeshIPC"/>, which only ever hands a
+/// The navmesh's pathfinder, for quest battle scripts walking a solo duty (<see cref="QuestBattle.QuestBattle"/>) and
+/// for the AI's walks round walls (<see cref="MeshWalk"/>): Ariadne's <c>Nav.Pathfind</c>, else vnavmesh's. Separate from <see cref="NavmeshIPC"/>, which only ever hands a
 /// follower points we already chose; this is the one place Minerva asks the mesh for a route.
 /// </summary>
 public sealed class QuestNavigation : QuestBattle.IQuestNavigation
