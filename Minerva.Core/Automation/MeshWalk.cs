@@ -113,6 +113,11 @@ public sealed class MeshWalk
 
         if (ahead is not { Count: > 0 } || offRoute)
             return null;
+        // The route ends where this walk goes. One kept for a destination up to ReplanYalms off ended where that walk went:
+        // Saar, Occult Crescent 2026-11-19 (Demi-Medusa), reached a flank spot and was sent on to the rear 3.6y away; the
+        // kept route's end, the flank spot, lay behind once the walk was a yalm past it, read as a bend off the chord, and
+        // walked the character back to it. Back and forth on the spot for 17 seconds, out of melee for the second half.
+        ahead[^1] = new Vector3(dest.X, ahead[^1].Y, dest.Z);
         if (!this.forced && ((dest - at).Length() < MinChordYalms || Straight(at, dest, ahead)))
             return null;
         this.Walking = true;

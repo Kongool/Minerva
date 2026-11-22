@@ -7130,6 +7130,39 @@ t.Section("A walk that is not a dodge goes round a wall the way the navmesh does
     t.True("and so does leaving the arena", !MeshWalk.Clear(far, from2, east, t0, 0.5f, 6f));
 }
 
+// Saar, Occult Crescent 2026-11-19 (Demi-Medusa): a walk to a flank spot, then on to the rear spot 3.6y away -- inside
+// ReplanYalms, so the flank walk's route was kept. Its end, the flank spot, lay behind once the walk was past it, read as a
+// bend, and walked the character back to it: back and forth on the spot for 17 seconds, out of melee for the second half.
+t.Section("A kept mesh route ends at the walk's new destination, not the old one");
+{
+    var t0 = new DateTime(2026, 11, 20, 2, 5, 0, DateTimeKind.Utc);
+    var start = new Vector3(-664.0f, 87f, -54.3f);
+    var flank = new WPos(-668.005f, -61f);
+    var rear = new WPos(-666.005f, -64f);
+    var asks = 0;
+    Task<List<Vector3>>? Mesh(Vector3 from, Vector3 to) { ++asks; return Task.FromResult(new List<Vector3> { from + new Vector3(0.1f, 0f, 0f), to }); }
+    var w = new MeshWalk();
+    w.Route(start, flank, t0, Mesh);
+    w.Route(new Vector3(-666f, 87f, -57.6f), flank, t0.AddSeconds(0.5), Mesh);
+    var dir = (rear - flank).Normalized();
+    var justPast = flank + (dir * 0.4f);
+    var past = flank + (dir * 1.1f);
+    t.True("on the flank spot, the walk on to the rear is the steer's", w.Route(new Vector3(justPast.X, 87f, justPast.Z), rear, t0.AddSeconds(1.2), Mesh) == null);
+    var back = w.Route(new Vector3(past.X, 87f, past.Z), rear, t0.AddSeconds(1.25), Mesh);
+    t.True($"a yalm past it, still the steer's, not a walk back to the flank spot ({(back is { } b ? $"{b[0].X:0.0},{b[0].Z:0.0}" : "none")})", back == null);
+    t.True("the destination moved inside ReplanYalms, so nothing was asked again", asks == 1);
+
+    // a kept route that does bend keeps its corners, and ends where the walk now goes
+    var c = new MeshWalk();
+    var corner = new Vector3(-660f, 87f, -60f);
+    Task<List<Vector3>>? Round(Vector3 from, Vector3 to) => Task.FromResult(new List<Vector3> { from, corner, to });
+    c.Route(start, flank, t0, Round);
+    var moved = flank + new WDir(1f, 1f);
+    var bent = c.Route(start, moved, t0.AddSeconds(0.1), Round);
+    t.True("a kept route round a corner still goes round it", bent is { Count: 2 } && bent[0] == corner);
+    t.True("and ends at the moved destination, at the route's height", bent![^1].X == moved.X && bent[^1].Z == moved.Z && bent[^1].Y == 87f);
+}
+
 // 2026-10-04: Minerva asked for Sprint dozens of times and Daedalus pressed it twice. The ask was a threshold the walk
 // crosses back over, so it stood for one frame, and a caster mid-cast let that frame pass.
 t.Section("An ask for Sprint stands while the dodge is under way");
