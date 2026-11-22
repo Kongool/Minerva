@@ -98,6 +98,7 @@ public abstract class ArenaBounds(float radius, float extent = -1f)
             }
 
             this.outsideMask = mask;
+            this.brokenSteps = this.FindBrokenSteps(center, origin, cell, w, h, mask);
             this.maskCenter = center;
             this.maskOrigin = origin;
             this.maskCell = cell;
@@ -106,6 +107,87 @@ public abstract class ArenaBounds(float radius, float extent = -1f)
         }
 
         Array.Copy(this.outsideMask, into, Math.Min(this.outsideMask.Length, into.Length));
+    }
+
+    private byte[]? brokenSteps;
+
+    /// <summary>
+    /// For the grid last given to <see cref="CopyOutsideMask"/>: per cell, a bit (<see cref="StepBit"/>) for each
+    /// neighbour that is on the floor while the straight step to it is not. Null when the floor has no such step, which
+    /// is every convex floor.
+    /// <para>The grid knows the floor at cell centres, and two neighbouring centres can both be floor with the floor's
+    /// edge between them: the notch where a round platform meets a ring. A search that steps cell to cell walked
+    /// through it. Forgiven Treachery, 2026-11-21: Saar's way from the west platform onto the ring ran through that
+    /// notch, he stood pressed into the corner for 6.6s and took the cone he was leaving, and Korha did the same at the
+    /// east platform.</para>
+    /// </summary>
+    public byte[]? BrokenSteps => this.brokenSteps;
+
+    /// <summary>The bit in <see cref="BrokenSteps"/> for the neighbour at (<paramref name="dx"/>, <paramref name="dz"/>).</summary>
+    public static int StepBit(int dx, int dz)
+    {
+        var k = ((dz + 1) * 3) + dx + 1;
+        return 1 << (k > 4 ? k - 1 : k);
+    }
+
+    private byte[]? FindBrokenSteps(WPos center, WPos origin, float cell, int w, int h, bool[] outside)
+    {
+        byte[]? broken = null;
+        for (var z = 0; z < h; ++z)
+        {
+            for (var x = 0; x < w; ++x)
+            {
+                var i = (z * w) + x;
+                if (outside[i])
+                    continue;
+
+                // each pair once: east, south, and the two southward diagonals
+                for (var d = 0; d < 4; ++d)
+                {
+                    var dx = d == 3 ? -1 : d == 1 ? 0 : 1;
+                    var dz = d == 0 ? 0 : 1;
+                    var nx = x + dx;
+                    var nz = z + dz;
+                    if (nx < 0 || nx >= w || nz >= h)
+                        continue;
+                    var j = (nz * w) + nx;
+                    // only where the floor's edge is near: a step with floor all round both ends cannot cross it
+                    if (outside[j] || (!NearOutside(outside, w, h, x, z) && !NearOutside(outside, w, h, nx, nz)))
+                        continue;
+
+                    var a = new WPos(origin.X + (x * cell), origin.Z + (z * cell));
+                    var step = new WDir(dx * cell, dz * cell);
+                    var parts = dx != 0 && dz != 0 ? 6 : 4;   // about a quarter of a yalm apart on a one-yalm grid
+                    for (var s = 1; s < parts; ++s)
+                    {
+                        if (this.Contains(center, a + (step * ((float)s / parts))))
+                            continue;
+                        broken ??= new byte[w * h];
+                        broken[i] |= (byte)StepBit(dx, dz);
+                        broken[j] |= (byte)StepBit(-dx, -dz);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return broken;
+    }
+
+    private static bool NearOutside(bool[] outside, int w, int h, int x, int z)
+    {
+        for (var dz = -1; dz <= 1; ++dz)
+        {
+            for (var dx = -1; dx <= 1; ++dx)
+            {
+                var nx = x + dx;
+                var nz = z + dz;
+                if (nx >= 0 && nx < w && nz >= 0 && nz < h && outside[(nz * w) + nx])
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     // The floor on the lattice ArenaPathfinder.Doorway walks; see LatticeInside.
@@ -371,6 +453,13 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     public readonly Shape[] UnionShapes;
     public readonly Shape[] DifferenceShapes;
 
+    /// <summary>Pieces put back after the differences are cut: an island in the middle of a hole. BossmodReborn's
+    /// third array. It was taken and dropped until 2026-11-21, so the seven floors that pass one had no islands.</summary>
+    public readonly Shape[] AdditionalShapes;
+
+    /// <summary>The player's hitbox: how far BossmodReborn's AdjustForHitbox flags move a floor's edge.</summary>
+    public const float HitboxRadius = 0.5f;
+
     /// <summary>Bounding-box centre of the union operands — what modules pass as the arena centre.</summary>
     public readonly WPos Center;
 
@@ -385,7 +474,7 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     /// code for those is written against this representation.</para>
     /// </summary>
     public RelSimplifiedComplexPolygon Polygon
-        => this.polygon ??= PolygonClipper.GetCombinedPolygon(this.Center, this.UnionShapes, this.DifferenceShapes);
+        => this.polygon ??= PolygonClipper.GetCombinedPolygon(this.Center, this.UnionShapes, this.DifferenceShapes, this.AdditionalShapes.Length > 0 ? this.AdditionalShapes : null);
 
     /// <summary>
     /// The union is a many-sided polygon standing in for a circle. Set by modules that build a round arena
@@ -394,12 +483,105 @@ public sealed class ArenaBoundsCustom : ArenaBounds
     public bool IsCircle { get; init; }
 
     public ArenaBoundsCustom(Shape[] UnionShapes, Shape[]? DifferenceShapes = null, Shape[]? AdditionalShapes = null, float MapResolution = 0.5f, float ScaleFactor = 1f, bool AllowObstacleMap = false, float Offset = default, bool AdjustForHitboxInwards = false, bool AdjustForHitboxOutwards = false)
-        : base(ComputeAxisExtent(UnionShapes), ComputeRadius(UnionShapes))
+        : base(ComputeAxisExtent(All(UnionShapes, AdditionalShapes)) + HitboxMove(AdjustForHitboxInwards, AdjustForHitboxOutwards), ComputeRadius(All(UnionShapes, AdditionalShapes)) + HitboxMove(AdjustForHitboxInwards, AdjustForHitboxOutwards))
     {
         this.UnionShapes = UnionShapes;
         this.DifferenceShapes = DifferenceShapes ?? [];
-        this.Center = ComputeCenter(UnionShapes);
+        this.AdditionalShapes = AdditionalShapes ?? [];
+        this.Center = ComputeCenter(All(UnionShapes, AdditionalShapes));
         this.MapResolution = MapResolution; // the caller's grid size was being accepted and dropped
+
+        // BossmodReborn's hitbox flags: the pieces are drawn to the walls, and a character's centre stops half a yalm
+        // short of a wall. Both were taken and ignored until 2026-11-21, so such a floor was half a yalm wider than
+        // anyone can stand on: Forgiven Treachery's walkway reached 19 where every recorded position is within 18.54,
+        // its platforms 7.5 where they stop at 7.03, and a route stepped through the notch between the two. As
+        // BossmodReborn does it: the union less the differences, every edge moved, corners rounded; the additional
+        // pieces are not moved.
+        var move = HitboxMove(AdjustForHitboxInwards, AdjustForHitboxOutwards);
+        if (move != 0f)
+        {
+            var (outlines, holes, islands) = MoveEdges(this.Center, UnionShapes, this.DifferenceShapes, move);
+            if (outlines.Length > 0)
+            {
+                this.UnionShapes = outlines;
+                this.DifferenceShapes = holes;
+                if (islands.Length > 0)
+                    this.AdditionalShapes = [.. this.AdditionalShapes, .. islands];
+            }
+        }
+    }
+
+    /// <summary>
+    /// What <paramref name="union"/> less <paramref name="differences"/> covers with every edge moved by
+    /// <paramref name="by"/> yalms (negative shrinks the floor: outlines come in and holes widen), as outlines and
+    /// holes. A piece of floor standing inside a hole comes back as an island, to be added after the holes are cut.
+    /// </summary>
+    private static (Shape[] Outlines, Shape[] Holes, Shape[] Islands) MoveEdges(WPos center, Shape[] union, Shape[] differences, float by)
+    {
+        var moved = PolygonClipper.GetCombinedPolygon(center, union, differences.Length > 0 ? differences : null).Offset(by, Clipper2Lib.JoinType.Round);
+        var outlines = new List<Shape>();
+        var holes = new List<Shape>();
+        var islands = new List<Shape>();
+        var holeLoops = new List<WDir[]>();
+        foreach (var part in moved.Parts)
+            for (var h = 0; h < part.HoleStarts.Count; ++h)
+                holeLoops.Add(part.Interior(h).ToArray());
+        foreach (var part in moved.Parts)
+        {
+            var exterior = part.Exterior.ToArray();
+            if (exterior.Length < 3)
+                continue;
+            var piece = new PolygonCustomRel(exterior, center);
+            var inAHole = false;
+            foreach (var loop in holeLoops)
+                inAHole |= InLoop(loop, exterior[0]);
+            (inAHole ? islands : outlines).Add(piece);
+        }
+        foreach (var loop in holeLoops)
+            holes.Add(new PolygonCustomRel(loop, center));
+        return ([.. outlines], [.. holes], [.. islands]);
+
+        static bool InLoop(WDir[] loop, WDir p)
+        {
+            var inside = false;
+            for (int i = 0, j = loop.Length - 1; i < loop.Length; j = i++)
+            {
+                if ((loop[i].Z > p.Z) != (loop[j].Z > p.Z) && p.X < ((loop[j].X - loop[i].X) * (p.Z - loop[i].Z) / (loop[j].Z - loop[i].Z)) + loop[i].X)
+                    inside = !inside;
+            }
+            return inside;
+        }
+    }
+
+    // how far the flags move the edges, and the floor's extent with them: the grid is laid out from the extent
+    private static float HitboxMove(bool inwards, bool outwards) => inwards ? -HitboxRadius : outwards ? HitboxRadius : 0f;
+
+    private static Shape[] All(Shape[] union, Shape[]? additional) => additional is { Length: > 0 } ? [.. union, .. additional] : union;
+
+    /// <summary>
+    /// The outline of what <paramref name="union"/> covers, moved by <paramref name="by"/> yalms (negative pulls it in),
+    /// with the holes left where they are: the differences as given, and any hole the pieces leave between them (a
+    /// ring's middle) as it is, where offsetting the whole polygon would widen it by the same amount. The outlines go
+    /// through the offset together: on its own, a piece with no area has no inside to shrink into and came back bigger.
+    /// </summary>
+    private static (Shape[] Outlines, Shape[] Holes) MoveOutline(WPos center, Shape[] union, Shape[] differences, float by, Clipper2Lib.JoinType join)
+    {
+        var outlines = new List<Shape>();
+        var holes = new List<Shape>(differences);
+        var solid = new RelSimplifiedComplexPolygon();
+        foreach (var part in PolygonClipper.GetCombinedPolygon(center, union).Parts)
+        {
+            solid.Parts.Add(new RelPolygonWithHoles([.. part.Exterior]));
+            for (var h = 0; h < part.HoleStarts.Count; ++h)
+                holes.Add(new PolygonCustomRel(part.Interior(h).ToArray(), center));
+        }
+        foreach (var part in solid.Offset(by, join).Parts)
+        {
+            outlines.Add(new PolygonCustomRel(part.Exterior.ToArray(), center));
+            for (var h = 0; h < part.HoleStarts.Count; ++h)
+                holes.Add(new PolygonCustomRel(part.Interior(h).ToArray(), center));
+        }
+        return ([.. outlines], [.. holes]);
     }
 
     private static WPos ComputeCenter(Shape[] shapes)
@@ -422,6 +604,9 @@ public sealed class ArenaBoundsCustom : ArenaBounds
 
     public override bool Contains(WPos center, WPos point)
     {
+        foreach (var s in this.AdditionalShapes)
+            if (s.Contains(point))
+                return true;
         var inside = false;
         foreach (var s in this.UnionShapes)
             if (s.Contains(point)) { inside = true; break; }
@@ -451,17 +636,10 @@ public sealed class ArenaBoundsCustom : ArenaBounds
                 polygons = false;
         }
         if (polygons)
-            return new ArenaBoundsCustom(union, this.DifferenceShapes, MapResolution: this.MapResolution) { IsCircle = this.IsCircle };
+            return new ArenaBoundsCustom(union, this.DifferenceShapes, this.AdditionalShapes, MapResolution: this.MapResolution) { IsCircle = this.IsCircle };
 
-        var outlines = new List<Shape>();
-        var holes = new List<Shape>(this.DifferenceShapes);
-        foreach (var part in PolygonClipper.GetCombinedPolygon(this.Center, this.UnionShapes).Offset(-margin).Parts)
-        {
-            outlines.Add(new PolygonCustomRel(part.Exterior.ToArray(), this.Center));
-            for (var h = 0; h < part.HoleStarts.Count; ++h)
-                holes.Add(new PolygonCustomRel(part.Interior(h).ToArray(), this.Center));
-        }
-        return outlines.Count == 0 ? this : new ArenaBoundsCustom([.. outlines], [.. holes], MapResolution: this.MapResolution);
+        var (outlines, holes) = MoveOutline(this.Center, this.UnionShapes, this.DifferenceShapes, -margin, Clipper2Lib.JoinType.Miter);
+        return outlines.Length == 0 ? this : new ArenaBoundsCustom(outlines, holes, this.AdditionalShapes, MapResolution: this.MapResolution);
     }
 
     public override IReadOnlyList<IReadOnlyList<WPos>> Obstacles(WPos center)

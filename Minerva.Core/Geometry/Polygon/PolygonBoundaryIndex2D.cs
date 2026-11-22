@@ -426,6 +426,12 @@ public sealed unsafe class PolygonBoundaryIndex2D : IDisposable
             {
                 r1 = rows - 1;
             }
+            // An edge a rounding step tall along the top of the outline starts in the row past the last: a regular
+            // hexagon with a flat top (Grynewaht's floor) threw here, as it does in BossmodReborn's copy.
+            if (r0 > r1)
+            {
+                r0 = r1;
+            }
 
             edgeRowStarts[idx] = r0;
             edgeRowEnds[idx] = r1;

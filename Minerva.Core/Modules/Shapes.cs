@@ -15,8 +15,50 @@ public abstract class Shape
     /// is already a polygon approximation for curves, so this is exact to the same tessellation the shape
     /// hit-tests against — a clipped arena cannot disagree with the shape it was built from.
     /// </summary>
-    public RelSimplifiedComplexPolygon ToPolygon(WPos center)
-        => new([new RelPolygonWithHoles([.. this.Contour(center)])]);
+    /// <remarks>
+    /// Every outline goes round the same way. The clipper unions by winding number, so two overlapping operands
+    /// wound opposite ways cancel where they overlap: a rectangle laid across a circle came out as a hole in it.
+    /// Until 2026-11-21 each shape's outline went in as written, and 15 of the 468 ported custom floors had a
+    /// combined polygon that disagreed with <see cref="Contains"/> by more than 2% of the floor.
+    /// </remarks>
+    public virtual RelSimplifiedComplexPolygon ToPolygon(WPos center)
+        => new([new RelPolygonWithHoles(Wound(this.Contour(center), true))]);
+
+    /// <summary>The loop, reversed if it does not go round the way asked: <paramref name="positive"/> for an outline,
+    /// the other way for a hole in it.</summary>
+    /// <remarks>A closing point that repeats the first is dropped. The round shapes' outlines end where they began,
+    /// which is right for drawing a closed line, and as a polygon is an edge of no length: where the two ends differed
+    /// by rounding the clipper returned it as a second piece with no area, and where it sat at the top of the outline
+    /// (every circle and regular polygon) the boundary index threw building its rows.</remarks>
+    protected static List<WDir> Wound(List<WDir> loop, bool positive)
+    {
+        if (loop.Count > 3 && (loop[^1] - loop[0]).LengthSq() < 1e-6f)
+            loop.RemoveAt(loop.Count - 1);
+        var twiceArea = 0f;
+        for (int i = 0, j = loop.Count - 1; i < loop.Count; j = i++)
+            twiceArea += (loop[j].X * loop[i].Z) - (loop[i].X * loop[j].Z);
+        if ((twiceArea > 0f) != positive)
+            loop.Reverse();
+        return loop;
+    }
+
+    /// <summary>A ring as a polygon: the outer circle with the inner one cut out of it. The outline alone
+    /// (<see cref="ContourWorld"/>, which is what gets drawn) is the outer circle, and built from that the ring was a
+    /// disc: Forgiven Treachery's floor had no hole in the middle, the radar painted zones across it, and the floor
+    /// pulled in from it counted the hole as ground (2026-11-21).</summary>
+    protected RelSimplifiedComplexPolygon RingPolygon(WPos center, WPos ringCenter, float innerRadius, Angle from, int segments)
+    {
+        var ring = new RelPolygonWithHoles(Wound(this.Contour(center), true));
+        if (innerRadius > 0f)
+        {
+            var inner = Arc(ringCenter, innerRadius, from, from + Angle.TwoPI.Radians(), segments);
+            var hole = new List<WDir>(inner.Count);
+            for (var i = 0; i < inner.Count; ++i)
+                hole.Add(inner[i] - center);
+            ring.AddHole(Wound(hole, false));
+        }
+        return new([ring]);
+    }
 
     protected const int Segments = 60;
 
@@ -108,6 +150,7 @@ public sealed class Donut(WPos center, float innerRadius, float outerRadius) : S
     public readonly float OuterRadius = outerRadius;
     public override bool Contains(WPos p) => p.InDonut(this.Center, this.InnerRadius, this.OuterRadius);
     public override IReadOnlyList<WPos> ContourWorld() => Arc(this.Center, this.OuterRadius, default, Angle.TwoPI.Radians(), Segments);
+    public override RelSimplifiedComplexPolygon ToPolygon(WPos center) => this.RingPolygon(center, this.Center, this.InnerRadius, default, Segments);
 }
 
 /// <summary>A tessellated donut (regular annulus). Containment is the analytic ring.</summary>
@@ -120,6 +163,7 @@ public sealed class DonutV(WPos center, float innerRadius, float outerRadius, in
     public readonly Angle Rotation = rotation;
     public override bool Contains(WPos p) => p.InDonut(this.Center, this.InnerRadius, this.OuterRadius);
     public override IReadOnlyList<WPos> ContourWorld() => Arc(this.Center, this.OuterRadius, this.Rotation, this.Rotation + Angle.TwoPI.Radians(), Math.Max(this.Edges, 3));
+    public override RelSimplifiedComplexPolygon ToPolygon(WPos center) => this.RingPolygon(center, this.Center, this.InnerRadius, this.Rotation, Math.Max(this.Edges, 3));
 }
 
 public class Rectangle(WPos center, float halfWidth, float halfHeight, Angle rotation = default) : Shape

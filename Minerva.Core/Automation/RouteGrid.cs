@@ -67,6 +67,7 @@ public sealed class RouteGrid
     private readonly int w, h;
     private readonly bool[] blocked;
     private readonly bool[] outside;  // out of bounds: blocked, but walkable back in by a character who is already out
+    private readonly byte[]? brokenSteps;   // steps between two floor cells that cross off the floor (ArenaBounds.BrokenSteps)
     private readonly bool[] solid;    // inside an obstacle: blocked, always
     private readonly bool[] risky;
     private readonly float[] dangerIn;  // seconds until each cell is lethal; MaxValue when it never is
@@ -152,6 +153,7 @@ public sealed class RouteGrid
         // shape and kept on the bounds itself, the way BossmodReborn keeps its pathfinding map. It was
         // costing a full pass of point-in-polygon over the grid on each of the four grids a solve builds.
         hints.Bounds.CopyOutsideMask(center, this.origin, this.cell, this.w, this.h, this.outside);
+        this.brokenSteps = hints.Bounds.BrokenSteps;   // for the grid just asked about; kept by reference, never written
 
         // Which zones touch which cell is the same for every grid of a solve; only the deadline differs. Measured
         // once and shared (see AIHints.ZoneTouches) -- it was most of the cost of a solve with many zones up.
@@ -537,6 +539,10 @@ public sealed class RouteGrid
                     var escaping = (i == start || this.outside[i]) && this.outside[j] && !this.solid[j]
                         && depth != null && depth[j] < depth[i];
                     if (this.blocked[j] && !escaping)
+                        continue;
+
+                    // two floor cells with the floor's edge between them (ArenaBounds.BrokenSteps): not a step
+                    if (this.brokenSteps != null && !this.outside[i] && !this.outside[j] && (this.brokenSteps[i] & ArenaBounds.StepBit(dx, dz)) != 0)
                         continue;
 
                     // no cutting a diagonal between two solid cells -- that is a corner, not a gap. Off the floor, only a
