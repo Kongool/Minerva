@@ -3231,6 +3231,235 @@ t.Section("A chasing AOE never catches a player the dodge moves");
     mod.Dispose();
 }
 
+// Divine Favor (Forgiven Treachery, Pilgrim's Traverse floor 30): eight explosions of radius 4, each 3.5 yalms toward the
+// target every 0.6s, which is running speed. Kept clear of the next explosion only, the chased toon cleared the first
+// puddle, stood still until the next landed, and was caught by the second and every one after: Korha twice and Saar once,
+// 2026-11-21. With a lead it is kept clear of every explosion still to come, so it runs from the first cast and stops
+// only where the chaser can no longer reach. The hit is judged on where the player was 0.3s earlier, as the server does.
+t.Section("A chaser at running speed never catches a player who keeps a lead");
+{
+    foreach (var (sx, sz, name) in new[] { (-310.0f, -302.7f, "west platform"), (-295.5f, -284.4f, "ring"), (-300.5f, -287.5f, "bridge") })
+    {
+        var ws = new WorldState(10_000_000, "test");
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        uint frame = 0;
+        ws.Execute(new WorldState.OpFrameStart(new FrameState(t0, 0, frame++, 0f, 0f, 1f), TimeSpan.Zero));
+        const ulong boss = 0x4000000F1, me = 0x100000F2;
+        ws.Execute(new ActorState.OpCreate(boss, 0x4609u, 0, "Forgiven Treachery", 0, ActorType.Enemy, new Vector4(-300, 0, -300, 0), 14f, default, true, false, 0));
+        ws.Execute(new ActorState.OpCreate(me, 0u, 1, "Me", 0, ActorType.Player, new Vector4(sx, 0, sz, 0), 0.5f, default, true, true, 0));
+        ws.Execute(new PartyState.OpModify(0, new PartyState.Member(0, me)));
+        var floor = TreacheryFloor();
+        var mod = new FloorModule(ws, ws.Actors.Find(boss)!, floor.Center, floor) { Arena = new NullArena() };
+        var chase = new Minerva.Components.StandardChasingAOEs(mod, 4f, 1u, 2u, 3.5f, 0.6d, 8) { LeadSteps = 8 };
+        var player = ws.Actors.Find(me)!;
+        chase.Chasers.Add(new(new AOEShapeCircle(4f), player, player.Position, 0f, 8, ws.FutureTime(2.7d), 0.6d));
+        double[] gaps = [0.72, 0.5, 0.62, 0.57, 0.64, 0.60, 0.56];   // as recorded
+        var landing = 0;
+        var next = t0.AddSeconds(2.7);
+        var history = new List<(DateTime At, WPos Pos)>();
+        var hits = 0;
+        var stoppedEarly = false;
+        var midChase = float.MaxValue;
+        var now = t0;
+        WPos? steer = null;   // a solve acts a frame later
+        for (var i = 0; i < 400 && chase.Chasers.Count > 0; ++i)
+        {
+            now = now.AddSeconds(0.05);
+            ws.Execute(new WorldState.OpFrameStart(new FrameState(now, 0, frame++, 0.05f, 0.05f, 1f), TimeSpan.Zero));
+            history.Add((now, player.Position));
+            if (now >= next)
+            {
+                var lands = chase.Chasers[0].PredictedPosition();
+                var seen = history.LastOrDefault(h => h.At <= now.AddSeconds(-0.3), history[0]).Pos;
+                var gap = (seen - lands).Length();
+                if (gap <= 4f)
+                    ++hits;
+                if (landing is >= 1 and <= 5)
+                    midChase = MathF.Min(midChase, gap);
+                chase.Advance(lands, 3.5f, now);
+                next = landing < gaps.Length ? now.AddSeconds(gaps[landing]) : DateTime.MaxValue;
+                ++landing;
+            }
+            if (steer is { } to)
+            {
+                var d = to - player.Position;
+                var len = d.Length();
+                if (len > 0.01f)
+                {
+                    var np = player.Position + (d / len * MathF.Min(len, 0.3f));
+                    ws.Execute(new ActorState.OpMove(me, new Vector4(np.X, 0, np.Z, Angle.FromDirection(d).Rad)));
+                }
+            }
+            if (chase.Chasers.Count == 0)
+                break;
+            var h2 = new AIHints { Center = mod.Center, Bounds = mod.Bounds, PlayerPosition = player.Position };
+            chase.AddAIHints(0, player, PartyRolesConfig.Assignment.Unassigned, h2);
+            var spot = ArenaPathfinder.Solve(h2, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 2f);
+            steer = spot.NeedToMove ? spot.Steer : null;
+            if (!spot.NeedToMove && landing < 4)
+                stoppedEarly = true;
+        }
+        t.True($"from the {name}: eight explosions, none on the player (hit {hits} of {landing})", landing == 8 && hits == 0);
+        t.True($"from the {name}: it runs until the fourth explosion has landed without a stop", !stoppedEarly);
+        t.True($"from the {name}: the chaser stays well behind while it comes ({midChase:0.0}y at the closest)", midChase >= 8f);
+        mod.Dispose();
+    }
+}
+
+// The grid knows the floor at cell centres. Where a round platform meets a ring, two neighbouring centres are both floor
+// with the notch between them, and a search that steps cell to cell walked through it. Forgiven Treachery, 2026-11-21:
+// Saar's way off the west platform ran through that notch; he stood pressed into the corner for 6.6s and took the cone he
+// was leaving, and Korha did the same at the east platform. Every leg of every route is walked here in twentieths of a
+// yalm. What is left is a leg grazing a corner between the quarter-yalm samples of the straight-line test.
+t.Section("A route does not step between two floor cells across the floor's edge");
+{
+    var floor = TreacheryFloor();
+    var starts = new List<WPos> { new(-312.25f, -303.57f), new(-287.94f, -308.12f) };   // where Saar and Korha stood
+    for (var x = -330f; x <= -270f; x += 6f)
+        for (var z = -330f; z <= -270f; z += 6f)
+            if (floor.Contains(floor.Center, new WPos(x + 0.37f, z + 0.21f)))
+                starts.Add(new WPos(x + 0.37f, z + 0.21f));
+    var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    var routes = 0;
+    var worst = 0f;
+    foreach (var s in starts)
+    {
+        var h = new AIHints { Center = floor.Center, Bounds = floor, PlayerPosition = s };
+        var grid = new RouteGrid(h, now.AddSeconds(7), s, 1f, 1f, now.AddSeconds(2), ArenaPathfinder.DefaultMoveSpeed, now);
+        for (var gz = 0; gz < grid.Height; ++gz)
+        {
+            for (var gx = 0; gx < grid.Width; ++gx)
+            {
+                if (grid.Outside(gx, gz) || grid.CostAt(gx, gz) is float.MaxValue or float.PositiveInfinity)
+                    continue;
+                var to = grid.Center(gx, gz);
+                if ((to - s).Length() < 1.5f)
+                    continue;
+                ++routes;
+                var from = s;
+                foreach (var corner in grid.Route(s, to))
+                {
+                    var leg = corner - from;
+                    var n = Math.Max(1, (int)MathF.Ceiling(leg.Length() / 0.05f));
+                    var run = 0f;
+                    for (var i = 1; i <= n; ++i)
+                    {
+                        run = floor.Contains(floor.Center, from + (leg * ((float)i / n))) ? 0f : run + (leg.Length() / n);
+                        worst = MathF.Max(worst, run);
+                    }
+                    from = corner;
+                }
+            }
+        }
+    }
+    t.True($"{routes} routes from {starts.Count} spots: no leg is off the floor for more than 0.3y (worst {worst:0.00}y)", routes > 5000 && worst <= 0.3f);
+    t.True("the floor has such steps to refuse", floor.BrokenSteps != null);
+    var square = new ArenaBoundsSquare(20f);
+    square.CopyOutsideMask(new WPos(100f, 100f), new WPos(79f, 79f), 1f, 43, 43, new bool[43 * 43]);
+    t.True("a square floor has none", square.BrokenSteps == null);
+}
+
+// A custom floor is answered two ways: Contains tests its pieces, and the combined polygon is what the radar masks zones
+// with and what a pulled-in floor is built from. They disagreed on 15 of the 468 ported custom floors (2026-11-21). A
+// ring's outline is its outer circle, so as a polygon it was a disc: Forgiven Treachery's floor had no hole and the
+// radar painted zones across the middle. Pieces whose outlines go round opposite ways cancelled where they overlapped.
+// A round shape's outline ends where it began, and that edge of no length came back as a piece of no area or threw in
+// the boundary index. BossmodReborn's third array, the islands put back after the holes are cut, was dropped.
+t.Section("A custom floor's polygon is the floor its pieces make");
+{
+    static (int Agree, int Total) Compare(ArenaBoundsCustom floor)
+    {
+        var c = floor.Center;
+        var poly = floor.Polygon;
+        poly.InitPolygonIndex();
+        int agree = 0, total = 0;
+        for (var x = -floor.Extent - 2f; x <= floor.Extent + 2f; x += 0.5f)
+        {
+            for (var z = -floor.Extent - 2f; z <= floor.Extent + 2f; z += 0.5f)
+            {
+                var at = c + new WDir(x + 0.13f, z + 0.07f);
+                ++total;
+                if (floor.Contains(c, at) == poly.Contains(at - c))
+                    ++agree;
+            }
+        }
+        return (agree, total);
+    }
+
+    // Forgiven Treachery as BossmodReborn writes it, less the hitbox flag: a walkway, two platforms, two bridges
+    var ring = new ArenaBoundsCustom([new DonutV(new WPos(-300f, -300f), 14f, 19f, 128), new Polygon(new(-283.51849f, -300f), 7.5f, 64),
+        new Polygon(new(-316.48102f, -300f), 7.5f, 64), new Rectangle(new(-300f, -281.5f), 5f, 9.5f), new Rectangle(new(-300f, -318.5f), 5f, 9.5f)]);
+    t.True($"a walkway with platforms and bridges is one piece with one hole ({ring.Polygon.Parts.Count} piece(s), {ring.Polygon.Parts[0].HoleStarts.Count} hole(s))",
+        ring.Polygon.Parts.Count == 1 && ring.Polygon.Parts[0].HoleStarts.Count == 1);
+    var (agree, total) = Compare(ring);
+    t.True($"its polygon and its pieces agree ({agree} of {total} points)", agree >= total * 0.995f);
+
+    // a rectangle across a circle, which go round opposite ways as written
+    var crossed = new ArenaBoundsCustom([new Circle(new WPos(100f, 100f), 10f), new Rectangle(new WPos(100f, 100f), 15f, 2f)]);
+    (agree, total) = Compare(crossed);
+    t.True($"a rectangle laid across a circle does not cut a hole in it ({agree} of {total} points agree, {crossed.Polygon.Parts.Count} piece(s))",
+        agree >= total * 0.995f && crossed.Polygon.Parts.Count == 1);
+
+    // a flat-topped hexagon: an edge a rounding step tall along the top of the outline
+    var hexagon = new ArenaBoundsCustom([new Polygon(new WPos(100f, 100f), 10.7f, 6, 30f.Degrees())]);
+    (agree, total) = Compare(hexagon);
+    t.True($"a flat-topped hexagon is indexed without throwing ({agree} of {total} points agree)", agree >= total * 0.995f);
+    t.True("a circle is one piece, with no sliver where its outline closes", new ArenaBoundsCustom([new Circle(new WPos(100f, 100f), 22f)]).Polygon.Parts.Count == 1);
+
+    // an island put back in the middle of a hole
+    var island = new ArenaBoundsCustom([new Circle(new WPos(100f, 100f), 20f)], [new Circle(new WPos(100f, 100f), 10f)], [new Circle(new WPos(100f, 100f), 4f)]);
+    t.True("an island put back in a hole is floor", island.Contains(island.Center, new WPos(100f, 100f)) && island.Contains(island.Center, new WPos(102f, 101f)));
+    t.True("the hole round it is not", !island.Contains(island.Center, new WPos(107f, 100f)));
+    t.True("and the floor outside the hole is", island.Contains(island.Center, new WPos(115f, 100f)));
+    (agree, total) = Compare(island);
+    t.True($"the polygon has the island too ({agree} of {total} points agree)", agree >= total * 0.995f);
+
+    // pulled in, the outline moves and the hole in the middle stays where it is
+    var inset = (ArenaBoundsCustom)ring.Inset(1f);
+    t.True("pulled in a yalm, the middle of the walkway is still floor", inset.Contains(inset.Center, new WPos(-300f + 11.5f, -300f + 11.5f)));
+    t.True("the hole is not", !inset.Contains(inset.Center, new WPos(-300f, -300f)) && !inset.Contains(inset.Center, new WPos(-304.2f, -304.2f)));
+    t.True("the walkway's outer yalm is not", !inset.Contains(inset.Center, new WPos(-300f + 13.1f, -300f + 13.1f)));
+    t.True("and its inner edge has not moved", inset.Contains(inset.Center, new WPos(-300f + 10.0f, -300f + 10.0f)));
+}
+
+// BossmodReborn's hitbox flags were taken and ignored, so a floor drawn to the walls was half a yalm wider than a
+// character's centre can go. Forgiven Treachery, 2026-11-21: walkway out to 19 as written, every recorded position
+// within 18.54; platforms 7.5 as written, 7.03 recorded; bridges out to 28, 27.6 recorded. As BossmodReborn does it,
+// every edge moves, holes included, and the corners are rounded. That walkway's inner edge is the one number the
+// recording disagrees with (BossmodReborn's 14 becomes 14.5 and the toons stand at 14.0), so the module writes 13.5.
+t.Section("The hitbox flags move every edge of a custom floor half a yalm");
+{
+    var floor = TreacheryFloor();
+    var c = floor.Center;
+    var k = MathF.Sqrt(0.5f);
+    bool Ring(float r) => floor.Contains(c, new WPos(-300f + (r * k), -300f + (r * k)));
+    t.True("the walkway's outer edge is at 18.5", Ring(18.3f) && !Ring(18.7f));
+    t.True("its inner edge, written at 13.5, is at 14", Ring(14.2f) && !Ring(13.8f));
+    t.True("a platform reaches 7 from its centre", floor.Contains(c, new WPos(-316.48f - 6.8f, -300f)) && !floor.Contains(c, new WPos(-316.48f - 7.2f, -300f)));
+    t.True("on its side toward the boss too, inside the walkway", floor.Contains(c, new WPos(-316.48f + 6.8f, -300f)) && !floor.Contains(c, new WPos(-316.48f + 7.2f, -300f)));
+    t.True("a bridge is 4.5 wide either side", floor.Contains(c, new WPos(-300f + 4.3f, -275f)) && !floor.Contains(c, new WPos(-300f + 4.7f, -275f)));
+    t.True("and ends at 27.5", floor.Contains(c, new WPos(-300f, -300f + 27.3f)) && !floor.Contains(c, new WPos(-300f, -300f + 27.7f)));
+    t.True("the hole in the middle is still a hole", !floor.Contains(c, new WPos(-300f, -300f)) && !floor.Contains(c, new WPos(-304.2f, -304.2f)));
+    t.True("it is one outline with one hole", floor.UnionShapes.Length == 1 && floor.DifferenceShapes.Length == 1);
+
+    var pitted = new ArenaBoundsCustom([new Rectangle(new WPos(100f, 100f), 10f, 10f)], [new Circle(new WPos(100f, 100f), 3f)], AdjustForHitboxInwards: true);
+    t.True("inwards, a square of 10 reaches 9.5", pitted.Contains(pitted.Center, new WPos(109.3f, 100f)) && !pitted.Contains(pitted.Center, new WPos(109.7f, 100f)));
+    t.True("and a hole of 3 in it widens to 3.5", !pitted.Contains(pitted.Center, new WPos(103.3f, 100f)) && pitted.Contains(pitted.Center, new WPos(103.7f, 100f)));
+
+    var grown = new ArenaBoundsCustom([new Rectangle(new WPos(100f, 100f), 10f, 10f)], [new Circle(new WPos(100f, 100f), 3f)], AdjustForHitboxOutwards: true);
+    t.True("outwards, it reaches 10.5", grown.Contains(grown.Center, new WPos(110.3f, 100f)) && !grown.Contains(grown.Center, new WPos(110.7f, 100f)));
+    t.True("and the grid is asked for that far", grown.Extent >= 10.5f);
+    t.True("and the hole closes to 2.5", !grown.Contains(grown.Center, new WPos(102.3f, 100f)) && grown.Contains(grown.Center, new WPos(102.7f, 100f)));
+
+    // a floor in two rings, one inside the other's hole: the inner one is an island
+    var nested = new ArenaBoundsCustom([new Circle(new WPos(100f, 100f), 20f)], [new Donut(new WPos(100f, 100f), 8f, 12f)], AdjustForHitboxInwards: true);
+    t.True("a piece of floor inside a hole is kept", nested.Contains(nested.Center, new WPos(100f, 100f)) && nested.Contains(nested.Center, new WPos(107.3f, 100f)));
+    t.True("the gap round it is half a yalm wider each side", !nested.Contains(nested.Center, new WPos(107.7f, 100f)) && !nested.Contains(nested.Center, new WPos(112.3f, 100f)) && nested.Contains(nested.Center, new WPos(112.7f, 100f)));
+
+    var plain = new ArenaBoundsCustom([new Rectangle(new WPos(100f, 100f), 10f, 10f)]);
+    t.True("with neither flag the floor is as written", plain.Contains(plain.Center, new WPos(109.9f, 100f)) && !plain.Contains(plain.Center, new WPos(110.1f, 100f)) && plain.UnionShapes[0] is Rectangle);
+}
+
 // A cleave swung at the player is kept off the player's own pet, where the component asks for it. Guttler swings at the
 // beastmaster about half the time, and the familiar standing beside it was cleaved too (the user, 2026-10-31).
 t.Section("A cleave at the player is kept off the player's own pet");
@@ -7650,6 +7879,12 @@ t.Section("Radar border and mask follow a custom floor's every piece");
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
+// Forgiven Treachery's floor as the module builds it: a ring, two round platforms and two bridges drawn to the walls,
+// with the hitbox flag.
+static ArenaBoundsCustom TreacheryFloor()
+    => new([new DonutV(new WPos(-300f, -300f), 13.5f, 19f, 128), new Polygon(new(-283.51849f, -300f), 7.5f, 64), new Polygon(new(-316.48102f, -300f), 7.5f, 64),
+        new Rectangle(new(-300f, -281.5f), 5f, 9.5f), new Rectangle(new(-300f, -318.5f), 5f, 9.5f)], AdjustForHitboxInwards: true);
+
 static FrameState Frame(WorldState ws, uint index, float dtSeconds = 0f)
 {
     var baseTime = ws.CurrentTime == default ? new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) : ws.CurrentTime;
@@ -7824,6 +8059,9 @@ sealed class ThrowingPullModule(WorldState ws, Actor primary) : ModuleBase(ws, p
 
 sealed class TestModule(WorldState ws, Actor primary)
     : ModuleBase(ws, primary, new WPos(100f, 100f), new ArenaBoundsSquare(20f));
+
+// a module on a floor of the test's choosing
+sealed class FloorModule(WorldState ws, Actor primary, WPos center, ArenaBounds bounds) : ModuleBase(ws, primary, center, bounds);
 
 // Iambe's rule in miniature: ending within the boss's circle is unsafe
 sealed class OdeMarch(ModuleBase module) : Minerva.Components.GenericForcedMarch(module)

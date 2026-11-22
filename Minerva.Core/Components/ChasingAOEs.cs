@@ -36,6 +36,16 @@ public class GenericChasingAOEs(ModuleBase module, float moveDistance, uint aid 
     public readonly List<Chaser> Chasers = [];
     private readonly List<AOEInstance> active = [];
 
+    /// <summary>
+    /// How many explosions past the next one the chased player is kept clear of. Zero, as it always was, keeps them
+    /// out of the next explosion only: they stop once clear and move again when it lands. That is enough for a slow
+    /// chaser. Divine Favor (Forgiven Treachery, 2026-11-21) steps 3.5 yalms every 0.6s, which is running speed:
+    /// a toon that stood still for two seconds after clearing the first puddle was never ahead again, and three died.
+    /// Each further explosion reaches a step further and lands an interval later, so with a lead the walk out of them
+    /// lasts the whole chase.
+    /// </summary>
+    public int LeadSteps;
+
     public bool IsChaserTarget(Actor? actor) => this.Chasers.Exists(c => c.Target == actor);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
@@ -113,7 +123,14 @@ public class GenericChasingAOEs(ModuleBase module, float moveDistance, uint aid 
             if (c.Target == actor == isTarget)
             {
                 if (isTarget)
+                {
                     hints.AddForbiddenZone(new SDCircle(c.PrevPos, this.moveDistance + radius), c.NextActivation);
+                    // the explosions after the next: the first cast does not move, so it is not one of them
+                    var moving = c.MoveDist > 0f ? c.NumRemaining : c.NumRemaining - 1;
+                    var further = Math.Min(this.LeadSteps, moving - 1);
+                    for (var k = 1; k <= further; ++k)
+                        hints.AddForbiddenZone(new SDCircle(c.PrevPos, radius + (k + 1) * this.moveDistance), c.NextActivation.AddSeconds(k * c.SecondsBetweenActivations));
+                }
                 else
                     hints.AddForbiddenZone(new SDCircle(c.PredictedPosition(), radius + 1f), c.NextActivation);
             }

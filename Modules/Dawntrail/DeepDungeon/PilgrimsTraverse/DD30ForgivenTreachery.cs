@@ -88,9 +88,31 @@ sealed class BrutalHalo(ModuleBase module) : Components.GenericAOEs(module)
 }
 
 [SkipLocalsInit]
+// Eight orbs of radius 4 on four spokes, turning together about the boss at 8 degrees a second, either way. Each spoke
+// has one orb at 28.5 from the centre (the bridge ends) and one at either 12.5 or 20.5. The one at 12.5 covers the
+// walkway's inner half and is dodged outward; the one at 20.5 covers its outer half and is dodged inward; the platforms
+// and bridges give room for both (the user, 2026-11-21). They appear at fixed spots and first hit three seconds later.
 sealed class BoundsOfIndulgence(ModuleBase module) : Components.GenericAOEs(module)
 {
     private readonly List<Actor> voidzones = [];
+    private readonly Dictionary<ulong, DateTime> liveAt = [];   // when each orb first hits
+    private const double SecondsToFirstHit = 3d;                // appeared 58.24, first hit 61.35
+    private readonly Dictionary<ulong, DateTime> movedAt = [];  // when each orb last changed place
+
+    // An orb is turning if it moved in the last half second. A frame with no new position for it reads as no
+    // movement, and asked frame by frame the zone ahead of it came and went.
+    private bool Turning(Actor orb) => movedAt.TryGetValue(orb.InstanceID, out var at) && (World.CurrentTime - at).TotalSeconds < 0.5d;
+
+    public override void Update()
+    {
+        foreach (var vz in voidzones)
+        {
+            if (vz.LastFrameMovement != default)
+            {
+                movedAt[vz.InstanceID] = World.CurrentTime;
+            }
+        }
+    }
     private readonly AOEShapeCircle circle = new(4f);
     private readonly AOEShapeArcCapsule arcCW = new(4f, 30f.Degrees(), module.Center), arcCCW = new(4f, -30f.Degrees(), module.Center);
 
@@ -107,7 +129,7 @@ sealed class BoundsOfIndulgence(ModuleBase module) : Components.GenericAOEs(modu
         {
             var vz = voidzones[i];
             var pos = vz.Position;
-            if (vz.LastFrameMovement == default)
+            if (!Turning(vz))
             {
                 aoes[i] = new(circle, pos.Quantized());
             }
@@ -129,9 +151,12 @@ sealed class BoundsOfIndulgence(ModuleBase module) : Components.GenericAOEs(modu
             {
                 case 0x1E46:
                     voidzones.Add(actor);
+                    liveAt[actor.InstanceID] = World.FutureTime(SecondsToFirstHit);
                     break;
                 case 0x1E3C:
                     voidzones.Remove(actor);
+                    liveAt.Remove(actor.InstanceID);
+                    movedAt.Remove(actor.InstanceID);
                     break;
             }
         }
@@ -158,20 +183,35 @@ sealed class BoundsOfIndulgence(ModuleBase module) : Components.GenericAOEs(modu
             var dir = pos - center;
             var ccw = vz.Rotation.ToDirection().OrthoR().Dot(dir) < 0f;
             var mult = ccw ? -1f : 1f;
-            var mov = vz.LastFrameMovement != default;
+            var mov = Turning(vz);
             if (mov)
             {
                 hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a15, 4f), forbiddenNearFuture);
                 hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a25, 4f), forbiddenSoon);
                 hints.AddForbiddenZone(new SDArcCapsule(pos, center, mult * a30, 4f), forbiddenFarFuture);
             }
-            hints.TemporaryObstacles.Add(new SDCircle(pos.Quantized(), mov ? 4f : 5f));
+            // The orb itself: ground about to go live for three seconds, live after. BossmodReborn makes it a solid
+            // obstacle of 4-5 yalms instead. A character standing where one appeared was then inside a wall with
+            // nothing but wall round it: Saar stepped back and forth on the spot for 3.4s inside the west platform's
+            // orb and took its first two hits. On a walkway 4.5 yalms wide the same wall also closed the ring to
+            // every route, which sent Korha the long way round and into Salvation's Reach (258s). As ground it can be
+            // left, and crossed at a price when the other way is worse.
+            var live = liveAt.GetValueOrDefault(vz.InstanceID);
+            hints.AddForbiddenZone(new SDCircle(pos, 4f), live > World.CurrentTime ? live : default);
         }
     }
 }
 
 [SkipLocalsInit]
-sealed class DivineFavor(ModuleBase module) : Components.StandardChasingAOEs(module, 4f, (uint)AID.DivineFavorFirst, (uint)AID.DivineFavorRest, 3.5f, 0.6d, 8, true, (uint)IconID.DivineFavor);
+sealed class DivineFavor : Components.StandardChasingAOEs
+{
+    // Eight explosions, 3.5 yalms apart every 0.6s: the chaser moves at running speed. A toon that cleared the first
+    // puddle and stood still until the next landed was caught by the second and by every one after (2026-11-21: Korha
+    // twice and Saar once, each dead inside four seconds). The chased toon stays clear of every explosion still to
+    // come, so it runs from the first cast until the chaser can no longer reach it.
+    public DivineFavor(ModuleBase module) : base(module, 4f, (uint)AID.DivineFavorFirst, (uint)AID.DivineFavorRest, 3.5f, 0.6d, 8, true, (uint)IconID.DivineFavor)
+        => LeadSteps = MaxCasts;
+}
 
 [SkipLocalsInit]
 sealed class GripOfSalvationsReach(ModuleBase module) : Components.GenericAOEs(module)
@@ -200,7 +240,12 @@ sealed class GripOfSalvationsReach(ModuleBase module) : Components.GenericAOEs(m
             AddAOE(rect, loc, rot, Module.CastFinishAt(spell));
             var rotAdj = rot + (id == (uint)AID.GripOfSalvation1 ? 1f : -1f) * 80f.Degrees();
             var pos = Module.PrimaryActor.Position + 9f * rotAdj.ToDirection();
-            AddAOE(rectFake, pos, rotAdj, Module.CastFinishAt(spell, 7.5d)); // fake aoe to encourage early positioning, 2nd aoe often overlaps with 1st
+            // Not an AOE: the far part of the side Salvation's Reach will cover, 7.4s after the grip lands. From there
+            // the safe wedge is up to half the ring away, more than 7.4s of running. BossmodReborn times it with the
+            // cone, 15s out; the dodge looks 7s ahead, so it was not acted on, the toons waited out the grip anywhere
+            // on its safe side, and the cone caught them on the way round (2026-11-21). Timed with the grip instead,
+            // it puts them within nine yalms of the line between the two before the grip lands.
+            AddAOE(rectFake, pos, rotAdj, Module.CastFinishAt(spell));
             void AddAOE(AOEShape shape, WPos position, Angle rotation, DateTime activation) => _aoes.Add(new(shape, position, rotation, activation, shapeDistance: shape.Distance(position, rotation)));
         }
     }
@@ -218,6 +263,8 @@ sealed class GripOfSalvationsReach(ModuleBase module) : Components.GenericAOEs(m
                 aoe.Rotation = rot;
                 aoe.Shape = cone;
                 aoe.Origin = Module.PrimaryActor.Position.Quantized();
+                if (id is (uint)AID.GripOfSalvation1 or (uint)AID.GripOfSalvation2)
+                    aoe.Activation = World.FutureTime(7.4d);   // the cone lands 7.36-7.51s after the grip
                 aoe.ShapeDistance = aoe.Shape.Distance(aoe.Origin, rot);
             }
         }
@@ -245,9 +292,18 @@ public sealed class DD30ForgivenTreachery : ModuleBase
 
     private DD30ForgivenTreachery(WorldState ws, Actor primary, (WPos center, ArenaBoundsCustom arena) a) : base(ws, primary, a.center, a.arena) { }
 
+    // BossmodReborn's shapes, drawn to the walls, with the hitbox flag, which moves every edge half a yalm: a walkway
+    // round the boss, two round platforms and two bridges. One number differs. BossmodReborn writes the walkway's
+    // inner edge at 14, which with the flag is 14.5; the toons stand at 14.0 (every walkway position in the first
+    // recording, 2026-11-21, is within 14.04-18.54), so it is written at 13.5 here. With it at 14.5 they counted as off
+    // the floor and replaying the fight took three times the hits. The rest fits the recording as written: platforms
+    // 7.03 from their centres, bridges out to 27.6.
+    // Until that day the flag did nothing. On the wider floor the notch between a platform and the walkway was thinner
+    // than it is, and a route stepped through it: Saar stood pressed into that corner for 6.6s and took Salvation's
+    // Reach, and Korha jammed at the east platform. The route search refuses such a step (ArenaBounds.BrokenSteps).
     private static (WPos center, ArenaBoundsCustom arena) BuildArena()
     {
-        var arena = new ArenaBoundsCustom([new DonutV(new WPos(-300f, -300f), 14f, 19f, 128), new Polygon(new(-283.51849f, -300f), 7.5f, 64),
+        var arena = new ArenaBoundsCustom([new DonutV(new WPos(-300f, -300f), 13.5f, 19f, 128), new Polygon(new(-283.51849f, -300f), 7.5f, 64),
         new Polygon(new(-316.48102f, -300f), 7.5f, 64), new Rectangle(new(-300f, -281.5f), 5f, 9.5f), new Rectangle(new(-300f, -318.5f), 5f, 9.5f)], AdjustForHitboxInwards: true);
         return (arena.Center, arena);
     }
