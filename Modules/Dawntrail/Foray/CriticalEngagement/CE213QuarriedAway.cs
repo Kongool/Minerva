@@ -106,127 +106,163 @@ sealed class OccultStoneII : Components.SimpleAOEs
     }
 }
 
+// Fourfold Attack Order: each golem's 90-degree cone fires after the long cast, then three more times 7.3s apart. Before each
+// of those it turns 90 degrees clockwise, for as many waves as the blue arrow on its caster says, then holds. From
+// BossmodReborn, which kept everything in one list, keyed on counts and list order. Saar, Occult Crescent 2026-11-19 21:19:
+// the first Attack Order's arrows were applied three times (a refreshed status reads as a new one). Each copy predicted
+// the waves again, also matching its own predictions, and each cast removed one cone, so the list never emptied. The second
+// and third Attack Orders drew ten cones left from the first, at the golems' old spots and 80-160s stale, and none of their
+// own. Saar stood still in two real cones each time and died twice.
+// Now each golem is predicted once per set, a set starts clean at its first long cast, the real Acclaim cast replaces its
+// wave's prediction (which runs 1.1s early on the first wave), and a cast removes its own golem's next cone.
 sealed class Acclaim(ModuleBase module) : Components.GenericAOEs(module)
 {
     private readonly List<AOEInstance> aoes = [];
     private readonly AOEShapeCone shape = new(40.0f, 45.0f.Degrees());
-    private readonly List<(Actor caster, int turns)> golemCasters = [];
-    private int totalGolems = 0;
-    private readonly double RiskyWithSecondsLeft = 5.0f;
+    private readonly List<(WPos Origin, Angle Rotation, DateTime Activation)> longs = [];
+    private readonly List<(Actor Caster, int Turns)> golemCasters = [];
+    private readonly HashSet<ulong> armed = [];
+    private const double RiskyWithSecondsLeft = 5d;
+    private const double WaveSeconds = 7.3d;
+    private const double SameWaveSeconds = 2.5d; // casts this close in time are one wave; the waves are 7.3s apart
+    private const double StaleSeconds = 3d;      // a cone this far past its time without its cast is dropped
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
-        if (spell.Action.ID == (uint)AID.AcclaimLong)
+        switch (spell.Action.ID)
         {
-            if (caster.OID == (uint)OID.AlabasterGolemVisual)
+            case (uint)AID.AcclaimLong when caster.OID == (uint)OID.AlabasterGolemVisual:
             {
-                aoes.Add(new(shape, spell.LocXZ, spell.Rotation, Module.CastFinishAt(spell)));
+                // a long cast from a set long gone starts a new one. Not the Attack Order's cast: it can start in the same frame
+                // as the long casts and after them (11-01 14:30), and resetting there wiped the cones just added.
+                if (this.longs.Count > 0 && this.longs[0].Activation < World.CurrentTime.AddSeconds(-StaleSeconds))
+                    this.Reset();
+                var finish = Module.CastFinishAt(spell);
+                this.longs.Add((spell.LocXZ, spell.Rotation, finish));
+                this.aoes.Add(new(this.shape, spell.LocXZ, spell.Rotation, finish));
+                SortHelpers.SortAOEByActivation(this.aoes);
+                break;
             }
+            case (uint)AID.AcclaimShort:
+                this.Place(spell.LocXZ, spell.Rotation, Module.CastFinishAt(spell));
+                break;
         }
     }
 
     public override void OnStatusGain(Actor actor, ref ActorStatus status)
     {
-        if (status.ID == (uint)SID.BlueArrow)
+        if (status.ID != (uint)SID.BlueArrow || !this.armed.Add(actor.InstanceID))
+            return; // a refreshed arrow is the same arrow
+        var turns = status.Extra switch
         {
-            var turns = status.Extra switch
-            {
-                0x43B => 3,
-                0x43C => 2,
-                0x43D => 1,
-                _ => 0,
-            };
-
-            if (turns != 0)
-            {
-                golemCasters.Add((actor, turns));
-                totalGolems++;
-            }
-        }
+            0x43B => 3,
+            0x43C => 2,
+            0x43D => 1,
+            _ => 0,
+        };
+        if (turns != 0)
+            this.golemCasters.Add((actor, turns));
     }
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
-        if (spell.Action.ID is (uint)AID.AcclaimLong or (uint)AID.AcclaimShort)
+        if (spell.Action.ID is not ((uint)AID.AcclaimLong or (uint)AID.AcclaimShort))
+            return;
+        // the cone that landed is this golem's earliest (the list is in activation order)
+        for (var i = 0; i < this.aoes.Count; ++i)
         {
-            if (aoes.Count > 0)
+            if (this.aoes[i].Origin.AlmostEqual(caster.Position, 0.5f))
             {
-                aoes.RemoveAt(0);
-            }
-
-            if (aoes.Count == 0)
-            {
-                golemCasters.Clear();
-                totalGolems = 0;
+                this.aoes.RemoveAt(i);
+                break;
             }
         }
     }
 
     public override void Update()
     {
-        if (golemCasters.Count == 0)
+        var added = false;
+        for (var g = this.golemCasters.Count - 1; g >= 0; --g)
         {
-            return;
-        }
-
-        List<AOEInstance> incomingAOEs = [];
-        List<(Actor caster, int turns)> processedGolems = [];
-        foreach (var golem in CollectionsMarshal.AsSpan(golemCasters))
-        {
-            var count = golem.turns;
-            foreach (ref var aoe in CollectionsMarshal.AsSpan(aoes))
+            var (caster, turns) = this.golemCasters[g];
+            foreach (var (origin, rotation0, activation) in this.longs)
             {
-                if (aoe.Origin.AlmostEqual(golem.caster.Position, 0.5f))
+                if (!origin.AlmostEqual(caster.Position, 0.5f))
+                    continue;
+                var rotation = rotation0;
+                for (var i = 0; i < 3; ++i)
                 {
-                    var rotation = aoe.Rotation;
-
-                    for (var i = 0; i < count; ++i)
-                    {
+                    if (i < turns)
                         rotation -= 90.0f.Degrees();
-                        incomingAOEs.Add(new(shape, aoe.Origin, rotation.Normalized(), aoe.Activation + TimeSpan.FromSeconds(7.3d * (i + 1d))));
-                    }
-
-                    for (var i = 0; i < 3 - count; ++i)
-                    {
-                        incomingAOEs.Add(new(shape, aoe.Origin, rotation.Normalized(), aoe.Activation + TimeSpan.FromSeconds(7.3d * (golem.turns + i + 1d))));
-                    }
-
-                    processedGolems.Add(golem);
+                    this.aoes.Add(new(this.shape, origin, rotation.Normalized(), activation.AddSeconds(WaveSeconds * (i + 1))));
                 }
+                this.golemCasters.RemoveAt(g);
+                added = true;
+                break;
             }
         }
+        if (added)
+            SortHelpers.SortAOEByActivation(this.aoes);
 
-        foreach (var golem in processedGolems)
-        {
-            golemCasters.Remove(golem);
-        }
-
-        if (incomingAOEs.Count > 0)
-        {
-            aoes.AddRange(incomingAOEs);
-            SortHelpers.SortAOEByActivation(aoes);
-        }
+        var stale = World.CurrentTime.AddSeconds(-StaleSeconds);
+        this.aoes.RemoveAll(a => a.Activation < stale);
     }
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
-        var count = aoes.Count;
+        var count = this.aoes.Count;
         if (count == 0)
-        {
             return [];
-        }
 
+        // the next wave: every cone landing within a couple of seconds of the first
         var time = World.CurrentTime;
-        var max = count > totalGolems ? totalGolems : count;
-
-        var nextAOEs = CollectionsMarshal.AsSpan(aoes);
-        for (var i = 0; i < max; i++)
+        var last = this.aoes[0].Activation.AddSeconds(SameWaveSeconds);
+        var span = CollectionsMarshal.AsSpan(this.aoes);
+        var max = 0;
+        while (max < count && span[max].Activation <= last)
         {
-            ref var aoe = ref nextAOEs[i];
-            aoe.Risky = aoe.Activation.AddSeconds(-RiskyWithSecondsLeft) <= time;
+            span[max].Risky = span[max].Activation.AddSeconds(-RiskyWithSecondsLeft) <= time;
+            ++max;
         }
+        return span[..max];
+    }
 
-        return nextAOEs[..max];
+    // The real cast for a wave: the golem's predicted cone for that wave takes its facing and time. One not predicted (an
+    // arrow never seen) is added as cast.
+    private void Place(WPos origin, Angle rotation, DateTime finish)
+    {
+        var best = -1;
+        var bestGap = SameWaveSeconds;
+        for (var i = 0; i < this.aoes.Count; ++i)
+        {
+            if (!this.aoes[i].Origin.AlmostEqual(origin, 0.5f))
+                continue;
+            var gap = Math.Abs((this.aoes[i].Activation - finish).TotalSeconds);
+            if (gap < bestGap)
+            {
+                bestGap = gap;
+                best = i;
+            }
+        }
+        if (best >= 0)
+        {
+            ref var aoe = ref this.aoes.Ref(best);
+            aoe.Rotation = rotation;
+            aoe.Activation = finish;
+        }
+        else
+        {
+            this.aoes.Add(new(this.shape, origin, rotation, finish));
+        }
+        SortHelpers.SortAOEByActivation(this.aoes);
+    }
+
+    private void Reset()
+    {
+        this.aoes.Clear();
+        this.longs.Clear();
+        this.golemCasters.Clear();
+        this.armed.Clear();
     }
 }
 
