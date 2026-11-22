@@ -1922,9 +1922,9 @@ t.Section("Auto-dodge pathfinding");
         t.True("a plain circle of the same range does not", h.IsPositionSafe(new WPos(57.2f, 0f)) && !h.IsPositionSafe(new WPos(55.5f, 0f)));
     }
 
-    // Pilgrim's Traverse, 2026-10-17: the sheet's Right-sided Shockwave is a 180-degree cone with no side, so the guess
-    // drew it in front of the mob. A zone module's corrections draw it on the mob's right and, once it lands, the hit
-    // that follows on its left, until that one lands too.
+    // Pilgrim's Traverse: Right-sided Shockwave's cast faces the half it hits (2026-11-22, Forgiven Riot: a cast at
+    // -53 on a mob facing -143). A zone module's corrections draw that half down the cast and, once it lands, the hit
+    // that follows on the mob's other side, from its facing, until that one lands too; the guess has no second hit.
     {
         var pt = new WorldState(qpf: 10_000_000, gameVersion: "test");
         pt.Execute(new WorldState.OpFrameStart(Frame(pt, 0), TimeSpan.Zero));
@@ -1934,8 +1934,8 @@ t.Section("Auto-dodge pathfinding");
         var guess = new Minerva.Automation.AutoHints(pt, new StubShapeResolver());
         using var fix = new Minerva.Automation.CastCorrections(pt, new Dictionary<uint, Minerva.Automation.CastCorrections.Entry>
         {
-            [42214u] = new(a => new AOEShapeCone(30f + a.HitboxRadius, 90f.Degrees(), (-90f).Degrees()),
-                new Minerva.Automation.CastCorrections.FollowUp(a => new AOEShapeCone(30f + a.HitboxRadius, 90f.Degrees(), 90f.Degrees()), 4d, EndedBy: 42215u)),
+            [42214u] = new(a => new AOEShapeCone(30f + a.HitboxRadius, 90f.Degrees()),
+                new Minerva.Automation.CastCorrections.FollowUp(a => new AOEShapeCone(30f + a.HitboxRadius, 90f.Degrees(), 90f.Degrees()), 4d, EndedBy: 42217u)),
         });
         AIHints Hints(bool corrected)
         {
@@ -1948,8 +1948,9 @@ t.Section("Auto-dodge pathfinding");
         var ahead = new WPos(3f, 10f);
         var right = new WPos(-10f, -1f);
         var left = new WPos(10f, -1f);
-        pt.Execute(new ActorState.OpCastInfo(riot, new ActorCastInfo { Action = ActionID.MakeSpell(42214u), TotalTime = 5f, Rotation = default }));
-        t.True("the guess alone puts a right-sided cleave in front of the mob", !Hints(false).IsPositionSafe(ahead) && Hints(false).IsPositionSafe(right));
+        // the cast faces the mob's right (west), as the game sends it
+        pt.Execute(new ActorState.OpCastInfo(riot, new ActorCastInfo { Action = ActionID.MakeSpell(42214u), TotalTime = 5f, Rotation = (-90f).Degrees() }));
+        t.True("the guess alone draws it down the cast too, with no second hit", !Hints(false).IsPositionSafe(right) && Hints(false).IsPositionSafe(left));
         var during = Hints(true);
         t.True("corrected, it is on the mob's right", !during.IsPositionSafe(right));
         t.True("and its left and front-left are clear", during.IsPositionSafe(left) && during.IsPositionSafe(ahead));
@@ -1957,7 +1958,7 @@ t.Section("Auto-dodge pathfinding");
         pt.Execute(new ActorState.OpCastInfo(riot, null));
         var after = Hints(true);
         t.True("once it lands the second hit is on the left, and the right is clear", !after.IsPositionSafe(left) && after.IsPositionSafe(right));
-        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(42215u), 0, default, default, 2)));
+        pt.Execute(new ActorState.OpCastEvent(riot, new ActorCastEvent(ActionID.MakeSpell(42217u), 0, default, default, 2)));
         t.Eq("and the second hit landing ends it", fix.Count, 0);
 
         // a follow-up that repeats lasts until its last landing; one whose own action is not known lasts its seconds

@@ -2,10 +2,15 @@
 // floors is still the cast-bar guess (AutoHints), which reads shapes off the sheet and is right for most of them.
 //
 // Checked 2026-10-17 against Splatoon's Pilgrim's Traverse presets (Leathen-94 and Ksirashi) and BossmodReborn's
-// PTFloorModule, cast by cast through `Minerva.Validate --action`. The tentacles have been seen in a recording
-// (2026-11-22, which turned them 90 degrees); nothing else here has.
-//  - Side and rear cleaves: the sheet's cone has no side, so the guess drew them in front of the mob. Sides and angles
-//    are Splatoon's. Its angles turn clockwise and Minerva's anticlockwise, so its +90 (the mob's right) is -90 here.
+// PTFloorModule, cast by cast through `Minerva.Validate --action`. The tentacles and Forgiven Riot's shockwaves have
+// been seen in a recording (2026-11-22); nothing else here has.
+//  - Side and rear cleaves: a cast's own rotation already points where it hits, so a cast is drawn straight down it
+//    with the sheet's width. Seen on both recorded families, and it is what BossmodReborn does (it draws these casts as
+//    the sheet says and adds only the second hit). The October table turned each one a further way to its side, which
+//    drew it where it does not hit: Korha in Left Tentacle, Saar and Rosa in Left-sided Shockwave, all told they were
+//    safe. A hit after the cast has no cast of its own and is drawn from the mob's facing, so it keeps its side.
+//    Splatoon's angles, where those came from, turn clockwise and Minerva's anticlockwise: its +90 (the mob's right)
+//    is -90 here.
 //  - Second hits with no cast bar of their own, and the true safe holes of rings: BossmodReborn's, with Splatoon's
 //    timing where BossmodReborn has none.
 //  - Lithic Breath and Heavy Smash: Splatoon's sizes, larger than the sheet's.
@@ -36,9 +41,9 @@ public enum AID : uint
     MasterOfLevin = 44732, // Traverse Howler: range 5-30 donut
     WhorlOfHurt = 44729, // the bird of 51-60: donut, 8-28 by Splatoon, 25 by the sheet
     RightSidedShockwave = 42214, // Forgiven Riot: right half, then its left half
-    RightSidedShockwaveSecond = 42215,
+    RightSideHit = 42215, // the right half with no cast: Left-sided Shockwave's second hit (seen 2026-11-22)
     LeftSidedShockwave = 42216,
-    LeftSidedShockwaveSecond = 42217,
+    LeftSideHit = 42217, // and the left half, Right-sided's
     GrowingCirclesOfAblution = 42578, // Forgiven Spite: a 10y circle, then a 10-40 donut
     GrowingCirclesOfAblutionSecond = 42749,
     ShrinkingCirclesOfAblution = 42748, // the donut first, then the circle
@@ -86,8 +91,10 @@ public abstract class PTTrash : ZoneModule
         [(uint)AID.MasterOfLevin] = new(Donut(5f, 30f)),
         // the sheet's outer edge is 25 and Splatoon's 28, its hole 8 and the guess's 6: the larger danger of each
         [(uint)AID.WhorlOfHurt] = new(Donut(6f, 28f)),
-        [(uint)AID.RightSidedShockwave] = new(Cone(30f, 90f, -90f), new CastCorrections.FollowUp(Cone(30f, 90f, 90f), 4d, (uint)AID.RightSidedShockwaveSecond)),
-        [(uint)AID.LeftSidedShockwave] = new(Cone(30f, 90f, 90f), new CastCorrections.FollowUp(Cone(30f, 90f, -90f), 4d, (uint)AID.LeftSidedShockwaveSecond)),
+        // Forgiven Riot, Korha 2026-11-22: Left-sided cast at -53 by a mob facing -143; Saar (-91) and Rosa (-113) hit,
+        // Xia and Korha on the half's edges (87 and 90 off) clear. Its second hit, 42215, landed 2.6s later on the other half.
+        [(uint)AID.RightSidedShockwave] = new(Cone(30f, 90f), new CastCorrections.FollowUp(Cone(30f, 90f, 90f), 4d, (uint)AID.LeftSideHit)),
+        [(uint)AID.LeftSidedShockwave] = new(Cone(30f, 90f), new CastCorrections.FollowUp(Cone(30f, 90f, -90f), 4d, (uint)AID.RightSideHit)),
         [(uint)AID.GrowingCirclesOfAblution] = new(Circle(10f), new CastCorrections.FollowUp(Donut(10f, 40f), 5d, (uint)AID.GrowingCirclesOfAblutionSecond)),
         [(uint)AID.ShrinkingCirclesOfAblution] = new(Donut(10f, 40f), new CastCorrections.FollowUp(Circle(10f), 5d, (uint)AID.ShrinkingCirclesOfAblutionSecond)),
         [(uint)AID.HailOfHeels] = new(Cone(8f, 90f), new CastCorrections.FollowUp(Cone(8f, 90f), 8d, (uint)AID.HailOfHeelsRepeat, 3)),
@@ -95,15 +102,15 @@ public abstract class PTTrash : ZoneModule
         [(uint)AID.Accelerate] = new(Circle(6f), new CastCorrections.FollowUp(Donut(5f, 10f), 4d, (uint)AID.Subduction)),
         // Splatoon's second line shows for the two seconds after the cast; its own action is not known
         [(uint)AID.ClawAndTail] = new(Rect(8f, 1.5f), new CastCorrections.FollowUp(Rect(10f, 1.5f, 180f), 2.5d)),
-        [(uint)AID.TailBlow] = new(Cone(19f, 45f, 180f)),
+        [(uint)AID.TailBlow] = new(Cone(19f, 45f)),
         [(uint)AID.LithicBreath] = new(Cone(40f, 60f)),
-        [(uint)AID.HoneyedLeft] = new(Cone(30f, 90f, 135f)),
-        [(uint)AID.HoneyedRight] = new(Cone(30f, 90f, -135f)),
-        [(uint)AID.RightSmite] = new(Cone(80f, 90f, -90f), new CastCorrections.FollowUp(Cone(80f, 90f, 90f), 2.5d)),
-        [(uint)AID.LeftSmite] = new(Cone(80f, 90f, 90f), new CastCorrections.FollowUp(Cone(80f, 90f, -90f), 2.5d)),
+        [(uint)AID.HoneyedLeft] = new(Cone(30f, 90f)),
+        [(uint)AID.HoneyedRight] = new(Cone(30f, 90f)),
+        [(uint)AID.RightSmite] = new(Cone(80f, 90f), new CastCorrections.FollowUp(Cone(80f, 90f, 90f), 2.5d)),
+        [(uint)AID.LeftSmite] = new(Cone(80f, 90f), new CastCorrections.FollowUp(Cone(80f, 90f, -90f), 2.5d)),
         [(uint)AID.HeavySmash] = new(Circle(10f)),
-        [(uint)AID.AuthoritysEdgeRight] = new(Cone(40f, 90f, -90f)),
-        [(uint)AID.AuthoritysEdgeLeft] = new(Cone(40f, 90f, 90f)),
+        [(uint)AID.AuthoritysEdgeRight] = new(Cone(40f, 90f)),
+        [(uint)AID.AuthoritysEdgeLeft] = new(Cone(40f, 90f)),
     };
 
     // a cone or a line starts at a large mob's edge, as in the guess; a circle or a ring is measured from its centre

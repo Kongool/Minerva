@@ -285,6 +285,7 @@ sealed class OneTwoStoneMarch(ModuleBase module) : Components.GenericAOEs(module
 sealed class SpinningNeedles(ModuleBase module) : Components.GenericRotatingAOE(module)
 {
     private readonly AOEShapeCone cone = new(60f, 30f.Degrees());
+    private const float CentreRadius = 2f; // the hitbox and the 30-degree half-angle: about a yalm, and a margin
     private readonly OneTwoStoneMarch _aoe = module.FindComponent<OneTwoStoneMarch>()!;
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe.AOEs.Count == 0 ? CollectionsMarshal.AsSpan(_aoes) : [];
@@ -321,6 +322,11 @@ sealed class SpinningNeedles(ModuleBase module) : Components.GenericRotatingAOE(
         {
             base.AddAIHints(slot, actor, assignment, hints);
             hints.AddForbiddenZone(new SDInvertedCircle(Center, 4f), Sequences.Ref(0).NextActivation);
+            // The game takes the half-yalm hitbox into the cone, so near its point every pair reaches all round: Rosa, 1.0y
+            // from the middle and 40 degrees off the cone's line, was hit (2026-11-22; Saar crossed 0.3s earlier, clear).
+            // The middle is ground to be off at each landing; crossing it between landings is still allowed.
+            ref var next = ref Sequences.Ref(0);
+            hints.AddForbiddenZone(new SDCircle(next.Origin, CentreRadius), next.NextActivation);
         }
     }
 }
