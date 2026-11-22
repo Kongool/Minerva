@@ -3460,6 +3460,22 @@ t.Section("The hitbox flags move every edge of a custom floor half a yalm");
     t.True("with neither flag the floor is as written", plain.Contains(plain.Center, new WPos(109.9f, 100f)) && !plain.Contains(plain.Center, new WPos(110.1f, 100f)) && plain.UnionShapes[0] is Rectangle);
 }
 
+// BossmodReborn says "stand inside this" by handing an AOE its shape's inverted distance, and reads every AOE by the
+// distance it carries. Minerva read the shape, so such a zone forbade the very ground it marked safe. Ogbunabali
+// (Pilgrim's Traverse floor 50), 2026-11-22: for the two seconds before Biting Wind the quicksand that stops the push
+// was forbidden and the rocks were not; every toon was on a rock for all seven winds recorded and was thrown.
+t.Section("An AOE that carries its own distance is forbidden by it");
+{
+    var circle = new AOEShapeCircle(5f);
+    var o = new WPos(100f, 100f);
+    var plain = new AIHints { Center = o, Bounds = new ArenaBoundsCircle(30f) };
+    plain.AddForbiddenZone(new AOEInstance(circle, o));
+    t.True("a plain AOE forbids its shape", !plain.IsPositionSafe(new WPos(102f, 100f)) && plain.IsPositionSafe(new WPos(108f, 100f)));
+    var inside = new AIHints { Center = o, Bounds = new ArenaBoundsCircle(30f) };
+    inside.AddForbiddenZone(new AOEInstance(circle, o, shapeDistance: circle.InvertedDistance(o, default)));
+    t.True("one handed its inverted distance forbids everything but its shape", inside.IsPositionSafe(new WPos(102f, 100f)) && !inside.IsPositionSafe(new WPos(108f, 100f)));
+}
+
 // A cleave swung at the player is kept off the player's own pet, where the component asks for it. Guttler swings at the
 // beastmaster about half the time, and the familiar standing beside it was cleaved too (the user, 2026-10-31).
 t.Section("A cleave at the player is kept off the player's own pet");

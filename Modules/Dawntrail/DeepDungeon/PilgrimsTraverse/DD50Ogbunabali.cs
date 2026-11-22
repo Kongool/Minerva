@@ -43,9 +43,19 @@ public enum IconID : uint
     PitAmbush = 640 // player->self
 }
 
+// The floor is quicksand but for seven rocks. Six Fulms Under comes 0.2-0.7s after stepping in, climbs a stage a second
+// (0x40E, 0x410, 0x412, 0x414) and kills 4.0s after the first (Xia 52.0 -> 56.0, Rosa 52.9 -> 56.9, Korha 132.75 ->
+// 136.66; 2026-11-22). It goes 0.25-0.6s after reaching a rock. BossmodReborn times the sand by the status's expiry,
+// which a recording does not carry (the replay threw) and which was not what killed: with no status the sand had no
+// time at all, so the walk to the boss stood in it (seven deaths in two pulls). The sand is now standing danger, like a
+// puddle, and once the status is on, ground to be off within OutBySeconds of its first stage. Tried and dropped: sand
+// allowed two seconds at a time (2 deaths in 8 closed-loop runs against none).
+// For the two seconds before Biting Wind lands it is the other way about: the sand's Breaker of Wind stops the push
+// (Xia, 172.3s: in the sand and not moved; the three toons on rocks thrown), so the rocks are the forbidden ground.
 [SkipLocalsInit]
 sealed class Quicksand(ModuleBase module) : Components.GenericAOEs(module, warningText: "GTFO from quicksand!")
 {
+    private const double OutBySeconds = 3d; // a second before it kills
     private AOEInstance[] _aoe = [];
     private AOEInstance[] _aoeInv = [];
     private readonly DateTime[] expirations = new DateTime[4];
@@ -110,8 +120,50 @@ sealed class Quicksand(ModuleBase module) : Components.GenericAOEs(module, warni
             return _aoeInv;
         }
         ref var aoe = ref _aoe[0];
-        aoe.Activation = expirations[slot];
+        var sinking = slot >= 0 && slot < expirations.Length ? expirations[slot] : DateTime.MaxValue;
+        aoe.Activation = sinking != DateTime.MaxValue ? sinking : default;
         return _aoe;
+    }
+
+    // A walk for uptime is a walk through the sand, and the dodge does not count the seconds: in the closed loop it set
+    // off across 20y of sand for a rock nearer the boss and sank on the way, once arriving as a wind's two seconds began
+    // with the sinking already three seconds old. So uptime is walked for only to a rock in reach of the boss that is
+    // the next one over (MaxHop to its middle: about a second of sand), and not at all while a wind is being cast, when
+    // the toon must be on a rock, free of the status, to step in fresh.
+    private const float MaxHop = 11f;
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        if (_aoe.Length == 0)
+        {
+            return;
+        }
+        if (kbImminent || !RockInReach(actor))
+        {
+            hints.UptimeHeld = true;
+        }
+    }
+
+    private bool RockInReach(Actor actor)
+    {
+        var boss = Module.PrimaryActor;
+        var reach = boss.HitboxRadius + actor.HitboxRadius + 3f;
+        foreach (var rock in (ReadOnlySpan<WPos[]>)[vertices1, vertices2, vertices3, vertices4, vertices5, vertices6, vertices7])
+        {
+            float x = 0f, z = 0f;
+            foreach (var v in rock)
+            {
+                x += v.X;
+                z += v.Z;
+            }
+            var middle = new WPos(x / rock.Length, z / rock.Length);
+            if ((middle - boss.Position).Length() <= reach && (middle - actor.Position).Length() <= MaxHop)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -122,8 +174,9 @@ sealed class Quicksand(ModuleBase module) : Components.GenericAOEs(module, warni
                 var center = Center;
                 var shape = new AOEShapeCustom(center, [new Square(center, 20f)], [new PolygonCustom(vertices1), new PolygonCustom(vertices2), new PolygonCustom(vertices3),
                 new PolygonCustom(vertices4), new PolygonCustom(vertices5), new PolygonCustom(vertices6),new PolygonCustom(vertices7)]);
-                _aoe = [new(shape, center, shapeDistance: shape.Distance(center, default))];
-                _aoeInv = [new(shape, center, shapeDistance: shape.InvertedDistance(center, default), color: Colors.SafeFromAOE)];
+                WPos[][] rocks = [vertices1, vertices2, vertices3, vertices4, vertices5, vertices6, vertices7];
+                _aoe = [new(shape, center, shapeDistance: new SDSand(rocks, false))];
+                _aoeInv = [new(shape, center, shapeDistance: new SDSand(rocks, true), color: Colors.SafeFromAOE)];
                 Array.Fill(expirations, DateTime.MaxValue);
                 break;
             case (uint)AID.BitingWind:
@@ -153,9 +206,10 @@ sealed class Quicksand(ModuleBase module) : Components.GenericAOEs(module, warni
         if (status.ID == (uint)SID.SixFulmsUnder)
         {
             var slot = Raid.FindSlot(actor.InstanceID);
-            if (slot >= 0)
+            // the first stage only: the later ones are the same sinking, a second further on
+            if (slot >= 0 && slot < expirations.Length && expirations[slot] == DateTime.MaxValue)
             {
-                expirations[slot] = status.ExpireAt.AddSeconds(-1d); // small safety margin because of latency
+                expirations[slot] = World.FutureTime(OutBySeconds);
             }
         }
     }
@@ -165,7 +219,7 @@ sealed class Quicksand(ModuleBase module) : Components.GenericAOEs(module, warni
         if (status.ID == (uint)SID.SixFulmsUnder)
         {
             var slot = Raid.FindSlot(actor.InstanceID);
-            if (slot >= 0)
+            if (slot >= 0 && slot < expirations.Length)
             {
                 expirations[slot] = DateTime.MaxValue;
             }
@@ -192,6 +246,74 @@ sealed class Quicksand(ModuleBase module) : Components.GenericAOEs(module, warni
                 return;
             }
         }
+    }
+}
+
+/// <summary>
+/// The quicksand as forbidden ground (everything that is not a rock), or the rocks as forbidden ground for the moments
+/// the sand is the place to be. The drawn shape's own distance measures all seven rocks' 200 edges for every cell the
+/// solver asks about, and the sand is now asked about all fight: 22ms a solve, over 100ms at worst (2026-11-22). A rock
+/// is measured exactly only from within <see cref="Near"/> of the circle round it; further off the circle is near enough.
+/// </summary>
+sealed class SDSand : ShapeDistance
+{
+    private const float Near = 2f;
+    private readonly WPos[][] rocks;
+    private readonly WPos[] centres;
+    private readonly float[] radii;
+    private readonly bool rocksForbidden;
+
+    public SDSand(WPos[][] rocks, bool rocksForbidden)
+    {
+        this.rocks = rocks;
+        this.rocksForbidden = rocksForbidden;
+        centres = new WPos[rocks.Length];
+        radii = new float[rocks.Length];
+        for (var i = 0; i < rocks.Length; ++i)
+        {
+            float x = 0f, z = 0f;
+            foreach (var v in rocks[i])
+            {
+                x += v.X;
+                z += v.Z;
+            }
+            centres[i] = new(x / rocks[i].Length, z / rocks[i].Length);
+            foreach (var v in rocks[i])
+                radii[i] = MathF.Max(radii[i], (v - centres[i]).Length());
+        }
+    }
+
+    public override float Distance(WPos p)
+    {
+        // to the nearest rock's edge, negative on a rock
+        var d = float.MaxValue;
+        for (var i = 0; i < rocks.Length; ++i)
+        {
+            var off = (p - centres[i]).Length() - radii[i];
+            if (off >= d)
+                continue;
+            d = off > Near ? off : MathF.Min(d, ToRock(rocks[i], p));
+        }
+        return rocksForbidden ? d : -d;
+    }
+
+    private static float ToRock(WPos[] rock, WPos p)
+    {
+        var best = float.MaxValue;
+        var inside = false;
+        for (int i = 0, j = rock.Length - 1; i < rock.Length; j = i++)
+        {
+            var a = rock[j];
+            var b = rock[i];
+            var ab = b - a;
+            var len = ab.LengthSq();
+            var t = len > 0f ? Math.Clamp((p - a).Dot(ab) / len, 0f, 1f) : 0f;
+            best = MathF.Min(best, (p - (a + (ab * t))).LengthSq());
+            if ((a.Z > p.Z) != (b.Z > p.Z) && p.X < ((b.X - a.X) * (p.Z - a.Z) / (b.Z - a.Z)) + a.X)
+                inside = !inside;
+        }
+        var dist = MathF.Sqrt(best);
+        return inside ? -dist : dist;
     }
 }
 
@@ -260,14 +382,39 @@ sealed class BitingWindKB(ModuleBase module) : Components.SimpleKnockbacks(modul
     }
 
     public override void AddHints(int slot, Actor actor, TextHints hints) { } // hint handled by quicksand component
+
+    // The quicksand component handles this too. Left to the knockback guard, the whole floor is forbidden for the whole
+    // cast (a push from anywhere lands in the sand or the ring), which is no instruction at all: the toon is to be on a
+    // rock until two seconds before the wind and in the sand, immune, when it lands. In the closed loop the guard sent a
+    // chased toon 20y across the sand to no better ground, and it sank.
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) { }
 }
 
 [SkipLocalsInit]
 sealed class FallingRock(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.FallingRock, 5f);
 
+// Drawn at BossmodReborn's 5y, knowingly a yalm short: the sheet says 6, and Korha was hit three times in two pulls from
+// 5.8-5.95y off the explosion's centre (2026-11-22; an explosion's own event carries the place the boss left, the next
+// one's carries its centre). At 6 the chased toon must keep 11y from the last landing, which from the middle of this
+// floor leaves one rock of the seven: in the closed loop it crossed 20y of sand for it and sank. A hit is 45k; the sand
+// kills. Open: a chased toon that hops to the next rock and takes the graze instead.
 [SkipLocalsInit]
 sealed class PitAmbush(ModuleBase module) : Components.StandardChasingAOEs(module, 5f, (uint)AID.PitAmbushFirst, default, 5f, 2.1d, 4, true, (uint)IconID.PitAmbush)
 {
+    // the chased toon keeps clear of the boss and makes no walk back to it: that walk is through the sand
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (var c in Chasers)
+        {
+            if (c.Target == actor)
+            {
+                hints.UptimeHeld = true;
+                return;
+            }
+        }
+    }
+
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID is (uint)AID.PitAmbushFirst or (uint)AID.PitAmbush2nd3rd or (uint)AID.PitAmbushLast)

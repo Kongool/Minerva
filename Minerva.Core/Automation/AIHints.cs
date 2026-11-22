@@ -269,8 +269,14 @@ public sealed class AIHints
         int? arenaProjectionLayer = null, bool? restrictToArenaProjectionLayer = null)
         => this.AddZone(new ForbiddenZone(shape.Distance(origin, rotation), activation, source));
 
+    /// <summary>
+    /// An AOE as forbidden ground. One that carries its own distance is read by it, as BossmodReborn does: that is how a
+    /// module says "stand inside this" (the shape's inverted distance, drawn in the safe colour). Read by the shape
+    /// instead, 21 such modules had the safe ground forbidden. Ogbunabali, 2026-11-22: for the two seconds before each
+    /// Biting Wind the sand that blocks the push was forbidden and the rocks were not, and every toon was thrown.
+    /// </summary>
     public void AddForbiddenZone(in AOEInstance aoe)
-        => this.AddZone(new ForbiddenZone(aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation));
+        => this.AddZone(new ForbiddenZone(aoe.ShapeDistance ?? aoe.Shape.Distance(aoe.Origin, aoe.Rotation), aoe.Activation));
 
     private void AddZone(in ForbiddenZone zone)
     {
