@@ -92,7 +92,7 @@ sealed class BoundsOfIndulgence(ModuleBase module) : Components.GenericAOEs(modu
 {
     private readonly List<Actor> voidzones = [];
     private readonly AOEShapeCircle circle = new(4f);
-    private readonly AOEShapeArcCapsule arcCW = new(4f, 30f.Degrees(), module.Arena.Center), arcCCW = new(4f, -30f.Degrees(), module.Arena.Center);
+    private readonly AOEShapeArcCapsule arcCW = new(4f, 30f.Degrees(), module.Center), arcCCW = new(4f, -30f.Degrees(), module.Center);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
