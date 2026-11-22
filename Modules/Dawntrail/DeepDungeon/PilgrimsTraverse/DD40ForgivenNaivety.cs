@@ -58,11 +58,38 @@ sealed class ShiningShot : Components.SimpleAOEs
     }
 }
 
+// Three pushes 2.6s apart, each 21y from its caster. The push starts 0.48-0.52s after its cast ends (10 pushes, Korha's
+// and Saar's, 2026-11-22), from wherever the player is by then, but the base list lets the caster go when the cast ends.
+// In that half second the dodge set off for the next push's spot, 2.5-3.8y further from the caster, and the push
+// carried the toon that much further: past the floor's edge on 7 of those 10, and into the damage beyond it (about
+// 18.3 from the centre, some 45k a time) on 3, with all four toons hit in the second set. The guard now holds until the push starts.
 [SkipLocalsInit]
 sealed class SaltwaterShot(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.SaltwaterShot, 21f)
 {
+    private const double PushStartsAfterSeconds = 0.5d;
+    // just past the latest push seen (0.52s): held any longer, the guard is still up mid-push and calls the landing danger
+    private const double HoldAfterCastSeconds = 0.55d;
+    private (WPos Origin, DateTime Push, DateTime Until)? held;
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo cast)
+    {
+        if (cast.Action.ID == WatchedAction)
+            held = (cast.LocXZ != default ? cast.LocXZ : caster.Position, World.FutureTime(PushStartsAfterSeconds), World.FutureTime(HoldAfterCastSeconds));
+        base.OnCastFinished(caster, cast);
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        if (held is { } h && World.CurrentTime < h.Until && !IsImmune(slot, h.Push))
+        {
+            // the push still to come, toward the next caster if there is one, as below
+            if (Casters.Count != 0)
+                hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOriginIntoDirection(Center, h.Origin, 21f, 16.5f, (Casters[0].Origin - h.Origin).Normalized(), 15f.Degrees()), h.Push);
+            else
+                hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOrigin(Center, h.Origin, 21f, 16.5f), h.Push);
+            return;
+        }
+
         var count = Casters.Count;
         if (count != 0)
         {

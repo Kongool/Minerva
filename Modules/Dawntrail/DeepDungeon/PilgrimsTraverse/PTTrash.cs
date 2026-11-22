@@ -2,7 +2,8 @@
 // floors is still the cast-bar guess (AutoHints), which reads shapes off the sheet and is right for most of them.
 //
 // Checked 2026-10-17 against Splatoon's Pilgrim's Traverse presets (Leathen-94 and Ksirashi) and BossmodReborn's
-// PTFloorModule, cast by cast through `Minerva.Validate --action`. Nothing here has been seen in a recording yet.
+// PTFloorModule, cast by cast through `Minerva.Validate --action`. The tentacles have been seen in a recording
+// (2026-11-22, which turned them 90 degrees); nothing else here has.
 //  - Side and rear cleaves: the sheet's cone has no side, so the guess drew them in front of the mob. Sides and angles
 //    are Splatoon's. Its angles turn clockwise and Minerva's anticlockwise, so its +90 (the mob's right) is -90 here.
 //  - Second hits with no cast bar of their own, and the true safe holes of rings: BossmodReborn's, with Splatoon's
@@ -27,7 +28,7 @@ namespace Minerva.Dawntrail.DeepDungeon.PilgrimsTraverse.Trash;
 
 public enum AID : uint
 {
-    LeftTentacle1 = 41780, // 180-degree half on the mob's left; the sheet says range 60
+    LeftTentacle1 = 41780, // 180-degree half on the mob's left, aimed by the cast itself (see the table); the sheet says range 60
     RightTentacle1 = 41782,
     LeftTentacle2 = 44690,
     RightTentacle2 = 44691,
@@ -72,10 +73,15 @@ public abstract class PTTrash : ZoneModule
 
     private static readonly IReadOnlyDictionary<uint, CastCorrections.Entry> Table = new Dictionary<uint, CastCorrections.Entry>
     {
-        [(uint)AID.LeftTentacle1] = new(Cone(60f, 90f, 90f)),
-        [(uint)AID.LeftTentacle2] = new(Cone(60f, 90f, 90f)),
-        [(uint)AID.RightTentacle1] = new(Cone(60f, 90f, -90f)),
-        [(uint)AID.RightTentacle2] = new(Cone(60f, 90f, -90f)),
+        // The cast's own rotation already points at the side it hits: the mob turns to its target and the cast faces
+        // 90 off that. Forgiven Petulance, Korha 2026-11-22: Left Tentacle cast at -19 by a mob that ended facing -109;
+        // it hit Korha at -54 and missed three toons at -133 to -158. Turned a further 90 here, it was drawn behind
+        // Korha and he stood in it. Right Tentacle the same (160 on a mob facing -109). The first pair has not been
+        // recorded; it is the same cast family, and BossmodReborn aims its own tentacles straight down the cast.
+        [(uint)AID.LeftTentacle1] = new(Cone(60f, 90f)),
+        [(uint)AID.LeftTentacle2] = new(Cone(60f, 90f)),
+        [(uint)AID.RightTentacle1] = new(Cone(60f, 90f)),
+        [(uint)AID.RightTentacle2] = new(Cone(60f, 90f)),
         [(uint)AID.EarthenAuger] = new(_ => new AOEShapeDonutSector(3f, 30f, 135f.Degrees())),
         [(uint)AID.MasterOfLevin] = new(Donut(5f, 30f)),
         // the sheet's outer edge is 25 and Splatoon's 28, its hole 8 and the guess's 6: the larger danger of each
