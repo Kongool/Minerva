@@ -117,7 +117,7 @@ internal readonly record struct AoeSample(string Kind, float[] Dims, float Origi
     {
         var result = new List<AoeSample>();
         foreach (var c in module.Components.OfType<Minerva.Components.GenericAOEs>())
-            foreach (ref readonly var aoe in c.ActiveAOEs(0, pc))
+            foreach (ref readonly var aoe in c.ActiveAOEs(module.Raid.ViewerSlot(pc.InstanceID), pc))
                 result.Add(new AoeSample(KindOf(aoe.Shape), DimsOf(aoe.Shape), aoe.Origin.X, aoe.Origin.Z, aoe.Rotation.Deg, aoe.Risky));
         return result;
     }

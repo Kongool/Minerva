@@ -30,8 +30,9 @@ public sealed class PartyState
     public const int MaxAllianceSize = 24;
 
     /// <summary>
-    /// The slot the viewing player occupies. Always 0: the game puts you first in your own party list, and
-    /// Minerva's sync preserves that ordering.
+    /// The slot the viewing player occupies when alone. NOT the player's slot in a party: the sync mirrors the
+    /// game's party list, which is in the server's order and the same on every client, so the player is often at
+    /// 1-7 there. Use <see cref="ViewerSlot"/> for "the slot of this character".
     /// </summary>
     public const int PlayerSlot = 0;
 
@@ -151,6 +152,13 @@ public sealed class PartyState
                 return i;
         return -1;
     }
+
+    /// <summary>
+    /// The slot to hand a module when asking on behalf of a character: its own, or 0 when it is in no slot.
+    /// Every caller passed 0 until 2026-11-23, so in a party a module answered for whoever was first in the list:
+    /// on Forgiven Profanity the doomed toons were told to avoid the cone that cleanses them, and died of it.
+    /// </summary>
+    public int ViewerSlot(ulong instanceID) => Math.Max(0, this.FindSlot(instanceID));
 
     public List<WorldState.Operation> CompareToInitial()
     {

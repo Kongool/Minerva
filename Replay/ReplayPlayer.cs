@@ -176,7 +176,7 @@ public sealed class ReplayPlayer : IDisposable
             this.arena.Bounds = this.module.Bounds;
             this.arena.Begin(canvasTopLeft, canvasSize);
             this.module.Arena = this.arena;
-            this.module.DrawArena(0, pc ?? this.module.PrimaryActor); // boundary + enemies + live AOEs
+            this.module.DrawArena(pc != null ? this.module.Raid.ViewerSlot(pc.InstanceID) : 0, pc ?? this.module.PrimaryActor); // boundary + enemies + live AOEs
             this.ClipAndFrame();
 
             foreach (var a in this.world.Actors)
@@ -345,7 +345,7 @@ public sealed class ReplayPlayer : IDisposable
     {
         if (this.module == null)
             return;
-        this.module.BuildAIHints(0, pc, this.aiHints);
+        this.module.BuildAIHints(this.module.Raid.ViewerSlot(pc.InstanceID), pc, this.aiHints);
         var solve = ArenaPathfinder.Solve(this.aiHints, this.world.CurrentTime);
         if (!solve.NeedToMove || !solve.Found)
             return;

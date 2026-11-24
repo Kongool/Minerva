@@ -52,7 +52,7 @@ public sealed class RadarView(ModuleManager manager, AIManager ai, Configuration
         }
 
         var pc = this.manager.LocalPlayer();
-        var pcSlot = 0;
+        var pcSlot = pc != null ? module.Raid.ViewerSlot(pc.InstanceID) : 0;
 
         // arena canvas
         var canvasTopLeft = ImGui.GetCursorScreenPos();

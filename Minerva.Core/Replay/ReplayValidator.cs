@@ -974,7 +974,7 @@ public sealed class ReplayValidator
         {
             if (c is Components.GenericAOEs g)
             {
-                foreach (ref readonly var aoe in g.ActiveAOEs(0, me))
+                foreach (ref readonly var aoe in g.ActiveAOEs(module.Raid.ViewerSlot(me.InstanceID), me))
                     if (aoe.Shape.Check(me.Position, aoe.Origin, aoe.Rotation))
                         return true;
             }

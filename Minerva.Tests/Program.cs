@@ -5253,6 +5253,9 @@ t.Section("Party + class/role sync");
     ws.Execute(new PartyState.OpModify(1, new PartyState.Member(0xBB, healer)));
     t.Eq("party WithSlot lists both live members", ws.Party.WithSlot().Length, 2);
     t.Eq("party FindSlot resolves by instance id", ws.Party.FindSlot(healer), 1);
+    // the slot a module is asked about is the character's own, not 0: the game's party list is in the server's order
+    t.Eq("party ViewerSlot is the character's own slot", ws.Party.ViewerSlot(healer), 1);
+    t.Eq("party ViewerSlot falls back to 0 for a character in no slot", ws.Party.ViewerSlot(0x10000099), 0);
     ws.Party.PlayerInstanceID = tank;
     t.Eq("party Player() resolves the POV", (long)ws.Party.Player()!.InstanceID, (long)tank);
 

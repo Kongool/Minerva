@@ -181,7 +181,7 @@ public sealed class AIManager
         // Magitek Colossus, "no safe spot" because not in its arena).
         if (InCharge(module, pc))
         {
-            module.BuildAIHints(0, pc, this.hints, this.roster.AssignmentFor(this.world.Party, pc));
+            module.BuildAIHints(this.world.Party.ViewerSlot(pc.InstanceID), pc, this.hints, this.roster.AssignmentFor(this.world.Party, pc));
         }
         else if (!this.BuildTrashHints(pc))
         {
@@ -205,7 +205,7 @@ public sealed class AIManager
         {
             try
             {
-                zone.CalculateAIHints(0, pc, this.hints);
+                zone.CalculateAIHints(this.world.Party.ViewerSlot(pc.InstanceID), pc, this.hints);
             }
             catch (Exception ex)
             {

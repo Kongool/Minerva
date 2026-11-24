@@ -203,7 +203,14 @@ sealed class NowhereToRun(ModuleBase module) : ModuleComponent(module)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (debuffed[slot] && numStacks[slot] >= 6)
+        if (!debuffed[slot])
+        {
+            return;
+        }
+        // Every 0.7s of walking is a stack and the eighth kills (Rosa, 2026-11-23: 2 to 8 in 6.6s). Dodges are
+        // worth their stacks; the walk back to the boss is not.
+        hints.UptimeHeld = true;
+        if (numStacks[slot] >= 6)
         {
             // BossmodReborn writes ForcedMovement = null here, which its own controller reads as "no forced
             // movement" rather than "do not move" -- the comment states the intent, the assignment does not
