@@ -208,7 +208,27 @@ sealed class SmashingStampBaitAOE(ModuleBase module) : Components.SimpleAOEs(mod
 sealed class GiganticRageCircle(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GiganticRageCircle, 15.0f);
 sealed class GiganticRageCone(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.GiganticRageCone, (uint)AID.GiganticRageCone1],
     new AOEShapeCone(40.0f, 90.0f.Degrees()));
-sealed class AftersparkTower(ModuleBase module) : Components.CastTowers(module, (uint)AID.AftersparkTower, 2.0f);
+// The tower appears under the player and must be soaked, or Afterspark (49365) hits the whole floor for 310-638. The
+// shared tower component only keeps a player out of a tower they must not soak; nothing tells the one who should soak
+// to stay. In 39 recordings 30 of 87 towers were soaked by nobody: the toon stood 0-2.7y from each as it appeared and
+// was 2.5-14.5y away when it went off, most often on the walk back to the boss after Gigantic Rage. So everything
+// outside the nearest tower is forbidden until it resolves.
+sealed class AftersparkTower(ModuleBase module) : Components.CastTowers(module, (uint)AID.AftersparkTower, 2.0f) {
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        base.AddAIHints(slot, actor, assignment, hints);
+        var towers = ActiveTowers(slot, actor);
+        var best = -1;
+        for (var i = 0; i < towers.Length; ++i) {
+            if (!towers[i].ForbiddenSoakers[slot] && (best < 0 || (towers[i].Position - actor.Position).LengthSq() < (towers[best].Position - actor.Position).LengthSq())) {
+                best = i;
+            }
+        }
+
+        if (best >= 0) {
+            hints.AddForbiddenZone(new SDInvertedCircle(towers[best].Position, Radius), towers[best].Activation);
+        }
+    }
+}
 sealed class AfterburnAOE(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AfterburnAOE, 6.0f);
 sealed class GiganticRageType(ModuleBase module) : Components.GenericBaitAway(module, centerAtTarget: true, onlyShowOutlines: true) {
     private readonly SmashingStampBait? smashingStampBait = module.FindComponent<SmashingStampBait>();
