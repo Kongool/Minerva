@@ -379,8 +379,10 @@ public sealed class ActorState : IEnumerable<Actor>
                 // back to the caster's position, which is wrong whenever a helper places a puddle from a
                 // parking spot — the AOE replays at the helper instead of on the floor it hit. Appended last
                 // so recordings written before it still parse (the reader stops when the tokens run out).
+                // Interruptible follows it, last for the same reason: without it a replay cannot say whether a cast
+                // a module calls interruptible actually was.
                 o.Tag("CST+").Emit(this.InstanceID, "X").Emit(c.Action.ID, "X").Emit(c.TargetID, "X").Emit(c.Rotation).Emit(c.ElapsedTime).Emit(c.TotalTime)
-                 .Emit(new Vector4(c.Location.X, c.Location.Y, c.Location.Z, 0f));
+                 .Emit(new Vector4(c.Location.X, c.Location.Y, c.Location.Z, 0f)).Emit(c.Interruptible);
             else
                 o.Tag("CST-").Emit(this.InstanceID, "X");
         }

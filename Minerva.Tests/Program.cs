@@ -5572,6 +5572,33 @@ t.Section("Offline validation round trip");
         t.True("legacy cast has no landing spot", legacyLoc == default);
     }
 
+    // the game's interruptible flag must survive record -> parse, so a recording can confirm or refute a module that
+    // calls a cast interruptible. Both values, so a parser that always read true would fail too.
+    {
+        var intWs = new WorldState(10_000_000, "test");
+        var intOut = new StringWriter();
+        using (var rec4 = new ReplayRecorder(intWs, intOut))
+        {
+            intWs.Execute(new WorldState.OpFrameStart(new FrameState { Timestamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) }, TimeSpan.FromSeconds(1)));
+            intWs.Execute(new ActorState.OpCreate(0x1, 0xABCu, 0, "Kickable", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 1f, default, true, false, 0));
+            intWs.Execute(new ActorState.OpCreate(0x2, 0xABDu, 0, "Unkickable", 0, ActorType.Enemy, new Vector4(5, 0, 0, 0), 1f, default, true, false, 0));
+            intWs.Execute(new ActorState.OpCastInfo(0x1, new ActorCastInfo { Action = ActionID.MakeSpell(46871u), TotalTime = 4f, Interruptible = true }));
+            intWs.Execute(new ActorState.OpCastInfo(0x2, new ActorCastInfo { Action = ActionID.MakeSpell(46928u), TotalTime = 4f, Interruptible = false }));
+        }
+
+        var intCasts = ReplayParser.ParseTimeline(new StringReader(intOut.ToString())).Ops.Select(o => o.Op)
+            .OfType<ActorState.OpCastInfo>().Where(o => o.Value != null).ToList();
+        t.True("an interruptible cast reads back interruptible", intCasts.FirstOrDefault(o => o.InstanceID == 0x1)?.Value?.Interruptible == true);
+        t.True("an uninterruptible cast reads back uninterruptible", intCasts.FirstOrDefault(o => o.InstanceID == 0x2)?.Value?.Interruptible == false);
+
+        // a recording from before the flag ends after the location; it must parse, and as not interruptible
+        var preFlag = ReplayParser.ParseTimeline(new StringReader(
+            "MINERVA-REPLAY 4 10000000 test" + Environment.NewLine + "0 CST+ 1 B717 0 0.000 0.000 4.000 (0.000,0.000,0.000,0.000)" + Environment.NewLine));
+        var preFlagCast = preFlag.Ops.Select(o => o.Op).OfType<ActorState.OpCastInfo>().FirstOrDefault();
+        t.True("a recording from before the interruptible flag still parses", preFlagCast?.Value != null);
+        t.True("and reads its cast as not interruptible", preFlagCast?.Value?.Interruptible == false);
+    }
+
     // cast events carry the per-target effect list the game sends; it must survive record -> parse.
     // Older recordings have no target section at all, so the parser must still accept those.
     {

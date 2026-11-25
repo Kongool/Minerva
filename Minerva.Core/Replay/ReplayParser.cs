@@ -246,6 +246,9 @@ public sealed class ReplayParser
             var loc = r.NextVec4();
             cast.Location = new Vector3(loc.X, loc.Y, loc.Z);
         }
+        // optional too: recordings made before revision 6 carry no interruptible flag
+        if (r.HasMore)
+            cast.Interruptible = r.NextBool();
 
         return new ActorState.OpCastInfo(id, cast);
     }

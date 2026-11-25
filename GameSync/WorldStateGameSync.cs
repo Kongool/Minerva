@@ -563,6 +563,7 @@ public sealed unsafe class WorldStateGameSync : IDisposable
                 Location = location,
                 ElapsedTime = chr.CurrentCastTime,
                 TotalTime = chr.TotalCastTime,
+                Interruptible = chr.IsCastInterruptible,
             };
         }
 
@@ -571,7 +572,8 @@ public sealed unsafe class WorldStateGameSync : IDisposable
             return;
 
         if (cur != null && prev != null && cur.Action == prev.Action && cur.TargetID == prev.TargetID
-            && cur.TotalTime == prev.TotalTime && MathF.Abs(cur.ElapsedTime - prev.ElapsedTime) < 0.2f)
+            && cur.TotalTime == prev.TotalTime && cur.Interruptible == prev.Interruptible
+            && MathF.Abs(cur.ElapsedTime - prev.ElapsedTime) < 0.2f)
         {
             prev.ElapsedTime = cur.ElapsedTime;
             return;
