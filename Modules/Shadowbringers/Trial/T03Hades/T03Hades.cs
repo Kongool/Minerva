@@ -181,6 +181,12 @@ sealed class EchoOfTheLost(ModuleBase module) : Components.SimpleAOEs(module, (u
 
 sealed class EchoOfTheLostCone(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.EchoOfTheLost1, new AOEShapeCone(100f, 45f.Degrees()));
 
+// The cone above is BossmodReborn's estimate. Nagumo's KodakkuAssist script (2026-11-24) draws the swipe as half the
+// arena instead, turned 75 degrees to the side of the raised arm: left for 16739, right for 16740. Neither has been
+// seen in a recording, so both are forbidden; the far side from the arm is clear of both.
+sealed class EchoOfTheLostHalfRight(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.EchoOfTheLost, new AOEShapeCone(100f, 90f.Degrees(), -75f.Degrees()));
+sealed class EchoOfTheLostHalfLeft(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.EchoOfTheLost1, new AOEShapeCone(100f, 90f.Degrees(), 75f.Degrees()));
+
 // targets both tanks (two highest enmity targets) with earthshaker markers, indicating that a cone-AoE will be
 // aimed from Hades in the direction of each marker. Marked players can bait the attack away from group
 sealed class HellbornYawp(ModuleBase module) : Components.BaitAwayCast(module, (uint)AID.HellbornYawp1, new AOEShapeCone(100f, 30f.Degrees()), centerAtTarget: true, tankbuster: true);
@@ -301,6 +307,8 @@ sealed class HadesStates : StateMachineBuilder
             .ActivateOnEnter<EchoOfTheLost>()
             .ActivateOnEnter<HellbornYawp>()
             .ActivateOnEnter<EchoOfTheLostCone>()
+            .ActivateOnEnter<EchoOfTheLostHalfRight>()
+            .ActivateOnEnter<EchoOfTheLostHalfLeft>()
             .ActivateOnEnter<LastPhaseRaidwides>()
             .ActivateOnEnter<CaptivityBait>()
             .ActivateOnEnter<AetherialGaol>()

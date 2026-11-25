@@ -39,7 +39,7 @@ public enum AID : uint
     RingingBladeFirst = 49293, // Helper->self, 7.0s cast, range 5-60 donut
     CirclingBladeVisual = 49294, // MedusaPiece->self, no cast, single-target
     CirclingBladeSecond = 49295, // Helper->self, 9.0s cast, range 6 circle
-    Shockwave = 49296, // Helper->self, 7.0s cast, range 60 30-degree cone, x4 then x4 two seconds later
+    Shockwave = 49296, // Helper->self, 7.0s cast, range 60 45-degree cone, x4 then x4 two seconds later
 
     LamiaFire = 48622, // LamiaPiece->player, no cast, single-target
     CircleOfFlames = 49284, // LamiaPiece->location, 4.0s cast, range 5 circle
@@ -68,7 +68,11 @@ public enum IconID : uint
 }
 
 sealed class PetrifyingRegard(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.PetrifyingRegard, new AOEShapeCone(60f, 22.5f.Degrees()));
-sealed class Shockwave(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Shockwave, new AOEShapeCone(60f, 15f.Degrees()));
+// 15 degrees a side until 2026-11-24, from one pull (hit 7-9 degrees off the line, missed at 35). Over all 55 Medusa
+// recordings since, three of the five hits landed 20-22 degrees off the line, 7.6-8.9y out, which a 15-degree cone
+// cannot reach even with the toon's own half yalm; Nagumo's KodakkuAssist script draws 22.5 a side. The misses are no
+// guide to the edge here: a covered toon is missed inside the cone.
+sealed class Shockwave(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Shockwave, new AOEShapeCone(60f, 22.5f.Degrees()));
 // Ringing Blade's omen (gl_sircle_6005at1) is the one BossmodReborn draws as 5-60 for Wind Sickle, Brutal Crown and Winding Wildwinds.
 sealed class RingingBlade(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.RingingBladeFirst, (uint)AID.RingingBladeSecond], new AOEShapeDonut(5f, 60f));
 sealed class CirclingBlade(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.CirclingBladeFirst, (uint)AID.CirclingBladeSecond], 6f);
