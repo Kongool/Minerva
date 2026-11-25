@@ -56,7 +56,8 @@ public enum TetherID : uint {
 }
 
 sealed class VoidThunderIII(ModuleBase module) : Components.SpreadFromIcon(module, (uint)IconID.VoidThunderIIITankBuster, (uint)AID.VoidThunderIIITB, 6.0f, 5.1f);
-sealed class VoidThunderIIICross(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VoidThunderIIICross, new AOEShapeCross(50.0f, 5.0f));
+// Both ids: the cross is cast as 50939 as well as 49207 (the only recording, 2026-10-31, has it as 50939 both times).
+sealed class VoidThunderIIICross(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.VoidThunderIIICross, (uint)AID.VoidThunderIIICross1], new AOEShapeCross(50.0f, 5.0f));
 sealed class VoidParalyzeIII(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.VoidParalyzeIII, "Raidwide + Applies Paralysis");
 
 sealed class VoidWaterIII(ModuleBase module) : Components.SpreadFromIcon(module, (uint)IconID.VoidWaterIIIIcon, (uint)AID.VoidWaterIII, 8.0f, 5.1f) {
