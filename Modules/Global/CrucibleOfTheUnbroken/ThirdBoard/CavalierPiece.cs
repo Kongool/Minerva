@@ -133,12 +133,14 @@ sealed class CrushingBlade(ModuleBase module) : Components.GenericKnockback(modu
 
     public override void OnCastFinished(Actor caster, ActorCastInfo spell)
     {
-        // The shove lands about half a second after the cast resolves, measured from wherever the player is by then
-        // (Ymir's Tsunami, 2026-10-25), so its ground is kept a second longer. Saar, 18:00: Bleeding at 60.6, off the floor
-        // after the 58.8 Blade.
+        // The shove lands after the cast resolves, measured from wherever the player is by then (Ymir's Tsunami, 2026-10-25),
+        // so its ground is kept a little longer. Saar, 18:00: Bleeding at 60.6, off the floor after the 58.8 Blade. Kept 1.0s,
+        // it let go just before every push: they start 1.08-1.13s after the cast (103 of 104, 2026-10-25 to 11-07), and the
+        // walk back had already gone 0.56y by then (2026-11-08). Now just past the latest push: any longer, the guard is
+        // still up mid-push and calls the landing danger.
         if (spell.Action.ID == (uint)AID.CrushingBlade)
         {
-            holdUntil = World.FutureTime(1d);
+            holdUntil = World.FutureTime(1.2d);
         }
     }
 
