@@ -105,14 +105,20 @@ sealed class AutoAttack(ModuleBase module) : Components.Cleave(module, (uint)AID
 sealed class UnmooringMelody(ModuleBase module) : Components.GenericAOEs(module)
 {
     private const double FirstPulseAfterTeleport = 2.3d;
+    // The sheet gives no angle, and a 90-degree cone from the teleport spot is a little small: of 33 pulses that hit an
+    // uncovered player (44 recordings, 95 sets), 17 landed outside it, up to 1.28y past its edge at range and up to 58
+    // degrees off its axis within 6y of the boss. The same cone from 1.5y behind the spot leaves 3 outside, the farthest
+    // 0.22y past the edge; set back 2y it would also cover the ground the dodge parked on untouched 291 times.
+    private const float ApexSetBack = 1.5f;
     private readonly List<AOEInstance> aoes = [];
-    private readonly AOEShapeCone shape = new(50.0f, 45.0f.Degrees());
+    private readonly AOEShapeCone shape = new(50.0f + ApexSetBack, 45.0f.Degrees());
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
         if (spell.Action.ID == (uint)AID.Teleport)
         {
-            aoes.Add(new(shape, spell.TargetXZ, Angle.FromDirection(Module.Center - spell.TargetXZ), World.FutureTime(FirstPulseAfterTeleport)));
+            var toCenter = (Module.Center - spell.TargetXZ).Normalized();
+            aoes.Add(new(shape, spell.TargetXZ - ApexSetBack * toCenter, Angle.FromDirection(toCenter), World.FutureTime(FirstPulseAfterTeleport)));
         }
 
         if (spell.Action.ID == (uint)AID.UnmooringMelody1)
