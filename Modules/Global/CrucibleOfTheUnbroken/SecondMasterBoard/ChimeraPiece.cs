@@ -70,10 +70,30 @@ public enum IconID : uint
 
 public enum TetherID : uint
 {
-    RushingRoar = 57, // ChimeraPiece->player, until the dash
+    RushingRoar = 57, // ChimeraPiece->player, until the dash: the slack form of the stretch tether
+    RushingRoarStretched = 1, // the same tether pulled taut (not yet seen in a recording: no toon has stretched it)
 }
 
 sealed class ToxicTantrum(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.ToxicTantrum);
+
+/// <summary>
+/// Rushing Roar's tether is the game's stretch tether (57 slack, 1 taut), and the dash hits the tethered player hard
+/// unless it is pulled taut. In 52 recordings no toon stood further than 4.3y from the boss while tethered, the dash did
+/// 576-2409 to the player, and it was the last hit in 5 of Korha's 14 deaths on 2026-11-05. The distance and the time
+/// are BossmodReborn's (16y, 5.8s; its module is newer than this one): the dash came 6.2s after the tether here.
+/// While the player is Covered the familiar takes the dash instead (19 of 19, and Cover up at the tether was still up at
+/// the dash 13 times of 13), so nobody is sent out then.
+/// </summary>
+sealed class RushingRoarTether(ModuleBase module) : Components.StretchTetherDuo(module, 16f, 5.8d, (uint)TetherID.RushingRoar, (uint)TetherID.RushingRoarStretched)
+{
+    private const uint Covered = 2413; // on the player while the familiar covers them
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (actor.FindStatus(Covered) == null)
+            base.AddAIHints(slot, actor, assignment, hints);
+    }
+}
 sealed class RamsRoar(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.RamsRoar, 12f);
 sealed class DragonsRoar(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.DragonsRoar, new AOEShapeDonut(8f, 40f));
 sealed class Breaths(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.RamsBreath, (uint)AID.DragonsBreath, (uint)AID.LionsBreath,
@@ -317,6 +337,7 @@ sealed class ChimeraPieceStates : StateMachineBuilder
             .ActivateOnEnter<DragonsRoar>()
             .ActivateOnEnter<Breaths>()
             .ActivateOnEnter<RushingBreath>()
+            .ActivateOnEnter<RushingRoarTether>()
             .ActivateOnEnter<BallLightning>()
             .ActivateOnEnter<RamsKeeper>()
             .ActivateOnEnter<RamsKeeperBait>()
