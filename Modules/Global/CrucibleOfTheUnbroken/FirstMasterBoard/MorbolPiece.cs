@@ -58,7 +58,55 @@ public enum TetherID : uint
 }
 
 sealed class AcidMist(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AcidMist, 6.0f);
-sealed class Tremblor(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.Tremblor, 10.0f);
+// Straight away from the centre, and the floor's edge bleeds (Bleeding 3077, then 3078). BossmodReborn's guard checks only
+// for landing in a zone, so nothing kept the player near the middle: 92 of 449 recorded pushes ended past the edge and 88
+// bled (Korha and Saar, 2026-10-31 to 11-07). The push is 9.4y measured. It starts 0.48-0.51s after the cast ends, and the
+// walk back to the target in that half second carried 13 of those landings off. The ground it throws you off from is
+// forbidden until just after the push starts, judged with the module's 10y and half a yalm short of the edge: about a
+// yalm to spare on the real push, as Durga's guard has. Cover does not take it: 87% of the pushes landed on a Covered player.
+sealed class Tremblor(ModuleBase module) : Components.SimpleKnockbacks(module, (uint)AID.Tremblor, 10.0f)
+{
+    private const double PushStartsAfterSeconds = 0.5d;
+    // just past the latest push seen (0.51s): held any longer, the guard is still up mid-push and calls the landing danger
+    private const double HoldAfterCastSeconds = 0.6d;
+    private const float WallMargin = 0.5f;
+    private (WPos Origin, DateTime Push, DateTime Until)? held;
+
+    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == WatchedAction)
+        {
+            held = (spell.LocXZ != default ? spell.LocXZ : caster.Position, World.FutureTime(PushStartsAfterSeconds), World.FutureTime(HoldAfterCastSeconds));
+        }
+        base.OnCastFinished(caster, spell);
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        WPos origin;
+        DateTime activation;
+        if (Casters.Count != 0)
+        {
+            origin = Casters[0].Origin;
+            activation = Casters[0].Activation;
+        }
+        else if (held is { } h && World.CurrentTime < h.Until)
+        {
+            origin = h.Origin;
+            activation = h.Push;
+        }
+        else
+        {
+            return;
+        }
+
+        if (!IsImmune(slot, activation))
+        {
+            hints.AddForbiddenZone(new SDKnockbackInCircleAwayFromOrigin(Module.Center, origin, Distance, 20.0f - WallMargin), activation);
+        }
+    }
+}
 // Tremblor also hits everyone, 900-1,200 in every recorded run whatever the distance (2026-10-31); a beastmaster
 // at 909 HP died to it. Announced as a raidwide so a rotation plugin hears it coming (SecondsUntilRaidwide).
 sealed class TremblorRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.Tremblor);
