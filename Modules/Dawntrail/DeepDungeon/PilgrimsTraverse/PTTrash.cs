@@ -2,8 +2,9 @@
 // floors is still the cast-bar guess (AutoHints), which reads shapes off the sheet and is right for most of them.
 //
 // Checked 2026-10-17 against Splatoon's Pilgrim's Traverse presets (Leathen-94 and Ksirashi) and BossmodReborn's
-// PTFloorModule, cast by cast through `Minerva.Validate --action`. The tentacles and Forgiven Riot's shockwaves have
-// been seen in a recording (2026-11-22); nothing else here has.
+// PTFloorModule, cast by cast through `Minerva.Validate --action`, and 2026-11-24 against Nagumo's Splatoon presets
+// (Bellows, Claw and Tail's second hit). Seen in a recording: the tentacles and Forgiven Riot's shockwaves (2026-11-22),
+// Passions' Heat and Incinerating Lahar (2026-11-24); nothing else here has been.
 //  - Side and rear cleaves: a cast's own rotation already points where it hits, so a cast is drawn straight down it
 //    with the sheet's width. Seen on both recorded families, and it is what BossmodReborn does (it draws these casts as
 //    the sheet says and adds only the second hit). The October table turned each one a further way to its side, which
@@ -15,16 +16,17 @@
 //    timing where BossmodReborn has none.
 //  - Lithic Breath and Heavy Smash: Splatoon's sizes, larger than the sheet's.
 //  - Traverse Monitor's Smoldering Scales: spikes that hurt whoever hits it. It is not attacked while they are up.
+//  - Rolling Barrage (Forgiven Corruption, 71-80) and Incinerating Lahar (Invoked Baal, 81-90): 16s casts over 45 and
+//    46y that a wall stops. Drawn less the ground a wall hides from the caster (the game is asked, live only), so the
+//    dodge walks behind a wall or out of reach. Lahar seen 2026-11-24; BossmodReborn only runs out of reach.
 //  - Invoked Succubus's Passions' Heat: a 10y circle on one toon that gives Pyretic to everyone in it. The others
 //    leave the circle; the toon it is on stops moving and acting before it lands and until the Pyretic is gone.
 //    BossmodReborn has it as a to-do. Four deaths in three casts on 2026-11-24, before this was written.
 // Not done:
-//  - Rolling Barrage and Incinerating Lahar (45 and 46y circles, 16s casts) stay unavoidable, as in the guess. BossmodReborn
-//    runs from them, Splatoon only draws them. A 30y trash arena has no ground that far away.
 //  - The line-of-sight cast (Forgiven Grudge), and the Talos and Stone Eater leaps, which have no cast to key on.
-//  - Three circles Splatoon draws larger than the sheet: Tempestuous Temper (Amemet, 12 against 8), Lightning Bolt
-//    (Cerberus, 10 against 8), Moatmaker (15 against 9). These target a place, so the size may be Splatoon's margin;
-//    they stay at the sheet's.
+//  - Two circles Splatoon draws larger than the sheet: Tempestuous Temper (Amemet, 12 against 8) and Lightning Bolt
+//    (Cerberus, 10 against 8). These target a place, so the size may be Splatoon's margin; they stay at the sheet's.
+//    (Moatmaker's 15 was a second hit, now drawn.)
 //  - BossmodReborn's deep dungeon assistant (traps, chests, pomanders, kiting the Troubadour turtles): out of scope.
 using System;
 using System.Collections.Generic;
@@ -56,7 +58,10 @@ public enum AID : uint
     Accelerate = 42516, // leaps to a place (6y circle), then a 5-10 donut round where it landed
     Subduction = 42517,
     SmolderingScales = 42212, // Traverse Monitor: spikes
-    ClawAndTail = 43132, // Traverse Cama: a line in front, then one behind
+    ClawAndTail = 43132, // Traverse Cama: a line in front, then its tail behind
+    ClawAndTailSecond = 43131,
+    Moatmaker = 40558, // the stone soldier of 36-39: 9y round it, then 15y two seconds later
+    Bellows = 44293, // Invoked Humbaba: 120 degrees by Splatoon; the sheet has no angle and the guess drew 90
     TailBlow = 44786, // Invoked Cerberus: 90 degrees behind
     LithicBreath = 44508, // Invoked Dahak: 120 degrees, 40y by Splatoon; the sheet says 90 and 28
     HoneyedLeft = 44357, // Invoked Sawtooth: 180 degrees centred 135 to the mob's left
@@ -67,6 +72,8 @@ public enum AID : uint
     AuthoritysEdgeRight = 44509, // Invoked Acheron: its right half; the sheet's cone is 90 degrees
     AuthoritysEdgeLeft = 44510,
     PassionsHeat = 43322, // Invoked Succubus: a 10y circle on one player; everyone in it gets Pyretic
+    RollingBarrage = 42523, // Forgiven Corruption: a 16s cast, 45y round it, stopped by walls
+    IncineratingLahar = 43133, // Invoked Baal: the same over 46y; kills
 }
 
 public enum SID : uint
@@ -104,8 +111,12 @@ public abstract class PTTrash : ZoneModule
         [(uint)AID.HailOfHeels] = new(Cone(8f, 90f), new CastCorrections.FollowUp(Cone(8f, 90f), 8d, (uint)AID.HailOfHeelsRepeat, 3)),
         [(uint)AID.PeripheralLasers] = new(Donut(5f, 60f)),
         [(uint)AID.Accelerate] = new(Circle(6f), new CastCorrections.FollowUp(Donut(5f, 10f), 4d, (uint)AID.Subduction)),
-        // Splatoon's second line shows for the two seconds after the cast; its own action is not known
-        [(uint)AID.ClawAndTail] = new(Rect(8f, 1.5f), new CastCorrections.FollowUp(Rect(10f, 1.5f, 180f), 2.5d)),
+        // The second hit is 43131, a 10y cone on the sheet. The presets of 2026-10-17 drew a line behind for two seconds;
+        // Nagumo's preset and script (2026-11-24) a 120-degree tail sweep behind, landing about 3s after the cast.
+        [(uint)AID.ClawAndTail] = new(Rect(8f, 1.5f), new CastCorrections.FollowUp(Cone(10f, 60f, 180f), 3.5d, (uint)AID.ClawAndTailSecond)),
+        // Nagumo's script: a second, wider circle about 2s after the cast lands. Three presets draw it at 15y.
+        [(uint)AID.Moatmaker] = new(a => new AOEShapeCircle(9f + a.HitboxRadius), new CastCorrections.FollowUp(Circle(15f), 2.5d)),
+        [(uint)AID.Bellows] = new(Cone(25f, 60f)),
         [(uint)AID.TailBlow] = new(Cone(19f, 45f)),
         [(uint)AID.LithicBreath] = new(Cone(40f, 60f)),
         [(uint)AID.HoneyedLeft] = new(Cone(30f, 90f)),
@@ -139,7 +150,19 @@ public abstract class PTTrash : ZoneModule
     /// <summary>How long after the cast a toon it caught stays stopped while the status has yet to show.</summary>
     private const double HeatBridge = 1.5d;
 
+    // Invoked Baal, 2026-11-24 (Korha, floors 81-90): a Baal nobody was fighting cast Incinerating Lahar from the next
+    // room. 16s later Rosa (23.6y off), Saar (34.9y) and Korha (39.8y) took 500-680k each and died; the two melee had
+    // been 46-48y away when it began and followed their mobs in. Xia, 34.4y off on another bearing, was not hit at all:
+    // a wall stood between. The guess leaves a circle this wide alone as a raidwide. The sheet's radius is measured here
+    // from the mob's edge: nobody has stood near the rim to say which it is.
+    private static readonly IReadOnlyDictionary<uint, SightCasts.Entry> BehindWalls = new Dictionary<uint, SightCasts.Entry>
+    {
+        [(uint)AID.RollingBarrage] = new(45f),
+        [(uint)AID.IncineratingLahar] = new(46f),
+    };
+
     private readonly CastCorrections casts;
+    private readonly SightCasts sight;
     private readonly List<Actor> heatCasters = [];
     private (WPos Centre, ulong Target, DateTime Until)? heatLanded;
     private readonly Dictionary<ulong, DateTime> spiked = [];
@@ -148,6 +171,7 @@ public abstract class PTTrash : ZoneModule
     protected PTTrash(WorldState ws) : base(ws)
     {
         this.casts = new CastCorrections(ws, Table);
+        this.sight = new SightCasts(ws, BehindWalls);
         this.subscriptions = new(
             ws.Actors.CastStarted.Subscribe(actor =>
             {
@@ -180,16 +204,18 @@ public abstract class PTTrash : ZoneModule
     protected override void Dispose(bool disposing)
     {
         this.casts.Dispose();
+        this.sight.Dispose();
         this.subscriptions.Dispose();
         base.Dispose(disposing);
     }
 
     // the guess draws Passions' Heat where its target stood when the cast began, and the circle follows the target
-    public override bool ReplacesGuess(uint action) => action == (uint)AID.PassionsHeat || this.casts.Replaces(action);
+    public override bool ReplacesGuess(uint action) => action == (uint)AID.PassionsHeat || this.casts.Replaces(action) || this.sight.Replaces(action);
 
     public override void CalculateAIHints(int playerSlot, Actor player, AIHints hints)
     {
         this.casts.AddForbiddenZones(hints);
+        this.sight.AddForbiddenZones(player, hints);
         this.AddPassionsHeat(player, hints);
 
         // Spikes hurt whoever hits the mob: leave it alone while they are up, by the status or, if that is never seen,

@@ -142,6 +142,8 @@ public sealed class Plugin : IDalamudPlugin
         Minerva.QuestBattle.QuestBattle.LogSink = static msg => Service.Log.Information($"Minerva: {msg}");
         Service.Condition.ConditionChange += this.OnConditionChange;
         ClientState.RecastQuery = GameData.RecastRemaining;
+        Sight.Blocked = GameData.SightBlocked;
+        Sight.Log = static msg => Service.Log.Information(msg);
 
         Service.Log.Information("Minerva loaded.");
     }
@@ -452,6 +454,8 @@ public sealed class Plugin : IDalamudPlugin
         Minerva.QuestBattle.QuestBattle.Navigation = null;
         Minerva.QuestBattle.QuestBattle.LogSink = null;
         ClientState.RecastQuery = null;
+        Sight.Blocked = null;
+        Sight.Log = null;
         Service.Framework.Update -= this.OnUpdate;
         Service.PluginInterface.UiBuilder.Draw -= this.DrawUi;
         Service.PluginInterface.UiBuilder.OpenMainUi -= this.OpenMain;

@@ -436,6 +436,26 @@ internal static unsafe class GameData
         return BGCollisionModule.RaycastMaterialFilter(origin, down, out _, ProbeRise + ProbeDrop);
     }
 
+    /// <summary>How far above the feet a line of sight is drawn, at both ends: BossmodReborn's height for the same question.</summary>
+    private const float SightHeight = 2f;
+
+    /// <summary>
+    /// Is there a wall between these two places (<see cref="Sight.Blocked"/>)? One ray through the zone's collision,
+    /// two yalms above the floor at each end, so a step or a low prop does not count. False when collision cannot be
+    /// reached: nothing is then treated as hidden.
+    /// </summary>
+    public static bool SightBlocked(Vector3 from, Vector3 to)
+    {
+        var module = Framework.Instance() != null ? Framework.Instance()->BGCollisionModule : null;
+        if (module == null)
+            return false;
+        from.Y += SightHeight;
+        to.Y += SightHeight;
+        var offset = to - from;
+        var distance = offset.Length();
+        return distance > 1e-3f && BGCollisionModule.RaycastMaterialFilter(from, offset / distance, out _, distance);
+    }
+
     /// <summary>
     /// Is the whole walk from <paramref name="from"/> to <paramref name="to"/> over ground?
     /// <para>Probing only the destination is not enough: a gap between here and there is walked into at

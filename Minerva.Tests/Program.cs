@@ -7896,6 +7896,87 @@ t.Section("Radar border and mask follow a custom floor's every piece");
     t.True("asking for a shorter reach keeps the mesh", ReferenceEquals(mask, meshes.OutsideField(50f)));
 }
 
+// Pilgrim's Traverse 81-90, 2026-11-24: an Invoked Baal in the next room cast Incinerating Lahar, 16s over 46 yalms. Three
+// toons 24-40y off died; the fourth, 34y off behind a wall, was not hit. The cast is its circle less what a wall hides
+// from the caster, so the dodge takes the nearer of cover and out of reach.
+t.Section("A cast a wall stops: ground hidden from the caster is clear of it");
+{
+    var now = new DateTime(2026, 11, 24, 21, 0, 0, DateTimeKind.Utc);
+    // a wall along x = 10 from z = -5 to z = 5, and a caster at the origin
+    static bool Wall(Vector3 from, Vector3 to)
+    {
+        if ((from.X - 10f) * (to.X - 10f) >= 0f)
+            return false;
+        var z = from.Z + (to.Z - from.Z) * ((10f - from.X) / (to.X - from.X));
+        return z is > -5f and < 5f;
+    }
+    var asked = 0;
+    var shadow = new SightShadow((from, to) => { ++asked; return Wall(from, to); }, default);
+    t.True("a wall check that sees past a yalm is trusted", shadow.Trusted);
+    t.True("behind the wall is hidden", shadow.Hides(new WPos(20f, 0f), 0f));
+    t.True("beside it is not", !shadow.Hides(new WPos(20f, 20f), 0f) && !shadow.Hides(new WPos(5f, 0f), 0f));
+    // the shadow's edge at x = 20 is z = 10: a yalm inside it does not count, two do
+    t.True("nor is the last yalm of the shadow", !shadow.Hides(new WPos(20f, 9f), 0f) && shadow.Hides(new WPos(20f, 8f), 0f));
+    var before = asked;
+    shadow.Hides(new WPos(20f, 0f), 0f);
+    t.Eq("each yalm of floor is asked once", asked, before);
+    t.True("a check that answers wall to everything is not trusted", !new SightShadow((_, _) => true, default).Trusted);
+
+    var lahar = new SDCircleInSight(default, 46f, shadow, 0f);
+    t.True("in reach and in sight is inside", lahar.Distance(new WPos(5f, 0f)) < 0f && lahar.Distance(new WPos(20f, 20f)) < 0f);
+    t.True("in reach behind the wall is clear by any margin", lahar.Distance(new WPos(20f, 0f)) > 10f);
+    t.True("out of reach is clear by how far", MathF.Abs(lahar.Distance(new WPos(0f, 50f)) - 4f) < 0.01f);
+
+    // the dodge: a toon in sight 20y out, the cast 4s away, cover 5y to one side and the rim 26y off
+    var hints = new AIHints { Center = new WPos(20f, 12f), Bounds = new ArenaBoundsCircle(30f), PlayerPosition = new WPos(20f, 12f) };
+    hints.AddForbiddenZone(lahar, now.AddSeconds(4d));
+    var spot = ArenaPathfinder.Solve(hints, now, horizonSeconds: 5f, safetyMargin: 1f, moveSpeed: ArenaPathfinder.DefaultMoveSpeed, clearanceLead: 1f);
+    t.True($"the dodge walks behind the wall ({spot.Target.X:0.0},{spot.Target.Z:0.0})", spot.NeedToMove && spot.Found && shadow.Hides(spot.Target, 0f));
+    t.True("a few yalms, not the 26 to the rim", (spot.Target - hints.PlayerPosition).Length() < 8f);
+
+    // the zone helper: with no wall check the plain circle from the caster's edge, with one the hidden ground is clear
+    var ws = new WorldState(qpf: 10_000_000, gameVersion: "test");
+    ws.Execute(new WorldState.OpFrameStart(Frame(ws, 0), TimeSpan.Zero));
+    const ulong baal = 0x400000003, shark = 0x400000004, toon = 0x100000002, other = 0x100000003;
+    ws.Execute(new ActorState.OpCreate(baal, 0x492E, 0, "Invoked Baal", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 3.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(shark, 0x1, 1, "Heavenly Shark", 0, ActorType.Enemy, new Vector4(0, 0, 0, 0), 2f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(toon, 0, 2, "Toon", 0, ActorType.Player, new Vector4(20, 0, 0, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    ws.Execute(new ActorState.OpCreate(other, 0, 3, "Other", 0, ActorType.Player, new Vector4(5, 0, 0, 0), 0.5f, new ActorHPMP(1000, 1000, 0, 0, 0), true, false, 0));
+    using var sight = new SightCasts(ws, new Dictionary<uint, SightCasts.Entry> { [43133u] = new(46f), [11981u] = new(25f, OnTarget: true) });
+    AIHints For(ulong id)
+    {
+        var h = new AIHints { Center = default, Bounds = new ArenaBoundsCircle(60f) };
+        sight.AddForbiddenZones(ws.Actors.Find(id)!, h);
+        return h;
+    }
+    try
+    {
+        Sight.Blocked = null;
+        ws.Execute(new ActorState.OpCastInfo(baal, new ActorCastInfo { Action = ActionID.MakeSpell(43133u), TargetID = baal, TotalTime = 15.7f }));
+        var plain = For(toon);
+        t.True("with no walls to ask, the whole circle from the caster's edge", !plain.IsPositionSafe(new WPos(20f, 0f)) && !plain.IsPositionSafe(new WPos(49f, 0f)) && plain.IsPositionSafe(new WPos(50f, 0f)));
+        t.True("and the helper answers for the cast", sight.Replaces(43133u) && !sight.Replaces(1u));
+        ws.Execute(new ActorState.OpCastInfo(baal, null));
+        t.Eq("the cast ending ends it", For(toon).ForbiddenZones.Count, 0);
+
+        Sight.Blocked = Wall;
+        ws.Execute(new ActorState.OpCastInfo(baal, new ActorCastInfo { Action = ActionID.MakeSpell(43133u), TargetID = baal, TotalTime = 15.7f }));
+        var walled = For(toon);
+        t.True("with walls, behind one is clear and in sight is not", walled.IsPositionSafe(new WPos(20f, 0f)) && !walled.IsPositionSafe(new WPos(20f, 20f)) && !walled.IsPositionSafe(new WPos(5f, 0f)));
+        ws.Execute(new ActorState.OpCastInfo(baal, null));
+
+        // a hit on one player: only that player has anything to leave, and its reach runs to the player's own edge
+        ws.Execute(new ActorState.OpCastInfo(shark, new ActorCastInfo { Action = ActionID.MakeSpell(11981u), TargetID = toon, TotalTime = 3.5f }));
+        var aimed = For(toon);
+        t.True("a cast at one player is that player's to leave or hide from", aimed.IsPositionSafe(new WPos(20f, 0f)) && !aimed.IsPositionSafe(new WPos(0f, 27f)) && aimed.IsPositionSafe(new WPos(0f, 28f)));
+        t.Eq("and nobody else's", For(other).ForbiddenZones.Count, 0);
+    }
+    finally
+    {
+        Sight.Blocked = null;
+    }
+}
+
 return t.Report();
 
 // Build a FrameState whose timestamp advances by dtSeconds from the world's current time.
