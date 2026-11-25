@@ -73,7 +73,22 @@ sealed class RustlingBreezeLeftRight(ModuleBase module) : Components.SimpleAOEGr
 sealed class RustlingBreezeMiddle(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.RustlingBreezeMiddle, new AOEShapeCone(60.0f, 45.0f.Degrees()));
 sealed class AqueousDischarge(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.AqueousDischarge, 5.0f);
 sealed class Silkscreen(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Silkscreen, new AOEShapeRect(40.0f, 2.0f));
-sealed class AcornBomb(ModuleBase module) : Components.SpreadFromIcon(module, (uint)IconID.AcornBombIcon, (uint)AID.AcornBomb, 3.0f, 5.1f);
+// Acorn Bomb always lands on the marked player, 5.2-5.4s after the icon, and puts whoever it hits into Nightmare (5383):
+// 15s unable to move or act. In 363 recordings it hit the uncovered player 69 times of 69 and a Covered one once in 258
+// (the familiar takes it). Asleep, the player takes the next Rustling Breeze (22 of its 26 hits came within a second of
+// Nightmare ending) and the Sapling grows unfought: 15 of the 15 deaths had an Acorn Bomb hit. Nothing here can dodge it,
+// so it is announced as a tankbuster on the marked player: that is the cue the rotation takes to bring Cover up.
+sealed class AcornBomb(ModuleBase module) : Components.SpreadFromIcon(module, (uint)IconID.AcornBombIcon, (uint)AID.AcornBomb, 3.0f, 5.1f) {
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints) {
+        base.AddAIHints(slot, actor, assignment, hints);
+        foreach (var s in ActiveSpreads) {
+            var marked = Raid.FindSlot(s.Target.InstanceID);
+            if (marked >= 0) {
+                hints.AddPredictedDamage(new BitMask().WithBit(marked), s.Activation, AIHints.PredictedDamageType.Tankbuster, (uint)AID.AcornBomb);
+            }
+        }
+    }
+}
 
 sealed class BossPuddle(ModuleBase module) : Components.Voidzone(module, 10.0f, GetVoidzones) {
     private static Actor[] GetVoidzones(ModuleBase module) {
