@@ -15,11 +15,13 @@
 //    timing where BossmodReborn has none.
 //  - Lithic Breath and Heavy Smash: Splatoon's sizes, larger than the sheet's.
 //  - Traverse Monitor's Smoldering Scales: spikes that hurt whoever hits it. It is not attacked while they are up.
+//  - Invoked Succubus's Passions' Heat: a 10y circle on one toon that gives Pyretic to everyone in it. The others
+//    leave the circle; the toon it is on stops moving and acting before it lands and until the Pyretic is gone.
+//    BossmodReborn has it as a to-do. Four deaths in three casts on 2026-11-24, before this was written.
 // Not done:
 //  - Rolling Barrage and Incinerating Lahar (45 and 46y circles, 16s casts) stay unavoidable, as in the guess. BossmodReborn
 //    runs from them, Splatoon only draws them. A 30y trash arena has no ground that far away.
-//  - The line-of-sight casts (Forgiven Grudge, Invoked Succubus), and the Talos and Stone Eater leaps, which have no cast
-//    to key on.
+//  - The line-of-sight cast (Forgiven Grudge), and the Talos and Stone Eater leaps, which have no cast to key on.
 //  - Three circles Splatoon draws larger than the sheet: Tempestuous Temper (Amemet, 12 against 8), Lightning Bolt
 //    (Cerberus, 10 against 8), Moatmaker (15 against 9). These target a place, so the size may be Splatoon's margin;
 //    they stay at the sheet's.
@@ -64,11 +66,13 @@ public enum AID : uint
     HeavySmash = 44342, // Traverse Warg: 10y by Splatoon, 6 by the sheet
     AuthoritysEdgeRight = 44509, // Invoked Acheron: its right half; the sheet's cone is 90 degrees
     AuthoritysEdgeLeft = 44510,
+    PassionsHeat = 43322, // Invoked Succubus: a 10y circle on one player; everyone in it gets Pyretic
 }
 
 public enum SID : uint
 {
     BlazeSpikes = 4579,
+    Pyretic = 960,
 }
 
 public abstract class PTTrash : ZoneModule
@@ -119,7 +123,25 @@ public abstract class PTTrash : ZoneModule
     private static Func<Actor, AOEShape> Circle(float radius) => _ => new AOEShapeCircle(radius);
     private static Func<Actor, AOEShape> Donut(float inner, float outer) => _ => new AOEShapeDonut(inner, outer);
 
+    // Passions' Heat, 2026-11-24 (Korha, floors 81-90): cast on Saar with Korha 5.4y away, both hit and dead
+    // half a second later; Rosa at 10.07y was not hit. Then Rosa and Xia the same way, then Korha alone. Every one of
+    // them had acted or moved after the cast went off: Pyretic kills on the first action, and the status only shows
+    // on the toon half a second after it has been decided.
+    private const float HeatRadius = 10f;
+    /// <summary>Drawn a yalm wider than it is: it is centred on a toon who may still be moving.</summary>
+    private const float HeatDrawn = HeatRadius + 1f;
+    /// <summary>Counted as caught half a yalm outside it: the server's idea of where a toon stands runs late.</summary>
+    private const float HeatCaught = HeatRadius + 0.5f;
+    /// <summary>The toon it is on stops this long before the cast bar's end, which is itself 0.3s before the cast goes off.</summary>
+    private const double HeatLead = 0.5d;
+    /// <summary>A toon walking out has to be clear this long before the cast goes off, or it stops where it is.</summary>
+    private const float HeatClearBy = 0.3f;
+    /// <summary>How long after the cast a toon it caught stays stopped while the status has yet to show.</summary>
+    private const double HeatBridge = 1.5d;
+
     private readonly CastCorrections casts;
+    private readonly List<Actor> heatCasters = [];
+    private (WPos Centre, ulong Target, DateTime Until)? heatLanded;
     private readonly Dictionary<ulong, DateTime> spiked = [];
     private readonly EventSubscriptions subscriptions;
 
@@ -127,17 +149,32 @@ public abstract class PTTrash : ZoneModule
     {
         this.casts = new CastCorrections(ws, Table);
         this.subscriptions = new(
+            ws.Actors.CastStarted.Subscribe(actor =>
+            {
+                if (actor.CastInfo?.Action.ID == (uint)AID.PassionsHeat && !this.heatCasters.Contains(actor))
+                    this.heatCasters.Add(actor);
+            }),
             ws.Actors.CastFinished.Subscribe((actor, cast) =>
             {
                 if (cast.Action.ID == (uint)AID.SmolderingScales)
                     this.spiked[actor.InstanceID] = ws.FutureTime(SpikesSeconds);
+                this.heatCasters.Remove(actor);
+            }),
+            ws.Actors.CastEvent.Subscribe((actor, ev) =>
+            {
+                if (ev.Action.ID == (uint)AID.PassionsHeat && ws.Actors.Find(ev.MainTargetID) is { } target)
+                    this.heatLanded = (target.Position, target.InstanceID, ws.FutureTime(HeatBridge));
             }),
             ws.Actors.StatusLose.Subscribe((actor, index) =>
             {
                 if (actor.Statuses[index].ID == (uint)SID.BlazeSpikes)
                     this.spiked.Remove(actor.InstanceID);
             }),
-            ws.Actors.Removed.Subscribe(actor => this.spiked.Remove(actor.InstanceID)));
+            ws.Actors.Removed.Subscribe(actor =>
+            {
+                this.spiked.Remove(actor.InstanceID);
+                this.heatCasters.Remove(actor);
+            }));
     }
 
     protected override void Dispose(bool disposing)
@@ -147,11 +184,13 @@ public abstract class PTTrash : ZoneModule
         base.Dispose(disposing);
     }
 
-    public override bool ReplacesGuess(uint action) => this.casts.Replaces(action);
+    // the guess draws Passions' Heat where its target stood when the cast began, and the circle follows the target
+    public override bool ReplacesGuess(uint action) => action == (uint)AID.PassionsHeat || this.casts.Replaces(action);
 
     public override void CalculateAIHints(int playerSlot, Actor player, AIHints hints)
     {
         this.casts.AddForbiddenZones(hints);
+        this.AddPassionsHeat(player, hints);
 
         // Spikes hurt whoever hits the mob: leave it alone while they are up, by the status or, if that is never seen,
         // for as long as they are known to last.
@@ -162,6 +201,34 @@ public abstract class PTTrash : ZoneModule
             if (a.FindStatus((uint)SID.BlazeSpikes) != null || this.spiked.TryGetValue(a.InstanceID, out var until) && now < until)
                 e.Priority = AIHints.Enemy.PriorityForbidden;
         }
+    }
+
+    private void AddPassionsHeat(Actor player, AIHints hints)
+    {
+        var now = World.CurrentTime;
+        foreach (var caster in this.heatCasters)
+        {
+            if (caster.IsDeadOrDestroyed || caster.CastInfo is not { } cast || cast.Action.ID != (uint)AID.PassionsHeat)
+                continue;
+            if (cast.TargetID == player.InstanceID)
+            {
+                // nothing to walk out of: it is on this toon. Stop before it lands.
+                hints.AddSpecialMode(AIHints.SpecialMode.Pyretic, World.FutureTime(cast.RemainingTime - HeatLead));
+            }
+            else if (World.Actors.Find(cast.TargetID) is { IsDeadOrDestroyed: false } target)
+            {
+                hints.AddForbiddenZone(new AOEShapeCircle(HeatDrawn), target.Position, default, World.FutureTime(cast.NPCRemainingTime));
+                // No time left to walk clear: being hit standing still is survivable, being hit walking is not.
+                var reach = (player.Position - target.Position).Length() + ArenaPathfinder.DefaultMoveSpeed * (cast.NPCRemainingTime - HeatClearBy);
+                if (reach < HeatCaught)
+                    hints.AddSpecialMode(AIHints.SpecialMode.Pyretic, now);
+            }
+        }
+
+        var caught = this.heatLanded is { } landed && now < landed.Until
+            && (landed.Target == player.InstanceID || player.Position.InCircle(landed.Centre, HeatCaught));
+        if (caught || player.FindStatus((uint)SID.Pyretic) != null)
+            hints.AddSpecialMode(AIHints.SpecialMode.Pyretic, now);
     }
 }
 
