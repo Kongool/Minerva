@@ -54,6 +54,7 @@ public enum SID : uint
     DamageUp = 2550, // none->GargoylePiece, extra=0xA/0x9/0x8/0x7/0x6/0x5/0x4/0x3/0x2/0x1
     GrowingDread = 5178, // 4CC3->player, extra=0x1/0x2/0x3/0x4
     Hysteria = 4167, // 4CC3->player, extra=0x0
+    Covered = 2413, // familiar->player, the familiar's Cover
 }
 
 public enum IconID : uint
@@ -342,17 +343,67 @@ sealed class PurpleVoidZone(ModuleBase module) : Components.Voidzone(module, 6.0
 // The knockback hits everyone (Korha took it in each recorded run, about 290; 2026-10-31): announced as a raidwide.
 sealed class FivefoldFalloutRaidwide(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.FivefoldFalloutKnockback);
 
+// The knockback is 19y measured straight from the centre (20 here), and the floor's edge bleeds. Little ground stays on:
+// along a diagonal out to about 7.6y from the centre, and a few yalms either side of it. BossmodReborn's guard checks only
+// for landing in a zone, and 95 of the 117 recorded pushes that reached the player bled (Korha and Saar, 2026-10-31 to
+// 11-07). So that ground is forbidden, judged with the 20y and half a yalm short of the edge, as Morbol's Tremblor. The
+// push starts 0.23-0.40s after the knockback's event, when this list lets it go, so the guard is held half a second past it.
+// The familiar's Cover takes the knockback. In 451 of 568 the familiar was pushed instead, every time the player was
+// Covered and never otherwise, so the guard stands down while Covered holds through the push. Covered dropped in the
+// last second before the event 3 times in 568.
 sealed class FivefoldFallout(ModuleBase module) : Components.GenericKnockback(module)
 {
+    private const float KnockbackDistance = 20.0f;
+    private const double PushStartsAfterSeconds = 0.3d;
+    // just past the latest push seen (0.40s)
+    private const double HoldAfterEventSeconds = 0.5d;
+    private const float WallMargin = 0.5f;
     private readonly List<Knockback> knockbacks = [];
+    private (WPos Origin, DateTime Push, DateTime Until)? held;
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (spell.Action.ID == (uint)AID.FivefoldFalloutLong)
         {
-            knockbacks.Add(new(spell.LocXZ, 20.0f, World.FutureTime(11.8d), kind: Kind.AwayFromOrigin));
+            knockbacks.Add(new(spell.LocXZ, KnockbackDistance, World.FutureTime(11.8d), kind: Kind.AwayFromOrigin));
         }
     }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        WPos origin;
+        DateTime activation;
+        var active = ActiveKnockbacks(slot, actor);
+        if (active.Length != 0)
+        {
+            origin = active[0].Origin;
+            activation = active[0].Activation;
+        }
+        else if (held is { } h && World.CurrentTime < h.Until)
+        {
+            origin = h.Origin;
+            activation = h.Push;
+        }
+        else
+        {
+            return;
+        }
+
+        if (IsImmune(slot, activation) || CoveredThrough(actor, activation.AddSeconds(HoldAfterEventSeconds)))
+        {
+            return;
+        }
+
+        var half = 20.0f - WallMargin;
+        hints.AddForbiddenZone(new SDKnockbackInAABBRectAwayFromOrigin(Module.Center, origin, KnockbackDistance, half, half), activation);
+    }
+
+    // Covered carries no timer (it ran 0.9-90s in the recordings): an expiry at or before now is that, not a status
+    // running out. Only a real expiry before the push says it will not hold.
+    private bool CoveredThrough(Actor actor, DateTime push)
+        => actor.FindStatus((uint)SID.Covered) is { } covered
+            && (covered.ExpireAt <= World.CurrentTime.AddSeconds(0.1d) || covered.ExpireAt >= push);
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
@@ -365,6 +416,7 @@ sealed class FivefoldFallout(ModuleBase module) : Components.GenericKnockback(mo
         {
             if (knockbacks.Count > 0)
             {
+                held = (knockbacks[0].Origin, World.FutureTime(PushStartsAfterSeconds), World.FutureTime(HoldAfterEventSeconds));
                 knockbacks.RemoveAt(0);
                 NumCasts = 0;
             }
