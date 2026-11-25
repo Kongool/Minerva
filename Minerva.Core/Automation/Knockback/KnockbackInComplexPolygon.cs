@@ -38,6 +38,53 @@ public sealed class SDKnockbackInComplexPolygonAwayFromOrigin : SDYesNo
 
 }
 
+/// <summary>Thrown off the floor, or into any of the given AOEs (whatever their shapes). Ported with Index (Forked
+/// Tower Magic), whose Shockwave lands among the implements' lines and circles.</summary>
+[SkipLocalsInit]
+public sealed class SDKnockbackInComplexPolygonAwayFromOriginMixedAOEs : SDYesNo
+{
+    public SDKnockbackInComplexPolygonAwayFromOriginMixedAOEs(WPos Center, WPos Origin, float Distance, RelSimplifiedComplexPolygon Polygon, AOEInstance[] AOEs, int Length)
+    {
+        center = Center;
+        origin = Origin;
+        polygon = Polygon;
+        distance = Distance;
+        aoes = AOEs;
+        len = Length;
+        polygon.VerifyPolygonIndexExistance();
+    }
+
+    private readonly WPos center;
+    private readonly WPos origin;
+    private readonly RelSimplifiedComplexPolygon polygon;
+    private readonly float distance;
+    private readonly AOEInstance[] aoes;
+    private readonly int len;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override float Distance(WPos p) => Inside(p) ? 0f : 1f;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool Inside(WPos p)
+    {
+        var dir = distance * (p - origin).Normalized();
+        if (!polygon.Contains(p - center + dir))
+        {
+            return true;
+        }
+
+        var projected = p + dir;
+        for (var i = 0; i < len; ++i)
+        {
+            if (aoes[i].Check(projected))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
 [SkipLocalsInit]
 public sealed class SDKnockbackInComplexPolygonFixedDirection : SDYesNo
 {
