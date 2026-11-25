@@ -17,7 +17,9 @@ sealed class InfraredBlast(ModuleBase module) : Components.InterceptTether(modul
     private DateTime _activation;
     private readonly List<Actor> players = [];
     private BitMask fire;
-    private readonly Actor tunnelmachine = module.Enemies((uint)OID.TunnelArmor)[0];
+    // Looked up when first needed, as BossmodReborn does: indexing the enemy list here threw when the module was built
+    // before the Tunnel Armor had loaded, and this component is built with the module.
+    private Actor? tunnelmachine;
 
     public override void OnTethered(Actor source, in ActorTetherInfo tether)
     {
@@ -132,7 +134,9 @@ sealed class InfraredBlast(ModuleBase module) : Components.InterceptTether(modul
         {
             var count = Tethers.Count;
             var forbidden = new List<ShapeDistance>(2);
-            var target = tunnelmachine;
+            var target = tunnelmachine ??= Module.Enemies((uint)OID.TunnelArmor).FirstOrDefault();
+            if (target == null)
+                return;
             for (var i = 0; i < count; ++i)
             {
                 var t = Tethers[i];

@@ -156,11 +156,13 @@ sealed class DetermineArena(ModuleBase module) : ModuleComponent(module)
 
 sealed class BossHealths(ModuleBase module) : ModuleComponent(module)
 {
-    private readonly Actor? _bossHellDiver = module.Enemies((uint)OID.FourthLegionHelldiver1)[0];
+    // The Helldiver is read from the module each time, as BossmodReborn does. Indexing the enemy list here threw when
+    // the module was built before the Helldiver had loaded, and this component is built with the module.
+    private readonly CLL1Brionac4thLegionHelldiver _module = (CLL1Brionac4thLegionHelldiver)module;
 
     public override void AddGlobalHints(GlobalHints hints)
     {
-        hints.Add($"Top: {Module.PrimaryActor.HPRatio * 100f:f1}%, Bottom: {_bossHellDiver?.HPRatio * 100f:f1}%");
+        hints.Add($"Top: {Module.PrimaryActor.HPRatio * 100f:f1}%, Bottom: {_module.BossHellDiver?.HPRatio * 100f:f1}%");
     }
 }
 
