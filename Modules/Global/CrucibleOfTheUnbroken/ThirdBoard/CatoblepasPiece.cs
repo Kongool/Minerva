@@ -31,6 +31,8 @@ public enum AID : uint
     FalseDemonEye = 48510, // Helper->self, no cast, range 100 circle, cast by tethered eye
     _Weaponskill_SinisterGleam = 48511, // CatoblepasPiece->self, 6.0s cast, single-target
     SinisterGleam = 48512, // Helper->self, 6.5s cast, range 60 180.000-degree cone
+    JettaturaVisual = 48513, // CatoblepasPiece->self, 3.0s cast, single-target
+    Jettatura = 48514, // Helper->location, 5.0s cast, range 8 circle
 
 }
 
@@ -181,6 +183,12 @@ sealed class FalseDemonEye(ModuleBase module) : Components.GenericGaze(module, (
     }
 }
 
+
+// From about 140s in: an 8y circle on the ground, a 5s cast. It had no component, so with the module in charge nothing
+// was drawn: in 10 casts over 45 recordings the toon stood inside it 9 times and was hit 4 (398-644), the familiar
+// taking the rest under Cover. BossmodReborn added it after this module was ported.
+sealed class Jettatura(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Jettatura, 8f);
+
 sealed class CatoblepasPieceStates : StateMachineBuilder
 {
     public CatoblepasPieceStates(ModuleBase module) : base(module)
@@ -192,7 +200,8 @@ sealed class CatoblepasPieceStates : StateMachineBuilder
             .ActivateOnEnter<DemonicEyeDonut>()
             .ActivateOnEnter<NearFarburst>()
             .ActivateOnEnter<FalseDemonEye>()
-            .ActivateOnEnter<SinisterGleam>();
+            .ActivateOnEnter<SinisterGleam>()
+            .ActivateOnEnter<Jettatura>();
     }
 }
 
