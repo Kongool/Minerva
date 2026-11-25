@@ -202,7 +202,8 @@ sealed class SmashingStampBait(ModuleBase module) : Components.GenericBaitProxim
     }
 }
 sealed class SmashingStamp(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SmashingStamp, new AOEShapeRect(40.0f, 4.0f));
-sealed class SmashingStampBaitAOE(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SmashingStamp, new AOEShapeRect(7.0f, 2.0f));
+// Keyed on the bait's own cast. It was on the 40y Smashing Stamp, so the bait rectangles were never drawn.
+sealed class SmashingStampBaitAOE(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.SmashingStampBait, new AOEShapeRect(7.0f, 2.0f));
 
 sealed class GiganticRageCircle(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.GiganticRageCircle, 15.0f);
 sealed class GiganticRageCone(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.GiganticRageCone, (uint)AID.GiganticRageCone1],
