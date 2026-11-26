@@ -117,6 +117,47 @@ sealed class Blot : Components.SimpleAOEs
     {
         MaxDangerColor = 3;
     }
+
+    // Three rows of three 15y circles, cast two seconds apart: the middle row, then either side, then the other (in 11
+    // sets, six went one way and five the other, so the second row cannot be known before its cast). Each lands two
+    // seconds after the one before. Waiting on the second row's ground leaves two seconds to cross 13y once the first
+    // has fired; waiting on the third's leaves four. Two rules send the toon to the third row's side:
+    // - the first row does not count as danger until the second exists (its cast is eight seconds long). Closed loop,
+    //   2026-11-19: the walk out began 0.1s before the second row was cast on the ground it was heading for;
+    // - while the first row is pending, the second is timed with it, so its ground is no place to wait.
+    private const double RowGap = 2d;
+    private const double WaitForSecondRow = 5.5d;
+    private readonly List<AOEInstance> _timed = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        var aoes = base.ActiveAOEs(slot, actor);
+        if (aoes.Length == 0)
+            return aoes;
+
+        var first = aoes[0].Activation;
+        var firstRow = 0;
+        while (firstRow < aoes.Length && (aoes[firstRow].Activation - first).TotalSeconds < RowGap / 2d)
+            ++firstRow;
+        var untilFirst = (first - World.CurrentTime).TotalSeconds;
+        // A row on its own close to its time is the last of a set, and two rows with no third behind them and the
+        // earlier about to fire are the second and third: the rows before have fired, and each keeps its own time.
+        var alone = firstRow == aoes.Length;
+        if (alone ? untilFirst <= WaitForSecondRow : Casters.Count == aoes.Length && untilFirst <= RowGap + 0.5d)
+            return aoes;
+
+        _timed.Clear();
+        for (var i = 0; i < aoes.Length; ++i)
+        {
+            var aoe = aoes[i];
+            if (alone)
+                aoe.Risky = false;
+            else if (i >= firstRow && (aoe.Activation - first).TotalSeconds < RowGap * 1.5d)
+                aoe.Activation = first;
+            _timed.Add(aoe);
+        }
+        return CollectionsMarshal.AsSpan(_timed);
+    }
 }
 [SkipLocalsInit]
 sealed class Invincibility(ModuleBase module) : Components.InvincibleStatus(module, (uint)SID.Invincibility);
