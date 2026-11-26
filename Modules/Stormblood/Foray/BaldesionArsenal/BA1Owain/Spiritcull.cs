@@ -41,34 +41,45 @@ sealed class Spiritcull(ModuleBase module) : Components.GenericStackSpread(modul
             base.AddHints(slot, actor, hints);
     }
 
+    // The one stack is aimed at the marked player nearest the one being asked about, so each of them is sent to a
+    // partner. BossmodReborn chose that partner while drawing, and so did this port: but the drawing callbacks run only
+    // while the radar is on screen. With it closed the stack stayed on the first player marked: that player's stack was
+    // on itself, so it went to nobody. Chosen where the hints are built now, and still where it is drawn.
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (targets.Contains(actor))
+        if (Stacks.Count != 0 && targets.Contains(actor))
+        {
+            AimAtNearestPartner(actor);
             base.AddAIHints(slot, actor, assignment, hints);
+        }
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)
     {
         if (Stacks.Count != 0 && targets.Contains(pc))
         {
-            Actor? actor = null;
-            var minDistanceSq = float.MaxValue;
-            var count = targets.Count;
-            for (var i = 0; i < count; ++i)
-            {
-                var target = targets[i];
-                if (target == pc)
-                    continue;
-                var distanceSq = (pc.Position - target.Position).LengthSq();
-                if (distanceSq < minDistanceSq)
-                {
-                    minDistanceSq = distanceSq;
-                    actor = target;
-                }
-            }
-            Stacks[0] = Stacks[0] with { Target = actor ?? pc };
-
+            AimAtNearestPartner(pc);
             base.DrawArenaForeground(pcSlot, pc);
         }
+    }
+
+    private void AimAtNearestPartner(Actor pc)
+    {
+        Actor? actor = null;
+        var minDistanceSq = float.MaxValue;
+        var count = targets.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            var target = targets[i];
+            if (target == pc)
+                continue;
+            var distanceSq = (pc.Position - target.Position).LengthSq();
+            if (distanceSq < minDistanceSq)
+            {
+                minDistanceSq = distanceSq;
+                actor = target;
+            }
+        }
+        Stacks[0] = Stacks[0] with { Target = actor ?? pc };
     }
 }
