@@ -45,8 +45,131 @@ public enum AID : uint
     CloudToGroundFast = 35741,      // DrakeFamiliar->location, 0.7s cast, range 6 circle
 }
 
-sealed class RingingQuoits(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.RingingQuoits, new AOEShapeDonut(4f, 18f));
-sealed class RavagingAxe(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.RavagingAxe, 14f);
+/// <summary>
+/// The Aetheric Charges' circles (Ravaging Axe) and rings (Ringing Quoits), drawn from their tethers.
+///
+/// <para>Each charge's own cast is 1.7 seconds long, and a 14y circle cannot be left from its middle in that: drawn from
+/// the cast alone, as this was, the closed loop was caught by the axes in three of four recordings. But the moment
+/// Quaqua begins the 7.7s wind-up every charge is tethered to it, 256 for an axe and 257 for a quoit, and the charges
+/// do not move again. In the four recordings (2026-09-20) all 39 casts were announced that way, 10.8 to 10.9s before
+/// the charge's own cast began, with the shape right every time, and each resolved 4.79 to 4.97s after the wind-up
+/// ended. BossmodReborn's module, which did not exist when this was written, reads the same tethers.</para>
+///
+/// <para>The tether and the wind-up arrive in the same frame, in either order, so the wind-up also reads the tethers
+/// already up.</para>
+/// </summary>
+sealed class ArcaneArmamentsCharges(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private const uint TetherAxe = 256u;
+    private const uint TetherQuoit = 257u;
+    private const double AfterWindUp = 4.85d;
+    // Drawn from the tether, dodged only in the last four seconds: walking covers 24y in that, and the three circles
+    // together are no wider. Counted for the whole 12.6s the melee toon left the boss six seconds early each time
+    // (closed loop, uptime 84.2% against 88.3%, the same hits).
+    private const double LeaveSeconds = 4d;
+    private static readonly AOEShapeCircle axe = new(14f);
+    private static readonly AOEShapeDonut quoit = new(4f, 18f);
+    private readonly List<(ulong Charge, AOEInstance AOE)> pending = [];
+    private readonly List<AOEInstance> shown = [];
+    private DateTime activation;
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
+    {
+        shown.Clear();
+        var now = World.CurrentTime;
+        foreach (var (_, aoe) in pending)
+        {
+            shown.Add(aoe with { Risky = (aoe.Activation - now).TotalSeconds <= LeaveSeconds });
+        }
+        return CollectionsMarshal.AsSpan(shown);
+    }
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        switch (spell.Action.ID)
+        {
+            case (uint)AID.ArcaneArmamentsVisual:
+                pending.Clear();
+                activation = Module.CastFinishAt(spell, AfterWindUp);
+                foreach (var charge in Module.Enemies((uint)OID.AethericCharge))
+                {
+                    if (!charge.IsDead)
+                    {
+                        Announce(charge, charge.Tether.ID);
+                    }
+                }
+                break;
+            case (uint)AID.RavagingAxe:
+                Set(caster.InstanceID, spell.LocXZ, axe, Module.CastFinishAt(spell));
+                break;
+            case (uint)AID.RingingQuoits:
+                Set(caster.InstanceID, spell.LocXZ, quoit, Module.CastFinishAt(spell));
+                break;
+        }
+    }
+
+    public override void OnTethered(Actor source, in ActorTetherInfo tether)
+    {
+        if (activation != default && source.OID == (uint)OID.AethericCharge)
+        {
+            Announce(source, tether.ID);
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is (uint)AID.RavagingAxe or (uint)AID.RingingQuoits)
+        {
+            pending.RemoveAll(p => p.Charge == caster.InstanceID);
+            if (pending.Count == 0)
+            {
+                activation = default;
+            }
+        }
+    }
+
+    public override void Update()
+    {
+        // a charge that never fired (the boss died first): gone two seconds after its time
+        if (pending.Count != 0)
+        {
+            var stale = World.CurrentTime.AddSeconds(-2d);
+            pending.RemoveAll(p => p.AOE.Activation < stale);
+            if (pending.Count == 0)
+            {
+                activation = default;
+            }
+        }
+    }
+
+    private void Announce(Actor charge, uint tetherID)
+    {
+        AOEShape? shape = tetherID switch
+        {
+            TetherAxe => axe,
+            TetherQuoit => quoit,
+            _ => null
+        };
+        if (shape != null)
+        {
+            Set(charge.InstanceID, charge.Position, shape, activation);
+        }
+    }
+
+    private void Set(ulong charge, WPos position, AOEShape shape, DateTime at)
+    {
+        var entry = (charge, new AOEInstance(shape, position, default, at));
+        var index = pending.FindIndex(p => p.Charge == charge);
+        if (index >= 0)
+        {
+            pending[index] = entry;
+        }
+        else
+        {
+            pending.Add(entry);
+        }
+    }
+}
 
 /// <summary>
 /// The telegraphed sweep, and a known gap behind it.
@@ -303,8 +426,7 @@ sealed class V3QuaquaStates : StateMachineBuilder
     public V3QuaquaStates(ModuleBase module) : base(module)
     {
         this.TrivialPhase()
-            .ActivateOnEnter<RingingQuoits>()
-            .ActivateOnEnter<RavagingAxe>()
+            .ActivateOnEnter<ArcaneArmamentsCharges>()
             .ActivateOnEnter<Rout>()
             .ActivateOnEnter<ArcaneArmamentsLine>()
             .ActivateOnEnter<VioletStorm>()
