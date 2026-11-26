@@ -112,6 +112,54 @@ sealed class FocusedTremor(ModuleBase module) : Components.ConcentricAOEs(module
     }
 }
 
+// Freefall has no cast of its own. The Stormcaller's teleport cast (4s) is followed by three landings 2.85s apart, each a
+// 12y circle, and each on the centre of one of the three Focused Tremor sets cast with it: 2.26s after the 6s ring's
+// cast starts, 5.11s after the 9s ring's, 7.93s after the 11.5s ring's (31 landings in 13 pulls, within 0.16s). Neither
+// this module nor BossmodReborn's drew it, and it hit 16 players in 50 landings.
+sealed class Freefall(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeCircle circle = new(12f);
+    private readonly List<AOEInstance> _aoes = [];
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(_aoes);
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        var landsAfter = spell.Action.ID switch
+        {
+            (uint)AID.FocusedTremor1 => 2.26f,
+            (uint)AID.FocusedTremor4 => 5.11f,
+            (uint)AID.FocusedTremor7 => 7.93f,
+            _ => 0f
+        };
+        // a cast met partway through (the module starting late) may already be past its landing
+        var wait = landsAfter - spell.ElapsedTime;
+        if (wait > 0f)
+        {
+            _aoes.Add(new(circle, spell.LocXZ, default, World.FutureTime(wait)));
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.Freefall)
+        {
+            var landed = spell.TargetXZ;
+            _aoes.RemoveAll(aoe => aoe.Origin.AlmostEqual(landed, 2f));
+        }
+    }
+
+    public override void Update()
+    {
+        // a landing that never came (the boss died mid-cast): gone a second and a half after its time
+        if (_aoes.Count != 0)
+        {
+            var stale = World.CurrentTime.AddSeconds(-1.5d);
+            _aoes.RemoveAll(aoe => aoe.Activation < stale);
+        }
+    }
+}
+
 [SkipLocalsInit]
 sealed class GaleForceEncounterStates : StateMachineBuilder
 {
@@ -120,7 +168,8 @@ sealed class GaleForceEncounterStates : StateMachineBuilder
         TrivialPhase()
             .ActivateOnEnter<Windage>()
             .ActivateOnEnter<BitingScratch>()
-            .ActivateOnEnter<FocusedTremor>();
+            .ActivateOnEnter<FocusedTremor>()
+            .ActivateOnEnter<Freefall>();
     }
 }
 
