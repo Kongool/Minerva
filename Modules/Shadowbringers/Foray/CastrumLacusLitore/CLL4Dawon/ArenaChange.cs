@@ -53,16 +53,32 @@ sealed class ArenaChange(ModuleBase module) : Components.GenericAOEs(module)
         }
     }
 
+    // Whether the player is in Dawon's arena or Lyon's. Decided on the game tick: the drawing callback this was ported
+    // in runs only while the radar is on screen, and a toon sent to Lyon with the radar closed kept Dawon's floor.
+    public override void Update()
+    {
+        base.Update();
+        if (Raid.Player() is { } player)
+        {
+            Decide(player.Position);
+        }
+    }
+
     public override void DrawArenaBackground(int pcSlot, Actor pc)
     {
         base.DrawArenaBackground(pcSlot, pc);
-        if (!IsDawonArena && DawonStartingArena.Contains(pc.Position - DawonStartingArena.Center))
+        Decide(pc.Position);
+    }
+
+    private void Decide(WPos position)
+    {
+        if (!IsDawonArena && DawonStartingArena.Contains(position - DawonStartingArena.Center))
         {
             IsDawonArena = true;
             Center = DawonCenter;
             Bounds = DawonDefaultArena;
         }
-        else if (IsDawonArena && LyonStartingArena.Contains(pc.Position - LyonStartingArena.Center))
+        else if (IsDawonArena && LyonStartingArena.Contains(position - LyonStartingArena.Center))
         {
             IsDawonArena = false;
             Center = LyonCenter;

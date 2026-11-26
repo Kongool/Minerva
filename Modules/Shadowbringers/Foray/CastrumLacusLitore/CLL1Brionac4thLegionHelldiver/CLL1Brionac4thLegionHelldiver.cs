@@ -137,15 +137,29 @@ sealed class DetermineArena(ModuleBase module) : ModuleComponent(module)
 {
     public bool IsBrionacArena;
 
-    public override void DrawArenaBackground(int pcSlot, Actor pc)
+    // Which of the two floors the player is on decides the arena and which half of the fight is drawn. BossmodReborn
+    // decided it while drawing, and so did this port: but here the drawing callbacks run only while the radar is on
+    // screen (RadarView), and the dodge runs whether it is or not. With the radar closed a toon upstairs kept the
+    // downstairs floor and was shown none of Brionac's attacks. Decided on the game tick now, from the local player.
+    public override void Update()
     {
-        if (IsBrionacArena && ArenaBottom.Contains(pc.Position - ArenaCenterBottom))
+        if (Raid.Player() is { } player)
+        {
+            Decide(player.Position);
+        }
+    }
+
+    public override void DrawArenaBackground(int pcSlot, Actor pc) => Decide(pc.Position);
+
+    private void Decide(WPos position)
+    {
+        if (IsBrionacArena && ArenaBottom.Contains(position - ArenaCenterBottom))
         {
             IsBrionacArena = false;
             Center = ArenaCenterBottom;
             Bounds = ArenaBottom;
         }
-        else if (!IsBrionacArena && ArenaTop.Contains(pc.Position - ArenaCenterTop))
+        else if (!IsBrionacArena && ArenaTop.Contains(position - ArenaCenterTop))
         {
             IsBrionacArena = true;
             Center = ArenaCenterTop;
