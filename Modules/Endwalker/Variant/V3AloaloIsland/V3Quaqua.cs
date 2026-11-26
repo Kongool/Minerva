@@ -172,25 +172,81 @@ sealed class ArcaneArmamentsCharges(ModuleBase module) : Components.GenericAOEs(
 }
 
 /// <summary>
-/// The telegraphed sweep, and a known gap behind it.
+/// The telegraphed sweep and its three repeats.
 ///
-/// <para>Rout is cast once with a 4.7 second bar and then repeats three more times with no cast bar at
-/// all, about 1.6 seconds apart, each at a fresh angle -- 90, then -25, -140, +70 degrees in the one
-/// occurrence recorded. The first is drawn here. The other three arrive as resolved events, which is to
-/// say the damage is already done by the time anything could draw them, and two of the three landed on
-/// the recorded character for a vulnerability stack each.</para>
-///
-/// <para>The angles ARE fixed: two pulls fifty minutes apart (2026-09-20 16:40 and 17:33) produced the
-/// same four to within three hundredths of a degree -- the telegraph, then 115.1 degrees back, 229.8 back
-/// and 20.0 back, at about 1.6, 3.2 and 4.9 seconds after it lands. What is not fixed is where they sweep
-/// from. The boss dashes between them: it stood at (-518.0, 81.5), then (-534.9, 117.5), then
-/// (-560.6, 87.1) during one set, and no single origin reproduces which of the three caught the recorded
-/// character and which missed. Predicting the angles from a guessed origin would draw three 45-yalm
-/// rectangles across ground that may be safe while missing the ground that is not, so they stay undrawn
-/// until a pull pins the origin -- most likely by sampling the boss at the instant each sweep fires rather
-/// than at the last movement before it.</para>
+/// <para>Rout is cast once with a 4.7 second bar and then repeats three more times with no cast bar at all, about 1.6
+/// seconds apart, each from a fresh place at a fresh angle: the boss dashes between them. The first is drawn from its
+/// cast here; the repeats are <see cref="RoutRepeats"/>.</para>
 /// </summary>
 sealed class Rout(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.Rout1, (uint)AID.Rout2], new AOEShapeRect(45f, 8f));
+
+/// <summary>
+/// Where Rout's sweeps will go, from the four line casts that mark them.
+///
+/// <para>After the wind-up (35728) four helpers cast a 2.7s line (35731) a second apart. Each is one sweep's path: the
+/// same origin and the same angle to the hundredth of a degree, in the same order (restored-t164018, 2026-09-20: lines
+/// from (-558.0,81.5) at 90, (-518.0,81.5) at -25, (-534.9,117.8) at -140, (-560.6,87.1) at 70; sweeps from those four
+/// places at 90.0, -25.1, -139.9 and 70.0). The sweep comes 4.96, 5.44, 6.06 and 6.82s after its line's cast starts,
+/// which is 2.3 to 4.1s after the line's own cast is over and its zone gone.</para>
+///
+/// <para>The sweep is 16 wide where the line is 10: in that pull the two repeats that reached the party hit six of
+/// eight toons, standing 4.7 to 8.2y off the axis, and missed the two at 12.4 and 13.3y. This module drew the line at
+/// its own width, took it off when the line's cast ended, and left the repeats undrawn for want of an origin; the
+/// origin was on the screen all along. BossmodReborn's module reads the lines the same way.</para>
+/// </summary>
+sealed class RoutRepeats(ModuleBase module) : Components.GenericAOEs(module)
+{
+    private static readonly AOEShapeRect sweep = new(45f, 8f);
+    // seconds from each line's cast start to its sweep
+    private static readonly float[] SweepAfterLine = [4.96f, 5.44f, 6.06f, 6.82f];
+    private readonly List<AOEInstance> sweeps = [];
+    private bool armed;
+    private int lines;
+
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(sweeps);
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        switch (spell.Action.ID)
+        {
+            case (uint)AID.ArcaneArmaments:
+                armed = true;
+                lines = 0;
+                sweeps.Clear();
+                break;
+            case (uint)AID.ArcaneArmamentsLine when armed:
+                var wait = SweepAfterLine[Math.Min(lines, SweepAfterLine.Length - 1)] - spell.ElapsedTime;
+                ++lines;
+                sweeps.Add(new(sweep, spell.LocXZ, spell.Rotation, World.FutureTime(Math.Max(wait, 0f))));
+                break;
+        }
+    }
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID is (uint)AID.Rout1 or (uint)AID.Rout2 && sweeps.Count != 0)
+        {
+            sweeps.RemoveAt(0);
+            if (sweeps.Count == 0 && lines >= SweepAfterLine.Length)
+            {
+                armed = false;
+            }
+        }
+    }
+
+    public override void Update()
+    {
+        // a sweep that never came (the boss died mid-set): gone three seconds after its time
+        if (sweeps.Count != 0)
+        {
+            var stale = World.CurrentTime.AddSeconds(-3d);
+            if (sweeps.RemoveAll(aoe => aoe.Activation < stale) != 0 && sweeps.Count == 0)
+            {
+                armed = false;
+            }
+        }
+    }
+}
 sealed class ArcaneArmamentsLine(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.ArcaneArmamentsLine, new AOEShapeRect(40f, 5f));
 sealed class VioletStorm(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.VioletStorm, new AOEShapeCone(32f, 60f.Degrees()));
 sealed class MadeMagic(ModuleBase module) : Components.RaidwideCast(module, (uint)AID.MadeMagic);
@@ -428,6 +484,7 @@ sealed class V3QuaquaStates : StateMachineBuilder
         this.TrivialPhase()
             .ActivateOnEnter<ArcaneArmamentsCharges>()
             .ActivateOnEnter<Rout>()
+            .ActivateOnEnter<RoutRepeats>()
             .ActivateOnEnter<ArcaneArmamentsLine>()
             .ActivateOnEnter<VioletStorm>()
             .ActivateOnEnter<CloudToGround>()
