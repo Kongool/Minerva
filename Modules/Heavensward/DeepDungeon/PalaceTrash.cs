@@ -2,6 +2,9 @@
 // trash floors is still the guess, which reads shapes off the game's sheet.
 //
 // From Nagumo's Splatoon presets against the sheet, 2026-11-24. BossmodReborn's PalaceFloorModule covers none of these.
+// Its gazes are the other half: Stone Gaze the guess already treats as one by its name, and its 8y cone form is drawn
+// and left. Mysterious Light (6953, 3s, damage on whoever looks at the caster within 30y) is neither named like a gaze
+// nor small enough to draw, so nothing was done about it until 2026-11-26: looked away from now, as Heaven-on-High's.
 // Nothing here has been seen in a recording.
 //  - The Dragon's Voice (81-89 and 181-189) is a ring the sheet calls a 30y circle, so the guess dropped it as a
 //    raidwide and drew nothing. The presets put its hole at 3y past the mob's edge.
@@ -15,6 +18,7 @@
 //  - The 171-179 ape's Chest Thump. By the author's script: out of combat it casts Ripe Banana (6973, 1.7s), gains a
 //    damage buff (status 53) for about 15s and thumps (7063, no cast, 50y past its edge) over and over until the buff
 //    ends or it is fought. Eureka Orthos's version is hidden from behind a wall; nothing is drawn for this one yet.
+using System;
 using System.Collections.Generic;
 using Minerva;
 using Minerva.Automation;
@@ -29,6 +33,7 @@ public enum AID : uint
     EvilEye = 7043, // 191-199
     TheDragonsVoice = 7079, // 81-89 and 181-189
     EyeOfTheBeholder = 6972, // 71-79
+    MysteriousLight = 6953, // ->self, 3.0s cast, range 30 circle, gaze
 }
 
 public abstract class PalaceTrash : ZoneModule
@@ -43,22 +48,56 @@ public abstract class PalaceTrash : ZoneModule
         [(uint)AID.EyeOfTheBeholder] = new(a => new AOEShapeDonut(1f + a.HitboxRadius, 16f + a.HitboxRadius)),
     };
 
+    /// <summary>How far each gaze reaches past the caster's edge: inside it, looking at the caster when it lands is the hit.</summary>
+    private static readonly Dictionary<uint, float> Gazes = new()
+    {
+        [(uint)AID.MysteriousLight] = 30f,
+    };
+
+    private readonly record struct GazeCast(ulong Caster, uint Action, DateTime Lands);
+
     private readonly CastCorrections casts;
+    private readonly List<GazeCast> watched = [];
+    private readonly EventSubscriptions subscriptions;
 
     protected PalaceTrash(WorldState ws) : base(ws)
     {
         this.casts = new CastCorrections(ws, Table);
+        this.subscriptions = new(
+            ws.Actors.CastStarted.Subscribe(actor =>
+            {
+                if (actor.CastInfo is { } cast && Gazes.ContainsKey(cast.Action.ID))
+                {
+                    this.watched.RemoveAll(c => c.Caster == actor.InstanceID);
+                    this.watched.Add(new GazeCast(actor.InstanceID, cast.Action.ID, ws.FutureTime(cast.RemainingTime)));
+                }
+            }),
+            ws.Actors.CastFinished.Subscribe((actor, _) => this.watched.RemoveAll(c => c.Caster == actor.InstanceID)),
+            ws.Actors.Removed.Subscribe(actor => this.watched.RemoveAll(c => c.Caster == actor.InstanceID)));
     }
 
     protected override void Dispose(bool disposing)
     {
         this.casts.Dispose();
+        this.subscriptions.Dispose();
         base.Dispose(disposing);
     }
 
-    public override bool ReplacesGuess(uint action) => this.casts.Replaces(action);
+    public override bool ReplacesGuess(uint action) => this.casts.Replaces(action) || Gazes.ContainsKey(action);
 
-    public override void CalculateAIHints(int playerSlot, Actor player, AIHints hints) => this.casts.AddForbiddenZones(hints);
+    public override void CalculateAIHints(int playerSlot, Actor player, AIHints hints)
+    {
+        this.casts.AddForbiddenZones(hints);
+        foreach (var c in this.watched)
+        {
+            if (World.Actors.Find(c.Caster) is not { IsDeadOrDestroyed: false } caster)
+                continue;
+            var reach = Gazes[c.Action] + caster.HitboxRadius;
+            var toCaster = caster.Position - player.Position;
+            if (toCaster.LengthSq() <= reach * reach && toCaster.LengthSq() > 0.01f)
+                hints.ForbiddenDirections.Add((Angle.FromDirection(toCaster), 45f.Degrees(), c.Lands));
+        }
+    }
 }
 
 [ZoneModuleInfo(BossModuleInfo.Maturity.WIP, 174)]
