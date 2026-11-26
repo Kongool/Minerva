@@ -7386,6 +7386,66 @@ t.Section("A walk that does not move the character stands down");
     t.True("and that way is timed afresh", !resumed.Observe(true, here, t0.AddSeconds(2.5)) && resumed.Observe(true, here, t0.AddSeconds(3.2)));
 }
 
+// Korha, Pilgrim's Traverse floor 91, 2026-11-24: ran 13.6y from Endless Nightmare (an 18y circle at about (-349.8,237.0)),
+// stopped at (-367.2,239.5) against the room's wall with the dodge steering at (-368.8,239.0), and stood 1.6s. Hit at 17.6y.
+t.Section("A dodge that stops at a wall blocks that heading and finds another way");
+{
+    var t0 = new DateTime(2026, 11, 24, 21, 23, 20, DateTimeKind.Utc);
+    var wall = new WPos(-367.2f, 239.5f);
+    var target = new WPos(-368.764f, 238.964f);
+    var s = new StuckDodge();
+    var fired = false;
+    // the run to the wall: 30 frames a second, 6y/s
+    for (var i = 0; i < 60; ++i)
+        fired |= s.Observe(true, wall + new WDir(0.2f * (60 - i), 0f), target, t0.AddSeconds(i / 30d));
+    t.True("a dodge that is moving blocks nothing", !fired && s.Count == 0);
+    var firedAt = -1d;
+    for (var i = 0; i < 30 && firedAt < 0; ++i)
+        if (s.Observe(true, wall, target, t0.AddSeconds(2d + i / 30d)))
+            firedAt = i / 30d;
+    t.True($"half a second at the wall blocks the heading ({firedAt:0.00}s)", firedAt is > 0.45 and < 0.6 && s.Count == 1);
+
+    var hints = new AIHints { Center = wall, Bounds = new ArenaBoundsCircle(40f) };
+    var now = t0.AddSeconds(2.6);
+    hints.AddForbiddenZone(new SDCircle(new WPos(-349.8f, 237.0f), 18f), now.AddSeconds(2.0));
+    hints.PlayerPosition = wall;
+    var before = ArenaPathfinder.Solve(hints, now, horizonSeconds: 5f, safetyMargin: 1f, clearanceLead: 1f);
+    s.Apply(hints, now);
+    var after = ArenaPathfinder.Solve(hints, now, horizonSeconds: 5f, safetyMargin: 1f, clearanceLead: 1f);
+    var toOld = (target - wall).Normalized();
+    t.True($"the solve then leaves by another way ({before.Target.X:0.0},{before.Target.Z:0.0}) -> ({after.Target.X:0.0},{after.Target.Z:0.0})",
+        before.Found && after.Found && !new SDRect(wall + toOld * StuckDodge.GapYalms, toOld, StuckDodge.SlabDepth, 0f, StuckDodge.SlabHalfWidth).Contains(after.Target)
+        && (after.Target - new WPos(-349.8f, 237.0f)).Length() >= 18f);
+    t.True("the character is never inside its own block", !hints.InObstacle(wall));
+
+    for (var i = 0; i < 60; ++i)
+        s.Observe(true, wall, target, t0.AddSeconds(2.6 + i / 30d));
+    t.True("standing on at the same wall keeps one block, not a ring of them", s.Count == 1);
+    var later = new AIHints { Center = wall, Bounds = new ArenaBoundsCircle(40f) };
+    s.Observe(false, wall, target, t0.AddSeconds(5));
+    s.Apply(later, t0.AddSeconds(9));
+    t.True("and the block is gone four seconds after the last time it was met", later.TemporaryObstacles.Count == 0 && s.Count == 0);
+
+    var held = new StuckDodge();
+    var heldFired = false;
+    for (var i = 0; i < 90; ++i)
+        heldFired |= held.Observe(true, wall, target, t0.AddSeconds(i / 30d));
+    t.True("a character that never moved on this dodge is held by something else: no block", !heldFired && held.Count == 0);
+
+    var near = new StuckDodge();
+    var nearFired = false;
+    for (var i = 0; i < 30; ++i)
+        nearFired |= near.Observe(true, wall + new WDir(0.2f * (30 - i), 0f), wall + new WDir(-0.6f, 0f), t0.AddSeconds(i / 30d));
+    for (var i = 0; i < 30; ++i)
+        nearFired |= near.Observe(true, wall, wall + new WDir(-0.6f, 0f), t0.AddSeconds(1d + i / 30d));
+    t.True("the last half-yalm is the follower's, not a wall", !nearFired);
+
+    var hitch = new StuckDodge();
+    for (var i = 0; i < 30; ++i)
+        hitch.Observe(true, wall + new WDir(0.2f * (30 - i), 0f), target, t0.AddSeconds(i / 30d));
+    t.True("one long frame is not a wall", !hitch.Observe(true, wall, target, t0.AddSeconds(1.0)) && !hitch.Observe(true, wall, target, t0.AddSeconds(2.2)));
+}
+
 // Korha, Eureka Anemos 2026-11-17: uptime walks to (25.9,-407.1) and (23.8,-412.3) from the south side of rock
 // z3fa_t1_rck01 ran straight into its south face. The route is the one Mnemosyne's findpath gives for the first walk.
 t.Section("A walk that is not a dodge goes round a wall the way the navmesh does");

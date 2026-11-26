@@ -70,6 +70,7 @@ public sealed class AIManager
     private readonly HashSet<uint> announcedEncounters = []; // open encounters already written to the log, once each
     private DateTime sprintAskedUntil; // DodgeSprint.Holds: an ask for Sprint stands until then
     private readonly StuckWalk stuckWalk = new();
+    private readonly StuckDodge stuckDodge = new();
     private readonly MeshWalk meshWalk = new();          // the mesh's way round walls, for walks not dodging anything
     private readonly QuestBattle.IQuestNavigation? mesh; // the navmesh's pathfinder, null when not installed
 
@@ -472,6 +473,14 @@ public sealed class AIManager
             if (meshRoute != null && !MeshWalk.Clear(this.hints, pc.Position, meshRoute, now, margin, moveSpeed))
                 meshRoute = null;
         }
+
+        // A dodge that does not move the character (StuckDodge): the heading is a wall, and the next solve goes another way.
+        // Only where there is no boss module: an arena's edge is known to the solve, and inside one a character that
+        // will not move is more likely held by the fight (Ogbunabali's sand) than by a wall. Trash and the open world
+        // have rooms and rocks the solve knows nothing of.
+        if (this.stuckDodge.Observe(steering && this.movement.Busy && this.modules.ActiveModule == null && reason is DodgeReason.Danger or DodgeReason.Clearing,
+                pc.Position, this.Current.Steer, now))
+            Service.Log.Information($"Minerva: the dodge to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckDodge.NoProgressSeconds}s at ({pc.Position.X:0.0},{pc.Position.Z:0.0}); that heading is blocked for {StuckDodge.BlockSeconds}s ({this.stuckDodge.Count} blocked).");
 
         if (this.stuckWalk.Observe(steering && this.movement is not NullMovementController, pc.Position, now))
         {
@@ -1050,6 +1059,7 @@ public sealed class AIManager
         {
             this.voidsZone = this.world.CurrentZone;
             this.knownVoids.Clear(); // a hole in the last arena says nothing about this one
+            this.stuckDodge.Clear();
             this.floorProbeStoodDown = false; // re-evaluate the probe fresh in the new zone (fresh stand-down signal)
             this.floorProbeDistrusted = false;
             this.probeRejectStreak = 0;
@@ -1643,6 +1653,7 @@ public sealed class AIManager
         }
 
         this.ApplyKnownVoids();
+        this.stuckDodge.Apply(this.hints, this.world.CurrentTime);
         this.ApplyEncounterGround(pc);
         return true;
     }

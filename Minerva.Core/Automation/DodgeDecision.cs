@@ -94,6 +94,122 @@ public sealed class StuckWalk
 }
 
 /// <summary>
+/// A dodge the mover reports running but that does not move the character: there is a wall in the way, and nothing on
+/// Minerva's side knows about walls outside an arena. <see cref="StuckWalk"/> stands uptime walks down and lets danger
+/// move; this is the danger half. Pilgrim's Traverse floor 91, 2026-11-24: Korha ran from Invoked Dreamer's Endless
+/// Nightmare (an 18y circle), stopped at 17.5y against the room's wall and stood there 1.6s with the dodge steering at a
+/// point a yalm and a half behind it. Hit for 226,000, then for 263,000 by a line cast down the same spot.
+/// <para>After <see cref="NoProgressSeconds"/> and <see cref="NoProgressFrames"/> frames without
+/// <see cref="ProgressYalms"/> of progress the heading is blocked: a slab of ground that cannot be walked, square to the
+/// heading, <see cref="SlabHalfWidth"/> to either side and <see cref="SlabDepth"/> deep, kept for
+/// <see cref="BlockSeconds"/>. A wall is straight where one meets it, so the next solve looks along it or back the way
+/// it came; a shallow or narrow block is stepped over to a spot that is still behind the wall. The slab begins
+/// <see cref="GapYalms"/> in front of the character, which is never inside it.</para>
+/// <para>Only a dodge that was moving counts: <see cref="MinWalkYalms"/> walked on it before it stopped. A character
+/// that has not moved at all may be held by something this cannot see (a root, an animation, sinking sand), and
+/// walling it in would trap it once it could move.</para>
+/// </summary>
+public sealed class StuckDodge
+{
+    /// <summary>Walking covers three yalms in this long; a mover's first frames and a rotation's weave are shorter.</summary>
+    public const double NoProgressSeconds = 0.5d;
+
+    /// <summary>And at least this many frames, so one long frame is not a wall.</summary>
+    public const int NoProgressFrames = 6;
+
+    public const float ProgressYalms = 0.3f;
+    public const float MinWalkYalms = 1f;
+    public const float SlabHalfWidth = 12f;
+    public const float SlabDepth = 30f;
+    public const float GapYalms = 0.25f;
+    public const double BlockSeconds = 4d;
+    public const int MaxBlocks = 4;
+
+    private readonly List<(WPos Origin, WDir Heading, DateTime Until)> blocks = [];
+    private bool active;
+    private WPos from;
+    private DateTime since;
+    private int frames;
+    private float walked;
+
+    /// <summary>Headings blocked right now.</summary>
+    public int Count => this.blocks.Count;
+
+    /// <summary>
+    /// Note this frame. <paramref name="dodging"/>: a steer away from danger went out through a mover that reports it is
+    /// driving, and nothing is holding the character. <paramref name="steer"/>: where that steer points. True on the
+    /// frame a heading is blocked.
+    /// </summary>
+    public bool Observe(bool dodging, WPos position, WPos steer, DateTime now)
+    {
+        if (!dodging)
+        {
+            this.active = false;
+            return false;
+        }
+        if (!this.active)
+        {
+            this.active = true;
+            this.from = position;
+            this.since = now;
+            this.frames = 0;
+            this.walked = 0f;
+            return false;
+        }
+        var step = (position - this.from).Length();
+        if (step > ProgressYalms)
+        {
+            this.walked += step;
+            this.from = position;
+            this.since = now;
+            this.frames = 0;
+            return false;
+        }
+        if (++this.frames < NoProgressFrames || (now - this.since).TotalSeconds < NoProgressSeconds)
+            return false;
+
+        this.since = now;
+        this.frames = 0;
+        var to = steer - position;
+        var d = to.Length();
+        // not a dodge that was under way, or the last half-yalm, which is the follower's to finish (FinalApproach)
+        if (this.walked < MinWalkYalms || d <= FinalApproach.FollowerStops + 0.25f)
+            return false;
+        var heading = to / d;
+        var origin = position + (heading * GapYalms);
+        var until = now.AddSeconds(BlockSeconds);
+        for (var i = 0; i < this.blocks.Count; ++i)
+        {
+            // the same wall again: the block stands longer, and one is enough
+            if ((this.blocks[i].Origin - origin).LengthSq() < 1f && this.blocks[i].Heading.Dot(heading) > 0.9f)
+            {
+                this.blocks[i] = (this.blocks[i].Origin, this.blocks[i].Heading, until);
+                return false;
+            }
+        }
+        if (this.blocks.Count >= MaxBlocks)
+            this.blocks.RemoveAt(0);
+        this.blocks.Add((origin, heading, until));
+        return true;
+    }
+
+    /// <summary>Put the blocked headings into this frame's hints as ground that cannot be walked.</summary>
+    public void Apply(AIHints hints, DateTime now)
+    {
+        for (var i = this.blocks.Count - 1; i >= 0; --i)
+        {
+            if (this.blocks[i].Until <= now)
+                this.blocks.RemoveAt(i);
+            else
+                hints.TemporaryObstacles.Add(new SDRect(this.blocks[i].Origin, this.blocks[i].Heading, SlabDepth, 0f, SlabHalfWidth));
+        }
+    }
+
+    /// <summary>A new zone: its walls are not the last one's.</summary>
+    public void Clear() => this.blocks.Clear();
+}
+
+/// <summary>
 /// The last moments of a gaze, when no walk may run: a step turns the character along its walk, and no facing survives
 /// that. BossmodReborn's AI stops for half a second.
 /// <para>The countdown is NaN when no gaze is coming, and every comparison with NaN is false: the quest battle walk
