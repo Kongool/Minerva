@@ -16,6 +16,16 @@ public enum OID : uint
     Helper = 0x233C
 }
 
+public enum AID : uint
+{
+    TerminusEst = 11538, // Menacing Mercenary (0x234E)->self, 2.2s cast, range 40 width 4 rect
+}
+
+// The Menacing Mercenaries line up and each fires Terminus Est down its own facing: fifteen casts in five volleys in
+// the one recording (newtoon1, 2026-09-28 21:15), every one of which hit an ally and none the player. BossmodReborn's
+// module has no component for it, and with a module in charge nothing else draws it.
+class TerminusEst(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.TerminusEst, new AOEShapeRect(40f, 2f));
+
 class LB(ModuleBase module) : ModuleComponent(module)
 {
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
@@ -35,6 +45,7 @@ class HostileSkyArmorStates : StateMachineBuilder
 
             .ActivateOnEnter<AlphinaudAI>()
             .ActivateOnEnter<LB>()
+            .ActivateOnEnter<TerminusEst>()
             .Raw.Update = () => module.World.CurrentCFCID != 582;
     }
 }
