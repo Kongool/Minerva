@@ -70,6 +70,46 @@ sealed class FocusedTremor(ModuleBase module) : Components.ConcentricAOEs(module
             AdvanceSequence(order, spell.LocXZ, World.FutureTime(2d));
         }
     }
+
+    // A toon that rides into the FATE while the rings are being cast never sees the casts start: the game sends a cast
+    // once, when it begins, so for a caster that loads in afterwards there is no cast bar, no telegraph, and nothing
+    // above to start or advance a sequence. The casts are 6 to 15.5 seconds long and the rings land in order two
+    // seconds apart, so the first ring seen to land tells where the rest will. Stormcaller, 2026-11-19 21:05: Saar
+    // arrived 5s into a set, walked in under a 20-30y ring and a 10-20y ring nothing had drawn, and died at 8.8s;
+    // 12 of the 23 cast-bar hits in 31 recordings were rings like these, with four deaths.
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        var order = spell.Action.ID switch
+        {
+            (uint)AID.FocusedTremor1 or (uint)AID.FocusedTremor4 or (uint)AID.FocusedTremor7 => 0,
+            (uint)AID.FocusedTremor2 or (uint)AID.FocusedTremor5 or (uint)AID.FocusedTremor8 => 1,
+            (uint)AID.FocusedTremor3 or (uint)AID.FocusedTremor6 or (uint)AID.FocusedTremor9 => 2,
+            _ => -1
+        };
+        if (order < 0)
+        {
+            return;
+        }
+        var origin = spell.TargetXZ;
+        var next = World.FutureTime(2d);
+        // a sequence waiting on this very ring: its cast's end was not seen (a cast seen to end has moved it on already)
+        if (AdvanceSequence(order, origin, next))
+        {
+            return;
+        }
+        foreach (var known in Sequences)
+        {
+            if (known.Origin.AlmostEqual(origin, 1f))
+            {
+                return;
+            }
+        }
+        if (order < _shapes.Length - 1)
+        {
+            AddSequence(origin, next);
+            Sequences[^1].Done = order + 1;
+        }
+    }
 }
 
 [SkipLocalsInit]
