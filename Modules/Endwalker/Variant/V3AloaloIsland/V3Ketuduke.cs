@@ -37,6 +37,7 @@ public enum AID : uint
     StrewnBubbles = 35462,          // Ketuduke->self, 2.7s cast, single-target
     BlowingBubbles = 35464,         // Ketuduke->self, 2.7s cast, single-target
     Summon = 35470,                 // ZealBlindZozone->self, 2.7s cast, single-target
+    HundredLashings = 35479,        // Aloalo Zaratan->self, 15.2s cast, range 60 180-degree cone
     RecedingTwintides = 35485,      // Ketuduke->self, 4.7s cast, range 14 circle: get out
     NearTide = 35486,               // Ketuduke->self, range 14 circle: get out
     EncroachingTwintides = 35487,   // Ketuduke->self, range 8-60 donut: get in
@@ -69,6 +70,30 @@ sealed class SaturateSpheres(ModuleBase module) : Components.SimpleAOEGroups(mod
 sealed class SaturateRects(ModuleBase module) : Components.SimpleAOEGroups(module, [(uint)AID.SaturateRect, (uint)AID.SaturateRectFast], new AOEShapeRect(38f, 5f, 38f));
 sealed class FlukeTyphoon(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.FlukeTyphoon, new AOEShapeRect(40f, 20f));
 sealed class Hydrobomb(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.Hydrobomb, 5f);
+
+// The Zaratan's lash: a 15.2s cast over the half of the floor in front of it. Nothing drew it, and it hit the recorded
+// toon in the one pull that has it (minerva-20260920-191836-Ketuduke, 184.2s). A Zaratan lifted in a bubble (status
+// 3745) lashes over everyone's heads, by BossmodReborn's module; the one recorded was on the ground.
+sealed class HundredLashings(ModuleBase module) : Components.SimpleAOEs(module, (uint)AID.HundredLashings, new AOEShapeCone(60f, 90f.Degrees()))
+{
+    private const uint Bubble = 3745u;
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (caster.FindStatus(Bubble) == null)
+        {
+            base.OnCastStarted(caster, spell);
+        }
+    }
+
+    public override void OnStatusGain(Actor actor, ref ActorStatus status)
+    {
+        if (status.ID == Bubble)
+        {
+            Casters.RemoveAll(aoe => aoe.ActorID == actor.InstanceID);
+        }
+    }
+}
 sealed class BubbleNet(ModuleBase module) : Components.RaidwideCasts(module, [(uint)AID.BubbleNet, (uint)AID.BubbleNet2]);
 
 /// <summary>
@@ -161,6 +186,7 @@ sealed class V3KetudukeStates : StateMachineBuilder
             .ActivateOnEnter<SaturateRects>()
             .ActivateOnEnter<FlukeTyphoon>()
             .ActivateOnEnter<Hydrobomb>()
+            .ActivateOnEnter<HundredLashings>()
             .ActivateOnEnter<Tides>()
             .ActivateOnEnter<AiryBubble>()
             .ActivateOnEnter<BubbleNet>()
