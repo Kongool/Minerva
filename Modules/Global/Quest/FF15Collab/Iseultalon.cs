@@ -80,6 +80,24 @@ class Electrocution(ModuleBase module) : Components.GenericTowers(module)
         }
     }
 
+    // The base tower component only keeps forbidden soakers out; it sends nobody in. The first tower of the fight is the
+    // player's to soak (Noctis takes this one from the second on). Saar, 2026-09-26 20:43, with no module loaded: the
+    // first Electrocution resolved at 88.0s with the player outside it, and Fatal Current followed at 91.4s and hit
+    // both of them. Any tower here the player is not barred from is stood in, as Electrocution2's own tower is.
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        base.AddAIHints(slot, actor, assignment, hints);
+        var count = Towers.Count;
+        for (var i = 0; i < count; ++i)
+        {
+            if (!Towers[i].ForbiddenSoakers[slot])
+            {
+                hints.AddForbiddenZone(new SDInvertedCircle(Towers[i].Position, 3f));
+                break;
+            }
+        }
+    }
+
     private WPos DeterminePosition(Actor caster, ActorCastInfo spell) => spell.TargetID == caster.InstanceID ? caster.Position : World.Actors.Find(spell.TargetID)?.Position ?? spell.LocXZ;
 }
 
