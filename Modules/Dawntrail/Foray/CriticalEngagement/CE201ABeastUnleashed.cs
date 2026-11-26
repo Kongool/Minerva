@@ -114,6 +114,7 @@ sealed class TopazRay(ModuleBase module) : Components.SimpleAOEGroups(module, [(
 {
     public readonly List<Actor> Actors = [];
     private RubyReflection? rubyreflection;
+    private SpinebreakingStampede? stampede;
     private bool intercept;
     private readonly List<AOEInstance> withChosen = [];
 
@@ -121,17 +122,24 @@ sealed class TopazRay(ModuleBase module) : Components.SimpleAOEGroups(module, [(
     // bar 2.7s out. Their circles are drawn from the moment they are chosen, as a warning only (not dodged), so the
     // radar shows where the ground will fire; the Stampede push reads the same stones to keep its landing off them.
     // Atlas Carbuncle, 2026-11-15: the rays' casts started 0.5s before the push landed both toons on one.
+    //
+    // A ray that fires after a circle push still to come is not dodged until the push has landed: where the player
+    // stands now is not where the ray will find them, and the push's own guard already keeps the landing off the stones.
+    // Saar, 2026-11-21, 340.0s: she stood 4.5y from a stone on a start that landed clear, the casts began, the dodge
+    // walked her 1.4y for clearance from that stone, and the push 0.5s later threw her from there onto another.
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor)
     {
         var cast = base.ActiveAOEs(slot, actor);
-        if (Actors.Count == 0)
+        stampede ??= Module.FindComponent<SpinebreakingStampede>();
+        var pushFirst = cast.Length != 0 && stampede != null && stampede.CirclePushLandsBefore(slot, cast[0].Activation);
+        if (Actors.Count == 0 && !pushFirst)
         {
             return cast;
         }
         withChosen.Clear();
         foreach (ref readonly var aoe in cast)
         {
-            withChosen.Add(aoe);
+            withChosen.Add(pushFirst ? aoe with { Risky = false } : aoe);
         }
         foreach (var stone in Actors)
         {
@@ -346,6 +354,19 @@ sealed class SpinebreakingStampede(ModuleBase module) : Components.GenericKnockb
     private bool isAlongXAxis;
 
     public override ReadOnlySpan<Knockback> ActiveKnockbacks(int slot, Actor actor) => CollectionsMarshal.AsSpan(_kbs);
+
+    /// <summary>Is the 30y circle push still to come (or under way) and due before <paramref name="time"/>, for a player it will move?</summary>
+    public bool CirclePushLandsBefore(int slot, DateTime time)
+    {
+        foreach (ref readonly var kb in CollectionsMarshal.AsSpan(_kbs))
+        {
+            if (kb.Distance == 30f && kb.Activation < time && !IsImmune(slot, kb.Activation))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
