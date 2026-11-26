@@ -28,7 +28,7 @@ sealed class EasternEwers(ModuleBase module) : Components.Exaflare(module, 4f)
             for (var i = 0; i < count; ++i)
             {
                 var line = Lines[i];
-                if (line.Next.AlmostEqual(pos, 0.1f))
+                if (line.Next.AlmostEqual(pos, 1f))
                 {
                     AdvanceLine(line, pos);
                     if (line.Next.Z > -135f)
@@ -39,6 +39,25 @@ sealed class EasternEwers(ModuleBase module) : Components.Exaflare(module, 4f)
                     {
                         Lines.RemoveAt(i);
                     }
+                    return;
+                }
+            }
+        }
+    }
+
+    // An ewer that goes takes its line with it. This and the yalm of slack above are BossmodReborn's (2026-08-23), which
+    // the port predates: without them a line whose ewer was a little off its predicted step never advanced and stayed.
+    public override void OnActorDestroyed(Actor actor)
+    {
+        if (actor.OID == (uint)OID.EasternEwer)
+        {
+            var pos = actor.Position;
+            var count = Lines.Count;
+            for (var i = 0; i < count; ++i)
+            {
+                if (Lines[i].Next.AlmostEqual(pos, 1f))
+                {
+                    Lines.RemoveAt(i);
                     return;
                 }
             }
