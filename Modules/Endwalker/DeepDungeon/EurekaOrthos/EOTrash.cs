@@ -10,14 +10,20 @@
 // wall or out of reach, whichever is nearer. Which casts: BossmodReborn's EOFloorModule (its AddLOS list) and Nagumo's
 // Splatoon presets (the ones labelled "hide behind a wall"), 2026-11-24, with the sheet's range for each. The user
 // confirms the same of Pilgrim's Traverse's Lahar, where it was seen. Nothing here has been seen in a recording.
+// From BossmodReborn's EOFloorModule, 2026-11-26, three casts the guess drops as raidwides (30y and over) and does
+// nothing about:
+//  - Allagan Fear (91-98 Orthos Fitter, 30y) is a gaze not named like one; the Splatoon preset says look away too.
+//  - Electric Whorl (60y) is a ring. BossmodReborn's hole is 8y; drawn at 6, the smallest hole the presets give any
+//    ring in here, since a hole drawn too big is the fault that has killed a toon.
+//  - Catharsis is a 40y circle with a 10s cast: time enough to walk out of.
 // Not done:
 //  - Interrupts and stuns (Quake, High Voltage, Winds of Winter can be stopped; Minerva presses no buttons).
-//  - BossmodReborn's gazes not named like gazes (Allagan Fear, Catharsis as a 40y circle to leave), Electric Whorl as
-//    an 8-60 ring, and the spikes of Gelid Charge and Smoldering Scales.
+//  - The spikes of Gelid Charge and Smoldering Scales.
 //  - Second hits with no cast bar (the Killing Paw's swipe, Sewer Water's other half, Headspin), and the 93-98
 //    chimera's breaths and the 86-89 Sweeps, which the presets draw off-centre.
 //  - Beastly Roar and Unholy (floors 91-98): 30y circles cast out of combat, by the presets. The guess drops them as
 //    raidwides. Their cast times are not known, and whether a wall stops them is not either.
+using System;
 using System.Collections.Generic;
 using Minerva;
 using Minerva.Automation;
@@ -46,6 +52,9 @@ public enum AID : uint
     TheDragonsVoice = 32444, // 31-39: a 7-37 ring by Splatoon, 8-30 by BossmodReborn
     TheDragonsVoice2 = 32910, // 93-98: 6-31
     RingingBurst = 32775, // 86-89: 6-30
+    AllaganFear = 32896, // 91-98 Orthos Fitter->self, range 30 circle, gaze
+    ElectricWhorl = 33186, // ->self, 4.0s cast, range 60 circle by the sheet, a ring
+    Catharsis = 32732, // ->self, 10.0s cast, range 40 circle
     RingCannon = 32876, // 91-98: hole 7.5; the sheet's edge is 40
 }
 
@@ -79,30 +88,63 @@ public abstract class EOTrash : ZoneModule
         [(uint)AID.TheDragonsVoice2] = new(_ => new AOEShapeDonut(6f, 31f)),
         [(uint)AID.RingingBurst] = new(_ => new AOEShapeDonut(6f, 30f)),
         [(uint)AID.RingCannon] = new(_ => new AOEShapeDonut(7.5f, 40f)),
+        [(uint)AID.ElectricWhorl] = new(_ => new AOEShapeDonut(6f, 60f)),
+        [(uint)AID.Catharsis] = new(_ => new AOEShapeCircle(40f)),
     };
+
+    /// <summary>How far each gaze reaches past the caster's edge: inside it, looking at the caster when it lands is the hit.</summary>
+    private static readonly Dictionary<uint, float> Gazes = new()
+    {
+        [(uint)AID.AllaganFear] = 30f,
+    };
+
+    private readonly record struct GazeCast(ulong Caster, uint Action, DateTime Lands);
 
     private readonly SightCasts sight;
     private readonly CastCorrections casts;
+    private readonly List<GazeCast> watched = [];
+    private readonly EventSubscriptions subscriptions;
 
     protected EOTrash(WorldState ws) : base(ws)
     {
         this.sight = new SightCasts(ws, BehindWalls);
         this.casts = new CastCorrections(ws, Table);
+        this.subscriptions = new(
+            ws.Actors.CastStarted.Subscribe(actor =>
+            {
+                if (actor.CastInfo is { } cast && Gazes.ContainsKey(cast.Action.ID))
+                {
+                    this.watched.RemoveAll(c => c.Caster == actor.InstanceID);
+                    this.watched.Add(new GazeCast(actor.InstanceID, cast.Action.ID, ws.FutureTime(cast.RemainingTime)));
+                }
+            }),
+            ws.Actors.CastFinished.Subscribe((actor, _) => this.watched.RemoveAll(c => c.Caster == actor.InstanceID)),
+            ws.Actors.Removed.Subscribe(actor => this.watched.RemoveAll(c => c.Caster == actor.InstanceID)));
     }
 
     protected override void Dispose(bool disposing)
     {
         this.sight.Dispose();
         this.casts.Dispose();
+        this.subscriptions.Dispose();
         base.Dispose(disposing);
     }
 
-    public override bool ReplacesGuess(uint action) => this.sight.Replaces(action) || this.casts.Replaces(action);
+    public override bool ReplacesGuess(uint action) => this.sight.Replaces(action) || this.casts.Replaces(action) || Gazes.ContainsKey(action);
 
     public override void CalculateAIHints(int playerSlot, Actor player, AIHints hints)
     {
         this.sight.AddForbiddenZones(player, hints);
         this.casts.AddForbiddenZones(hints);
+        foreach (var c in this.watched)
+        {
+            if (World.Actors.Find(c.Caster) is not { IsDeadOrDestroyed: false } caster)
+                continue;
+            var reach = Gazes[c.Action] + caster.HitboxRadius;
+            var toCaster = caster.Position - player.Position;
+            if (toCaster.LengthSq() <= reach * reach && toCaster.LengthSq() > 0.01f)
+                hints.ForbiddenDirections.Add((Angle.FromDirection(toCaster), 45f.Degrees(), c.Lands));
+        }
     }
 }
 
