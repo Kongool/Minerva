@@ -160,12 +160,23 @@ public sealed class Plugin : IDalamudPlugin
 
     // What each tick costs while a fight is up, logged when it ends (see FrameCost).
     private readonly FrameCost frameCost = new();
+    private TimeSpan lastGcPause;
+    private int lastGen0;
+    private int lastGen1;
+    private int lastGen2;
 
     private void OnUpdate(IFramework framework)
     {
         try
         {
             var started = Stopwatch.GetTimestamp();
+            // The collector's figures since the last tick began: the span the frame just measured covers.
+            var gcPause = GC.GetTotalPauseDuration();
+            var (gen0, gen1, gen2) = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2));
+            var gcPauseMs = (gcPause - this.lastGcPause).TotalMilliseconds;
+            var (d0, d1, d2) = (gen0 - this.lastGen0, gen1 - this.lastGen1, gen2 - this.lastGen2);
+            (this.lastGcPause, this.lastGen0, this.lastGen1, this.lastGen2) = (gcPause, gen0, gen1, gen2);
+            var allocated = GC.GetAllocatedBytesForCurrentThread();
             this.sync.Update(framework.UpdateDelta);
             this.CheckHooks(framework.UpdateDelta);
             started = this.Timed(FrameCost.Stage.Sync, started);
@@ -190,7 +201,12 @@ public sealed class Plugin : IDalamudPlugin
             this.Timed(FrameCost.Stage.Rest, started);
             if (this.modules.ActiveModule != null)
             {
-                this.frameCost.EndTick(framework.UpdateDelta.TotalSeconds);
+                this.frameCost.EndTick(framework.UpdateDelta.TotalSeconds, gcPauseMs, d0, d1, d2, (GC.GetAllocatedBytesForCurrentThread() - allocated) / 1024d);
+                // into the op stream, so a recording carries them (PERF lines)
+                if (this.frameCost.LastDrop is { } drop)
+                    this.World.Execute(new OpFramePerf(drop));
+                if (this.frameCost.LastWindow is { } window)
+                    this.World.Execute(new OpFramePerf(window));
             }
             else
             {

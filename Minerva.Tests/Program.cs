@@ -6552,6 +6552,57 @@ t.Section("Pending effects");
     t.True("and starts afresh for the next fight", cost.Summarise() == null && cost.Frames == 0);
 }
 
+// ---- Frame drops, and what they were made of ----
+// A frame's length is known one tick late, so a drop is charged with the update and drawing of the tick before.
+{
+    var cost = new FrameCost();
+    var dropsSeen = new List<FramePerf>();
+    var windowsSeen = new List<FramePerf>();
+    for (var i = 0; i < 300; ++i)
+    {
+        // tick 100 runs a 90ms dodge: the frame measured at tick 101 is 120ms long. Tick 200 is cheap, and the frame
+        // measured at 201 is 150ms with a 110ms collection in it. Tick 250 is cheap and its frame is 200ms of nobody's.
+        cost.Add(FrameCost.Stage.Sync, 0.5);
+        cost.Add(FrameCost.Stage.Dodge, i == 100 ? 90.0 : 1.0);
+        var frame = i == 101 ? 0.120 : i == 201 ? 0.150 : i == 251 ? 0.200 : 0.030;
+        cost.EndTick(frame, gcPauseMs: i == 201 ? 110d : 0d, gen2: i == 201 ? 1 : 0, allocKb: 12d);
+        if (cost.LastDrop is { } d)
+            dropsSeen.Add(d);
+        if (cost.LastWindow is { } w)
+            windowsSeen.Add(w);
+        cost.AddDraw(0.4);
+    }
+
+    t.True($"three long frames among 30ms ones are three drops ({dropsSeen.Count})", dropsSeen.Count == 3);
+    t.True("the first is charged with the slow dodge of the tick before, against a 30ms baseline",
+        dropsSeen.Count == 3 && dropsSeen[0] is { Drop: true, FrameMs: 120f, BaselineMs: 30f, DodgeMs: 90f, SyncMs: 0.5f, GcPauseMs: 0f } && MathF.Abs(dropsSeen[0].DrawMs - 0.4f) < 1e-4f);
+    t.True("the second carries the collection and the update's allocation", dropsSeen.Count == 3 && dropsSeen[1] is { GcPauseMs: 110f, Gen2: 1, DodgeMs: 1f, AllocKb: 12f });
+    // the first five seconds hold the 90ms dodge and the 120ms frame: about 164 frames, 1.5ms of dodge and 30.5ms a frame
+    t.True($"five-second windows average what their frames held ({windowsSeen.Count})",
+        windowsSeen.Count == 1 && windowsSeen[0] is { Drop: false } w0 && w0.Frames is > 150 and < 170 && w0.DodgeMs is > 1.4f and < 1.7f && w0.FrameMs is > 30f and < 31f);
+    var dropLine = cost.Summarise() ?? "";
+    t.True($"the line counts the drops and whose they were: {dropLine}",
+        dropLine.Contains("drops (twice the running median and 25ms over it): 3,") && dropLine.Contains("mostly Minerva's in 1, mostly the collector's in 1, neither in 1")
+        && dropLine.Contains("Worst 200ms"));
+
+    var steady = new FrameCost();
+    for (var i = 0; i < 200; ++i)
+    {
+        steady.Add(FrameCost.Stage.Sync, 0.5);
+        steady.EndTick(i % 2 == 0 ? 0.085 : 0.095);
+    }
+    t.True("a steady 11 fps has no drops", (steady.Summarise() ?? "").Contains("No frame drops."));
+
+    var perfOut = new System.IO.StringWriter();
+    var perfWorld = new WorldState(10_000_000, "test");
+    using (var rec = new ReplayRecorder(perfWorld, perfOut))
+        perfWorld.Execute(new OpFramePerf(new FramePerf(true, 1, 120f, 30f, 0.5f, 0f, 90f, 0.02f, 0.4f, 0f, 0, 0, 0, 12f)));
+    var perfLine = perfOut.ToString().Split('\n').FirstOrDefault(l => l.Contains(" PERF ")) ?? "";
+    t.True($"a drop is one PERF line in the recording: {perfLine.Trim()}", perfLine.Trim().EndsWith("PERF 1 1 120.0 30.0 0.50 0.00 90.00 0.02 0.40 0.0 0 0 0 12"));
+    using var perfReader = new System.IO.StringReader(perfOut.ToString());
+    t.True("and a recording with PERF lines still parses", ReplayParser.ParseTimeline(perfReader) != null);
+}
+
 // ---- A walk that starts beside a zone is not leaving it ----
 // Elm Gigas, 2026-10-19, Saar: 0.5y outside an Ancient Aero line, inside the safety margin, the last-resort door was 8.2y
 // across the line, which fired in a second. Counted as leaving the line, the walk passed; it is crossing it.
