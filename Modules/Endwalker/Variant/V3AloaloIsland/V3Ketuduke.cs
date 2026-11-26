@@ -192,7 +192,13 @@ sealed class V3KetudukeStates : StateMachineBuilder
             .ActivateOnEnter<BubbleNet>()
             .ActivateOnEnter<WindRaidwides>()
             .ActivateOnEnter<SphereShatter>()
-            .ActivateOnEnter<TidalRoar>();
+            .ActivateOnEnter<TidalRoar>()
+            // BossmodReborn's components for what this module was never written for (see V032Ketuduke.cs)
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V032Ketuduke.Hydroblast>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V032Ketuduke.WaterIII>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V032Ketuduke.TidalWave>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V032Ketuduke.Hydrosurge>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V032Ketuduke.FlukeTyphoonAnila>();
     }
 }
 

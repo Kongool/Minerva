@@ -494,7 +494,11 @@ sealed class V3QuaquaStates : StateMachineBuilder
             .ActivateOnEnter<ElementalImpact>()
             .ActivateOnEnter<FlowingLance>()
             .ActivateOnEnter<ScaldingWavesWide>()
-            .ActivateOnEnter<ScaldingWaves>();
+            .ActivateOnEnter<ScaldingWaves>()
+            // BossmodReborn's components for what this module was never written for (see V031Quaqua.cs)
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V031Quaqua.ArcaneIntervention>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V031Quaqua.ArcanePursuit>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V031Quaqua.ArcaneArmamentsPoison>();
     }
 }
 

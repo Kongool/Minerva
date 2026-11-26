@@ -490,7 +490,10 @@ sealed class V3LalaStates : StateMachineBuilder
             .ActivateOnEnter<RollingSpout>()
             .ActivateOnEnter<ForcedMarch>()
             .ActivateOnEnter<InfernoTheorem>()
-            .ActivateOnEnter<FlailSmash>();
+            .ActivateOnEnter<FlailSmash>()
+            // BossmodReborn's components for what this module was never written for (see V033TheLala.cs)
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V033TheLala.AeroII>()
+            .ActivateOnEnter<Minerva.Endwalker.VariantCriterion.V03Aloalo.V033TheLala.VolcanicCoordinates>();
     }
 }
 
