@@ -87,6 +87,18 @@ public abstract class PTTrash : ZoneModule
     /// <summary>How long Smoldering Scales' spikes are trusted to last if their status is never seen to go.</summary>
     private const double SpikesSeconds = 10d;
 
+    // Invoked Dahak (floors 93-95) swings its tail at whoever is behind it: Tail Drive (44507), no cast bar, a 30y cone
+    // on the sheet. Korha's recording 2026-11-26 18:26: 6.4s into the pull Saar, 13.0y from it and 178 degrees off its
+    // facing, took about 638,000 and died; the three toons in front were not touched. The sheet's cone is 90 degrees,
+    // as it is for Lithic Breath, which Splatoon measures at 120: the wider is drawn. The community script draws 10.5y,
+    // which the 13y hit rules out, so the sheet's reach from the mob's edge (3.5y) stands.
+    // It was pulled by Korha from 23y and ran at him straight past Saar, who had gone to meet it: 2.3y in front of it
+    // at 5.0s, 4.1y behind at 5.4s, and no walk leaves a cone whose point is running away at 8y a second. So the cone
+    // is also drawn from the toon it is running at, back along its way, until it has arrived.
+    private const uint InvokedDahak = 0x49A6;
+    private const float TailDriveArrived = 5f;
+    private static readonly AOEShapeCone TailDrive = new(33.5f, 60f.Degrees());
+
     private static readonly IReadOnlyDictionary<uint, CastCorrections.Entry> Table = new Dictionary<uint, CastCorrections.Entry>
     {
         // The cast's own rotation already points at the side it hits: the mob turns to its target and the cast faces
@@ -217,6 +229,21 @@ public abstract class PTTrash : ZoneModule
         this.casts.AddForbiddenZones(hints);
         this.sight.AddForbiddenZones(player, hints);
         this.AddPassionsHeat(player, hints);
+
+        // Tail Drive has no cast: behind a Dahak that is fighting is never somewhere to stand. Nor is the lane between
+        // it and the toon it is running at: it stops in front of that toon, and everything it ran past is then behind it.
+        foreach (var a in World.Actors)
+        {
+            if (a.OID != InvokedDahak || !a.InCombat || a.IsDeadOrDestroyed)
+                continue;
+            hints.AddForbiddenZone(TailDrive, a.Position, a.Rotation + 180f.Degrees());
+            if (a.TargetID != player.InstanceID && World.Actors.Find(a.TargetID) is { IsDeadOrDestroyed: false } target)
+            {
+                var back = a.Position - target.Position;
+                if (back.LengthSq() > TailDriveArrived * TailDriveArrived)
+                    hints.AddForbiddenZone(TailDrive, target.Position, Angle.FromDirection(back));
+            }
+        }
 
         // Spikes hurt whoever hits the mob: leave it alone while they are up, by the status or, if that is never seen,
         // for as long as they are known to last.
