@@ -334,22 +334,28 @@ public sealed class ArenaBoundsCircle(float radius) : ArenaBounds(radius)
 public sealed class ArenaBoundsSquare(float halfWidth, Angle rotation = default, float mapResolution = 0.5f, bool allowObstacleMap = false) : ArenaBounds(halfWidth, halfWidth * 1.41421356f)
 {
     public readonly float HalfWidth = halfWidth;
+    public readonly Angle Rotation = rotation;
+
+    // The square's own axes. The rotation was taken and dropped until 2026-11-26, so a diamond was an upright square:
+    // its corners were wall and the ground past the middle of each edge was floor. Malacoda (Pilgrim's Traverse 90)
+    // stands on the middle of an edge for Skinflayer, and three toons dodged a Hot Iron to 2-4y behind it, outside.
+    private readonly WDir axisZ = rotation.ToDirection();
+    private readonly WDir axisX = rotation.ToDirection().OrthoL();
 
     public override bool Contains(WPos center, WPos point)
-        => MathF.Abs(point.X - center.X) <= this.HalfWidth && MathF.Abs(point.Z - center.Z) <= this.HalfWidth;
+    {
+        var d = point - center;
+        return MathF.Abs(d.Dot(this.axisX)) <= this.HalfWidth && MathF.Abs(d.Dot(this.axisZ)) <= this.HalfWidth;
+    }
 
-    public override ArenaBounds Inset(float margin) => new ArenaBoundsSquare(MathF.Max(this.HalfWidth - margin, 0f)) { MapResolution = this.MapResolution };
+    public override ArenaBounds Inset(float margin)
+        => new ArenaBoundsSquare(MathF.Max(this.HalfWidth - margin, 0f), this.Rotation) { MapResolution = this.MapResolution };
 
     public override IReadOnlyList<WPos> Contour(WPos center)
     {
-        var h = this.HalfWidth;
-        return
-        [
-            new(center.X - h, center.Z - h),
-            new(center.X + h, center.Z - h),
-            new(center.X + h, center.Z + h),
-            new(center.X - h, center.Z + h),
-        ];
+        var x = this.axisX * this.HalfWidth;
+        var z = this.axisZ * this.HalfWidth;
+        return [center - x - z, center + x - z, center + x + z, center - x + z];
     }
 }
 

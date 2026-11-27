@@ -2447,6 +2447,13 @@ t.Section("A barrier floor is dodged from two yalms in");
 
     var c = new WPos(238f, 352f);
     t.True("a square shrinks on every side", new ArenaBoundsSquare(20f).Inset(2f) is ArenaBoundsSquare { HalfWidth: 18f });
+    // Malacoda's floor: a 20y square turned 45 degrees, the boss on the middle of an edge at (14.1, 14.1)
+    var diamond = new ArenaBoundsSquare(20f, 45f.Degrees());
+    t.True("a turned square ends at its edge, not at the upright square's corner", !diamond.Contains(c, c + new WDir(12.5f, 18.7f)));
+    t.True("and reaches its own corner", diamond.Contains(c, c + new WDir(27f, 0f)) && !new ArenaBoundsSquare(20f).Contains(c, c + new WDir(27f, 0f)));
+    t.True("its outline is the diamond", diamond.Contour(c).All(p => MathF.Abs((p - c).Length() - 28.2843f) < 0.01f && MathF.Min(MathF.Abs(p.X - c.X), MathF.Abs(p.Z - c.Z)) < 0.01f));
+    t.True("shrinking keeps the turn", diamond.Inset(2f) is ArenaBoundsSquare { HalfWidth: 18f } inner && !inner.Contains(c, c + new WDir(13.5f, 13.5f)) && inner.Contains(c, c + new WDir(12f, 12f)));
+    t.True("an upright square is unchanged", new ArenaBoundsSquare(20f).Contour(c) is [var p0, _, var p2, _] && p0 == new WPos(c.X - 20f, c.Z - 20f) && p2 == new WPos(c.X + 20f, c.Z + 20f));
     t.Near("a circle by its radius", new ArenaBoundsCircle(24f).Inset(2f).Radius, 22f);
     var custom = new ArenaBoundsCustom([new Polygon(c, 24.5f, 32)], [new Rectangle(c + new WDir(0f, 10f), 2f, 2f)]);
     var shrunk = custom.Inset(2f);
