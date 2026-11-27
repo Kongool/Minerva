@@ -27,6 +27,7 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
     protected bool aetherdrainActive;
     protected float hpDifference;
     protected uint griefHP, eaterHP;
+    private const float ObstacleClearYalms = 1f;
     protected const string either = "Get light or dark buff!";
     protected const string light = "Get light buff!";
     protected const string dark = "Get dark buff!";
@@ -95,6 +96,35 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
                 new PolygonCustom(dark4), new PolygonCustom(dark5)]);
         _aoes.Add(new(shapeDark, center, color: Colors.FutureVulnerable, risky: false, shapeDistance: shapeDark.InvertedDistance(center, default)));
         _sdfs.Add(shapeDark.Distance(center, default));
+        foreach (var pool in (WPos[][])[light1, light2, light3, light4, light5])
+            lightPools.Add(OnePool(pool));
+        foreach (var pool in (WPos[][])[dark1, dark2, dark3, dark4, dark5])
+            darkPools.Add(OnePool(pool));
+
+        (WPos, ShapeDistance) OnePool(WPos[] outline)
+        {
+            var sum = default(WDir);
+            foreach (var p in outline)
+                sum += p - center;
+            return (center + (sum / outline.Length), new AOEShapeCustom(center, [new PolygonCustom(outline)]).InvertedDistance(center, default));
+        }
+    }
+
+    // Each pool by itself, with its middle. During Drain Aether the wanted colour is asked for as the pool nearest the
+    // toon: "stand in any of the five" has no clock (a walk that starts outside them all is leaving danger wherever it
+    // goes), and the solve took the pool nearest the boss. Replaying Korha's 2026-11-26 pull with the trap above
+    // fixed, the toon left the dark pool for a light one 26y off, through another on the way, and reached it 0.5s
+    // before the hit.
+    private readonly List<(WPos Middle, ShapeDistance Outside)> lightPools = [];
+    private readonly List<(WPos Middle, ShapeDistance Outside)> darkPools = [];
+
+    private static ShapeDistance Nearest(List<(WPos Middle, ShapeDistance Outside)> pools, WPos at)
+    {
+        var best = 0;
+        for (var i = 1; i < pools.Count; ++i)
+            if ((pools[i].Middle - at).LengthSq() < (pools[best].Middle - at).LengthSq())
+                best = i;
+        return pools[best].Outside;
     }
 
     protected void UpdateStatus(ref BitMask mask, Actor actor, DateTime value)
@@ -131,6 +161,8 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
         ref var aoeDark = ref aoes[1];
         aoeDark.Risky = false;
         aoeLight.Risky = false;
+        var anyLight = aoeLight.ShapeDistance;
+        var anyDark = aoeDark.ShapeDistance;
         if (!aetherdrainActive)
         {
             if (eaterHP <= 1u && !lightBuff[slot])
@@ -157,22 +189,32 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
         {
             if (wantLight[0])
             {
-                UpdateAOE(ref aoeLight, _sdfs[1], lightBuff);
+                UpdateAOE(ref aoeLight, _sdfs[1], lightBuff, lightPools);
             }
             else
             {
-                UpdateAOE(ref aoeDark, _sdfs[0], darkBuff);
+                UpdateAOE(ref aoeDark, _sdfs[0], darkBuff, darkPools);
             }
         }
         base.AddAIHints(slot, actor, assignment, hints);
-        void UpdateAOE(ref AOEInstance aoeWant, ShapeDistance aoeAvoid, BitMask mask)
+        aoeLight.ShapeDistance = anyLight;
+        aoeDark.ShapeDistance = anyDark;
+        void UpdateAOE(ref AOEInstance aoeWant, ShapeDistance aoeAvoid, BitMask mask, List<(WPos Middle, ShapeDistance Outside)> pools)
         {
             if (!mask[slot] || expirations[slot] < aoeWant.Activation)
             {
                 aoeWant.Risky = true;
                 aoeWant.Activation = activations[0];
+                if (pools.Count != 0)
+                    aoeWant.ShapeDistance = Nearest(pools, actor.Position);
             }
-            hints.TemporaryObstacles.Add(aoeAvoid);
+            // The other colour is solid ground to keep the walk off it, but not for a toon standing in it: a solve that
+            // starts inside an obstacle has no way out. Korha, 2026-11-26 (first recording of the fight): in a light pool
+            // when Drain Aether began, he stood there two seconds and reached the dark pool 0.2s after the hit; then, in
+            // that dark pool with light wanted, he stood five seconds with the target flickering inside it and was hit
+            // again. Solid again once the toon is a yalm clear.
+            if (aoeAvoid.Distance(actor.Position) > ObstacleClearYalms)
+                hints.TemporaryObstacles.Add(aoeAvoid);
         }
     }
 }
