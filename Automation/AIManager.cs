@@ -72,6 +72,7 @@ public sealed class AIManager
     private readonly StuckWalk stuckWalk = new();
     private readonly StuckDodge stuckDodge = new();
     private readonly MeshWalk meshWalk = new();          // the mesh's way round walls, for walks not dodging anything
+    private readonly MeshEscape meshEscape = new();      // the mesh's way out of danger, where no boss module shapes the floor
     private readonly QuestBattle.IQuestNavigation? mesh; // the navmesh's pathfinder, null when not installed
 
     public SafeSpot Current { get; private set; } = SafeSpot.Stay;
@@ -354,6 +355,22 @@ public sealed class AIManager
         // steering is opt-in and only meaningful with a real controller installed
         var steering = this.config.AutoDodgeEnabled && this.Current.NeedToMove && this.Current.Found;
 
+        // Where no boss module shapes the floor, the navmesh is asked for the way out of danger (MeshEscape): the solve's
+        // nearest safe spot may be behind a wall or down a dead end, and on the ground it knows it may have found none.
+        IReadOnlyList<Vector3>? escape = null;
+        if (this.config.AutoDodgeEnabled && this.Current.NeedToMove && this.modules.ActiveModule == null && this.mesh != null
+            && this.movement is MovementController { UsingNavmesh: true }
+            && this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin))
+        {
+            escape = this.meshEscape.Route(this.hints, pc.PosRot.XYZ(), this.Current.Found ? this.Current.Target : null, now, now.AddSeconds(horizon + lead),
+                margin, moveSpeed, this.mesh.Pathfind);
+            if (this.meshEscape.Verdict is { } verdict)
+                Service.Log.Information($"Minerva: {pc.Name} at ({pc.Position.X:0.0},{pc.Position.Z:0.0}): {verdict}.");
+            steering |= escape != null;
+        }
+        else
+            this.meshEscape.Reset();
+
         // Stunned, asleep, bound or petrified: the game ignores movement input, so a steer is a lie the
         // whole way down -- the mover reports it is driving and the character does not move (Orthos,
         // 2026-09-06). Say so instead, and leave the facing alone: a gaze still resolves while stunned.
@@ -479,8 +496,11 @@ public sealed class AIManager
         // will not move is more likely held by the fight (Ogbunabali's sand) than by a wall. Trash and the open world
         // have rooms and rocks the solve knows nothing of.
         if (this.stuckDodge.Observe(steering && this.movement.Busy && this.modules.ActiveModule == null && reason is DodgeReason.Danger or DodgeReason.Clearing,
-                pc.Position, this.Current.Steer, now))
+                pc.Position, escape != null ? new WPos(escape[0].X, escape[0].Z) : this.Current.Steer, now))
+        {
+            this.meshEscape.Replan(); // a mesh route that met something: ask again from here
             Service.Log.Information($"Minerva: the dodge to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckDodge.NoProgressSeconds}s at ({pc.Position.X:0.0},{pc.Position.Z:0.0}); that heading is blocked for {StuckDodge.BlockSeconds}s ({this.stuckDodge.Count} blocked).");
+        }
 
         if (this.stuckWalk.Observe(steering && this.movement is not NullMovementController, pc.Position, now))
         {
@@ -495,7 +515,9 @@ public sealed class AIManager
                 Service.Log.Information($"Minerva: the walk to ({this.Current.Target.X:0.0},{this.Current.Target.Z:0.0}) has not moved {pc.Name} for {StuckWalk.NoProgressSeconds}s; uptime walks stand down for {StuckWalk.StandDownSeconds}s so the rotation can cast.");
         }
 
-        if (steering && meshRoute != null)
+        if (steering && escape != null)
+            this.movement.Travel(escape);
+        else if (steering && meshRoute != null)
             this.movement.Travel(meshRoute);
         else if (steering)
             // Steer is where to head this frame (used when we drive directly); Route is the whole path,
@@ -527,10 +549,25 @@ public sealed class AIManager
         // Out of ground that fires before walking can clear it: ask the rotation plugin for Sprint (DodgeSprint).
         var dodging = steering && this.hints.InImminentDanger(pc.Position, now.AddSeconds(horizon + lead), margin);
         this.WantSprint = DodgeSprint.Holds(
-            dodging && DodgeSprint.Wanted(DodgeSprint.EscapeDistance(pc.Position, this.Current), this.hints.SecondsUntilDangerAt(pc.Position, now, margin), moveSpeed),
+            dodging && DodgeSprint.Wanted(escape != null ? RouteLength(pc.Position, escape) : DodgeSprint.EscapeDistance(pc.Position, this.Current), this.hints.SecondsUntilDangerAt(pc.Position, now, margin), moveSpeed),
             dodging, now, ref this.sprintAskedUntil);
 
-        this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target, reason, blocker, steering));
+        if (escape != null)
+            this.Publish(this.Decide(true, true, new WPos(escape[^1].X, escape[^1].Z), DodgeReason.Danger, blocker, steering));
+        else
+            this.Publish(this.Decide(this.Current.NeedToMove, this.Current.Found, this.Current.Target, reason, blocker, steering));
+    }
+
+    private static float RouteLength(WPos from, IReadOnlyList<Vector3> route)
+    {
+        var total = 0f;
+        foreach (var p in route)
+        {
+            var q = new WPos(p.X, p.Z);
+            total += (q - from).Length();
+            from = q;
+        }
+        return total;
     }
 
     /// <summary>

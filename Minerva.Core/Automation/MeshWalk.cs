@@ -149,7 +149,7 @@ public sealed class MeshWalk
 
     // the waypoints from the end of the leg nearest the character (a leg from where the route was asked to its first
     // waypoint included); at a corner the later leg wins, so the corner reached is dropped
-    private static List<Vector3> Ahead(WPos start, List<Vector3> route, WPos at, out float off)
+    internal static List<Vector3> Ahead(WPos start, List<Vector3> route, WPos at, out float off)
     {
         var from = start;
         var leg = 0;

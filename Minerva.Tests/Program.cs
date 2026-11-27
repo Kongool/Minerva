@@ -7524,6 +7524,84 @@ t.Section("A walk that is not a dodge goes round a wall the way the navmesh does
     t.True("and so does leaving the arena", !MeshWalk.Clear(far, from2, east, t0, 0.5f, 6f));
 }
 
+// Pilgrim's Traverse 91-94, 2026-11-26: toons ran from an 18y circle into dead ends. A made-up room: the toon 10y east
+// of the caster, a wall to the east (the way round is long), an alcove to the north that ends inside the circle, open
+// floor to the south.
+t.Section("A dodge with no boss module asks the navmesh for the way out");
+{
+    var t0 = new DateTime(2026, 11, 26, 18, 0, 0, DateTimeKind.Utc);
+    var toon = new Vector3(10f, 5f, 0f);
+    var at = new WPos(10f, 0f);
+    AIHints Room()
+    {
+        var h = new AIHints { Center = at, Bounds = new ArenaBoundsCircle(30f) };
+        h.AddForbiddenZone(new AOEShapeCircle(18f), new WPos(0f, 0f), default, t0.AddSeconds(5));
+        return h;
+    }
+    var asks = 0;
+    Task<List<Vector3>>? Walls(Vector3 from, Vector3 to)
+    {
+        ++asks;
+        if (to.Z > 6f)
+            return Task.FromResult(new List<Vector3> { from, new(12f, 5f, 8f) }); // the alcove: the mesh stops short
+        if (to.X > 14f && MathF.Abs(to.Z) < 6f)
+            return Task.FromResult(new List<Vector3> { from, new(13f, 5f, from.Z), new(13f, 5f, -9f), new(to.X, 5f, -9f), to }); // round the wall
+        return Task.FromResult(new List<Vector3> { from, to });
+    }
+    Task<List<Vector3>>? Open(Vector3 from, Vector3 to) { ++asks; return Task.FromResult(new List<Vector3> { from, to }); }
+    var deadline = t0.AddSeconds(10);
+    var east = new WPos(19.5f, 0f); // the solve's nearest safe spot: straight through the wall
+
+    var e = new MeshEscape();
+    var h1 = Room();
+    var stood = new KnownGround();
+    stood.Observe(at);
+    h1.WalkableGround = stood;
+    var route = e.Route(h1, toon, east, t0, deadline, 0.5f, 6f, Walls);
+    t.True($"the way out is south, not through the wall or up the alcove ({route?[^1]})", route is { Count: 1 } && route[^1].Z < -10f && route[^1].X > 15f && e.Walking);
+    t.True("it ends out of the circle's reach", route != null && (new WPos(route[^1].X, route[^1].Z) - new WPos(0f, 0f)).Length() > 18.5f);
+    t.True($"the solve's spot and one spot each way were asked for ({asks})", asks == 13 && e.Asked == 1);
+    t.True("ground nobody has stood on did not rule the spots out, and is put back", h1.WalkableGround == stood);
+    t.True($"it says so once ({e.Verdict})", e.Verdict != null && e.Verdict.Contains("27.5y walk for 9.5y"));
+    var mid = (toon + route![^1]) / 2;
+    var next = e.Route(h1, mid, east, t0.AddSeconds(1), deadline, 0.5f, 6f, Walls);
+    t.True("and keeps to it without asking again", next is { Count: 1 } && next[0] == route[^1] && asks == 13 && e.Verdict == null);
+    e.Route(h1, new Vector3(4f, 5f, -4f), east, t0.AddSeconds(1.5), deadline, 0.5f, 6f, Walls);
+    t.True("knocked off it, it asks again from where it stands", e.Asked == 2);
+
+    var none = new MeshEscape();
+    var found = none.Route(Room(), toon, null, t0, deadline, 0.5f, 6f, Walls);
+    t.True("where the solve found no spot at all the mesh still has one", found is { Count: 1 } && found[^1].Z < -10f);
+
+    var open = new MeshEscape();
+    t.True("in an open room the solve's spot is the mesh's too, and the solve steers", open.Route(Room(), toon, east, t0, deadline, 0.5f, 6f, Open) == null && !open.Walking);
+    asks = 0;
+    open.Route(Room(), toon, east, t0.AddSeconds(0.1), deadline, 0.5f, 6f, Open);
+    t.True("that is settled once for the dodge", asks == 0);
+    open.Reset();
+    open.Route(Room(), toon, east, t0.AddSeconds(3), deadline, 0.5f, 6f, Open);
+    t.True("the next dodge asks afresh", asks == 13);
+
+    var slow = new MeshEscape();
+    var pending = new List<TaskCompletionSource<List<Vector3>>>();
+    Task<List<Vector3>>? Later(Vector3 from, Vector3 to) { var c = new TaskCompletionSource<List<Vector3>>(); pending.Add(c); return c.Task; }
+    t.True("while the mesh is thinking the solve steers", slow.Route(Room(), toon, east, t0, deadline, 0.5f, 6f, Later) == null && pending.Count == 13);
+    pending[6].SetResult([toon, new(16.5f, 5f, -11.3f)]);
+    t.True("one answer is not waited on alone", slow.Route(Room(), toon, east, t0.AddSeconds(0.1), deadline, 0.5f, 6f, Later) == null);
+    t.True("but after a quarter second the answers that came are used", slow.Route(Room(), toon, east, t0.AddSeconds(0.3), deadline, 0.5f, 6f, Later) is { Count: 1 });
+
+    var dead = new MeshEscape();
+    Task<List<Vector3>>? Nowhere(Vector3 from, Vector3 to) => Task.FromResult(new List<Vector3> { from, new(12f, 5f, 8f) });
+    t.True("a mesh with no way out leaves the steer to the solve and says so", dead.Route(Room(), toon, east, t0, deadline, 0.5f, 6f, Nowhere) == null && dead.Verdict != null);
+    var off = new MeshEscape();
+    t.True("with no mesh to ask, the solve", off.Route(Room(), toon, east, t0, deadline, 0.5f, 6f, (_, _) => null) == null && off.Verdict == null);
+
+    var upstairs = new MeshEscape();
+    Task<List<Vector3>>? Up(Vector3 from, Vector3 to) => Task.FromResult(new List<Vector3> { from, new(to.X, to.Z < -10f ? 20f : 5f, to.Z) });
+    var level = upstairs.Route(Room(), toon, null, t0, deadline, 0.5f, 6f, Up);
+    t.True("a route that ends on another floor is not a way out", level != null && level[^1].Y == 5f && level[^1].Z >= -10f);
+}
+
 // Saar, Occult Crescent 2026-11-19 (Demi-Medusa): a walk to a flank spot, then on to the rear spot 3.6y away -- inside
 // ReplanYalms, so the flank walk's route was kept. Its end, the flank spot, lay behind once the walk was past it, read as a
 // bend, and walked the character back to it: back and forth on the spot for 17 seconds, out of melee for the second half.
