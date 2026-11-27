@@ -84,7 +84,9 @@ sealed class ScourgingBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (Lanes.Up(World.CurrentTime))
+        // The spot stands unless this toon's buff is about to run out, or something else lands on the spot: a Ball of
+        // Fire baited there killed Korha standing on it (2026-11-26 22:54). Then the single blasts are dodged instead.
+        if (Lanes.Up(World.CurrentTime) && !Lanes.SpotTaken(hints, World.CurrentTime) && !(Module.FindComponent<LightAndDark>() is { } pools && pools.MustRefresh(slot)))
             Lanes.AddHints(hints);
         else
             base.AddAIHints(slot, actor, assignment, hints);

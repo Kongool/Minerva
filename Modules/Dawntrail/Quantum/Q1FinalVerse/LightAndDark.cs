@@ -17,7 +17,24 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
 
     // From the towers appearing to their resolve Bounds of Sin has its own places to stand (out or in, the pairs, a
     // tower each); the split's "take your colour" zone left no ground beside them and the toon stood still.
-    protected override bool ColourOnHold => boundsOfSinTowers || Module.FindComponent<ScourgingBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime);
+    // From the Bounds of Sin cast to its towers everyone wants light: a tower soaked without it gives the whole party
+    // a stack of Damage Down (two dark soakers, two stacks on all four, three pulls running, 2026-11-26), and light
+    // taken at the cast is also a fresh sixty seconds for the half minute in which no pool can be reached. Once the
+    // pull has landed the order stands down: the toon has a place to be (in or out, its pair spot, its tower), and a
+    // walk to a pool outside while the pillars close would leave it there for the donut. The tower step has its own
+    // way by a light pool.
+    private bool boundsWindow, pulled;
+
+    protected override bool? ForcedLight => boundsWindow ? true : null;
+
+    protected override bool ColourOnHold => boundsWindow && pulled
+        || Module.FindComponent<ScourgingBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime);
+
+    public override void OnEventCast(Actor caster, ActorCastEvent spell)
+    {
+        if (spell.Action.ID == (uint)AID.BoundsOfSinPull)
+            pulled = true;
+    }
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(Aoes);
 
@@ -36,6 +53,10 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
                 break;
             case (uint)AID.DrainAether4:
                 UpdateWantedStatus(1, true);
+                break;
+            case (uint)AID.BoundsOfSinPull:
+                boundsWindow = true;
+                pulled = false;
                 break;
         }
 
@@ -64,12 +85,12 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
     {
         switch (status.ID)
         {
-            // a recording carries no expiry, and UpdateStatus reads "no time" as the buff being lost
+            // a recording carries no expiry, and UpdateStatus reads "no time" as the buff being lost; here it lasts 60s
             case (uint)SID.LightVengeance:
-                UpdateStatus(ref lightBuff, actor, status.ExpireAt == default ? DateTime.MaxValue : status.ExpireAt);
+                UpdateStatus(ref lightBuff, actor, status.ExpireAt == default ? World.FutureTime(60d) : status.ExpireAt);
                 break;
             case (uint)SID.DarkVengeance:
-                UpdateStatus(ref darkBuff, actor, status.ExpireAt == default ? DateTime.MaxValue : status.ExpireAt);
+                UpdateStatus(ref darkBuff, actor, status.ExpireAt == default ? World.FutureTime(60d) : status.ExpireAt);
                 break;
         }
     }
@@ -181,6 +202,8 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
         }
 
         base.AddAIHints(slot, actor, assignment, hints);
+        if (boundsWindow)
+            KeepOffDark(actor, hints);
     }
 
     public override void OnMapEffect(byte index, uint state)
@@ -194,6 +217,8 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
                     break;
                 case 0x00080004u:
                     boundsOfSinTowers = false;
+                    boundsWindow = false;
+                    pulled = false;
                     break;
             }
         }
@@ -218,6 +243,8 @@ sealed class LightDarkNeutralize(ModuleBase module) : Components.GenericStackSpr
     // paired with a light one (BoundsOfSinTowers keeps the marks) and each pair is given its own spot.
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
+        if (Module.FindComponent<LightAndDark>() is { } pools && pools.MustRefresh(slot))
+            return;
         if (Module.FindComponent<BoundsOfSinTowers>() is { Pairing: true } marks && marks.PairSpot(actor) is { } spot)
             hints.AddForbiddenZone(new SDInvertedCircle(spot, 1f), marks.PairsResolve);
     }
@@ -250,6 +277,9 @@ sealed class BoundsOfSinTowers(ModuleBase module) : Components.GenericTowers(mod
     public DateTime PairsResolve;
 
     public bool Pairing => PairsResolve != default && World.CurrentTime <= PairsResolve.AddSeconds(0.3d);
+
+    /// <summary>The pairs have resolved and the towers have not: each marked toon is on its way to its tower.</summary>
+    public bool AfterPairs => PairsResolve != default && !Pairing && Towers.Count != 0 && World.CurrentTime <= PairsResolve.AddSeconds(8d);
 
     public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
     {
@@ -292,6 +322,9 @@ sealed class BoundsOfSinTowers(ModuleBase module) : Components.GenericTowers(mod
     {
         if (Towers.Count == 0 || Pairing)
             return;
+        var buffs = Module.FindComponent<LightAndDark>();
+        if (buffs != null && buffs.MustRefresh(slot))
+            return;
         var activation = Towers[0].Activation;
         WDir offset;
         if (MarkOf(actor) is { Pair: <= 1 } mark)
@@ -311,7 +344,7 @@ sealed class BoundsOfSinTowers(ModuleBase module) : Components.GenericTowers(mod
         var tower = Center + offset;
         // BMR's own text hint wants light for the towers. A toon without it goes by way of a light pool while the walk
         // pool-then-tower still fits before the towers resolve, and straight to its tower otherwise.
-        if (Module.FindComponent<LightAndDark>() is { } pools && !pools.HoldsLight(slot) && pools.LightPoolOnTheWay(actor.Position, tower) is { } pool)
+        if (buffs is { } pools && !pools.HoldsLight(slot) && pools.LightPoolOnTheWay(actor.Position, tower) is { } pool)
         {
             var walk = ((pool.Middle - actor.Position).Length() + (tower - pool.Middle).Length()) / WalkSpeed;
             if ((activation - World.CurrentTime).TotalSeconds > walk + 1.5d)

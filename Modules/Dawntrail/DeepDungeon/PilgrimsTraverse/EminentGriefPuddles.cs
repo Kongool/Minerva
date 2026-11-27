@@ -273,6 +273,28 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
     /// <summary>The split's colour order stands down while this is true: a mechanic with its own places to stand.</summary>
     protected virtual bool ColourOnHold => false;
 
+    /// <summary>A mechanic that wants one colour on everyone: true light, false dark, null the split.</summary>
+    protected virtual bool? ForcedLight => null;
+
+    // The buff's own timer. At Quantum 40 it lasts 60s, and a toon whose buff runs out gains Hysteria (296) and runs
+    // off the floor: Xia 2026-11-26 22:37 and 22:55, Rosa 22:54, each dead 2.6-4s after the buff ended, each during a
+    // stretch where the colour order was standing down. So the colour held is taken again from a pool when little time
+    // is left, and at the last moment even through a hold: the components that place toons ask MustRefresh and yield.
+    private const double RefreshSeconds = 20d, LastMomentSeconds = 8d;
+
+    /// <summary>Seconds left on the buff under which it is taken again.</summary>
+    protected virtual double RefreshBelow => ColourOnHold ? LastMomentSeconds : RefreshSeconds;
+
+    public bool MustRefresh(int slot) => slot >= 0 && slot < expirations.Length && (lightBuff[slot] || darkBuff[slot])
+        && (expirations[slot] - World.CurrentTime).TotalSeconds < RefreshBelow;
+
+    /// <summary>Dark pools as solid ground, for a toon that must stay light and is not standing in one.</summary>
+    public void KeepOffDark(Actor actor, AIHints hints)
+    {
+        if (_sdfs.Count > 1 && ((Pools)_sdfs[1]).Clearance(actor.Position) > ObstacleClearYalms)
+            hints.TemporaryObstacles.Add(_sdfs[1]);
+    }
+
     public bool HoldsLight(int slot) => lightBuff[slot];
 
     /// <summary>The light pool that makes the shortest walk from one point to another by way of a pool.</summary>
@@ -314,7 +336,7 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
             else if (eaterHP > 1u && griefHP > 1u && !ColourOnHold)
             {
                 UpdateSkew();
-                if (WantsLight(actor))
+                if (ForcedLight ?? WantsLight(actor))
                 {
                     if (!lightBuff[slot])
                     {
@@ -325,6 +347,12 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
                 {
                     aoeDark.Risky = true;
                 }
+            }
+            if (MustRefresh(slot))
+            {
+                // the colour held, again: any pool of it
+                aoeLight.Risky = lightBuff[slot];
+                aoeDark.Risky = !lightBuff[slot];
             }
         }
         else
@@ -439,6 +467,22 @@ sealed class ExaflareLanes
     }
 
     public bool Up(DateTime now) => found && from != default && now <= until;
+
+    public WPos Spot => spot;
+
+    /// <summary>
+    /// Is the spot inside (or within a yalm of) a zone some other mechanic has forbidden and that is due within three
+    /// seconds? Not sooner: at Quantum 40 an eight-second Blade of First Light covers the pocket from the fourth
+    /// second of the lines, and leaving then would be weaving through all of them again.
+    /// </summary>
+    public bool SpotTaken(AIHints hints, DateTime now)
+    {
+        var soon = now.AddSeconds(3d);
+        foreach (var zone in hints.ForbiddenZones)
+            if (zone.Activation <= soon && zone.ShapeDistance.Distance(spot) < 1f)
+                return true;
+        return false;
+    }
 
     public void AddHints(AIHints hints) => hints.AddForbiddenZone(new SDInvertedCircle(spot, SpotRadius), from);
 }
