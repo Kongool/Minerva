@@ -232,6 +232,44 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
         }
     }
 
+    // Not BMR, which sends an unbuffed toon to the fuller boss's colour and everyone there once the gap passes 25%, so
+    // the whole party piled onto one boss and seesawed (the Final Verse kill, 2026-11-26: all four dark, then all four
+    // light; the gap ran from -26% to +9% and the Eater waited at 1 HP for 35s). The party is split instead: damage
+    // dealers first, then tanks, then healers, each in id order, take light and dark in turn, so every client gives
+    // the same answer with nothing to configure. When the gap reaches SkewOn percent of Grief's HP everyone takes the
+    // fuller boss's colour until it is back under SkewOff. A colour held is a boss attacked: the other boss stays
+    // forbidden for that toon (the subclasses' priorities), so Daedalus's own Split mode must be off in these duties
+    // or it fights that forbid every frame.
+    private const float SkewOn = 6f, SkewOff = 1.5f;
+    private int skew; // +1: the Eater is the fuller, everyone takes dark; -1: Grief is, everyone takes light
+
+    private void UpdateSkew()
+    {
+        if (skew != 0 && (MathF.Abs(hpDifference) <= SkewOff || (hpDifference > 0f) != (skew > 0)))
+            skew = 0;
+        if (skew == 0 && MathF.Abs(hpDifference) >= SkewOn)
+            skew = hpDifference > 0f ? 1 : -1;
+    }
+
+    private bool WantsLight(Actor actor)
+    {
+        if (skew != 0)
+            return skew < 0;
+        var mine = SplitOrder(actor);
+        var before = 0;
+        var party = Raid.WithoutSlot(true, true, true);
+        for (var i = 0; i < party.Length; ++i)
+        {
+            var p = party[i];
+            var theirs = SplitOrder(p);
+            if (p != actor && (theirs < mine || theirs == mine && p.InstanceID < actor.InstanceID))
+                ++before;
+        }
+        return (before & 1) == 0;
+    }
+
+    private static int SplitOrder(Actor a) => a.Role switch { Role.Tank => 1, Role.Healer => 2, _ => 0 };
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         var aoes = CollectionsMarshal.AsSpan(_aoes);
@@ -251,15 +289,19 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
             {
                 aoeDark.Risky = true;
             }
-            else if (Math.Abs(hpDifference) > 25f || !combined[slot])
+            else if (eaterHP > 1u && griefHP > 1u)
             {
-                if (hpDifference > 0f)
+                UpdateSkew();
+                if (WantsLight(actor))
+                {
+                    if (!lightBuff[slot])
+                    {
+                        aoeLight.Risky = true;
+                    }
+                }
+                else if (!darkBuff[slot])
                 {
                     aoeDark.Risky = true;
-                }
-                else
-                {
-                    aoeLight.Risky = true;
                 }
             }
         }
