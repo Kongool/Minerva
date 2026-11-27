@@ -90,12 +90,12 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
         var center = Center;
         var shapeLight = new AOEShapeCustom(center, [new PolygonCustom(light1), new PolygonCustom(light2), new PolygonCustom(light3),
                 new PolygonCustom(light4), new PolygonCustom(light5)]);
-        _aoes.Add(new(shapeLight, center, color: Colors.Light, risky: false, shapeDistance: shapeLight.InvertedDistance(center, default)));
-        _sdfs.Add(shapeLight.Distance(center, default));
+        _aoes.Add(new(shapeLight, center, color: Colors.Light, risky: false, shapeDistance: new Pools(true, light1, light2, light3, light4, light5)));
+        _sdfs.Add(new Pools(false, light1, light2, light3, light4, light5));
         var shapeDark = new AOEShapeCustom(center, [new PolygonCustom(dark1), new PolygonCustom(dark2), new PolygonCustom(dark3),
                 new PolygonCustom(dark4), new PolygonCustom(dark5)]);
-        _aoes.Add(new(shapeDark, center, color: Colors.FutureVulnerable, risky: false, shapeDistance: shapeDark.InvertedDistance(center, default)));
-        _sdfs.Add(shapeDark.Distance(center, default));
+        _aoes.Add(new(shapeDark, center, color: Colors.FutureVulnerable, risky: false, shapeDistance: new Pools(true, dark1, dark2, dark3, dark4, dark5)));
+        _sdfs.Add(new Pools(false, dark1, dark2, dark3, dark4, dark5));
         foreach (var pool in (WPos[][])[light1, light2, light3, light4, light5])
             lightPools.Add(OnePool(pool));
         foreach (var pool in (WPos[][])[dark1, dark2, dark3, dark4, dark5])
@@ -106,7 +106,7 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
             var sum = default(WDir);
             foreach (var p in outline)
                 sum += p - center;
-            return (center + (sum / outline.Length), new AOEShapeCustom(center, [new PolygonCustom(outline)]).InvertedDistance(center, default));
+            return (center + (sum / outline.Length), new Pools(true, outline));
         }
     }
 
@@ -117,6 +117,84 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
     // before the hit.
     private readonly List<(WPos Middle, ShapeDistance Outside)> lightPools = [];
     private readonly List<(WPos Middle, ShapeDistance Outside)> darkPools = [];
+
+    /// <summary>
+    /// Pools as forbidden ground (or, <paramref name="inverted"/>, everything but the pools), answered yes or no as the
+    /// shape's own check was, but with each pool's box tried first. The shape's check walks all 115 edges of the five
+    /// pools for every point, and "everything but the pools" is asked of nearly every cell of the solve several times:
+    /// on the first pull (2026-11-26) each solve cost about 83ms while a toon lacked a buff, 280ms at worst in Drain
+    /// Aether, and 183 of Korha's 190 dropped frames were this.
+    /// </summary>
+    private sealed class Pools : SDYesNo
+    {
+        private readonly WPos[][] outlines;
+        private readonly (float MinX, float MaxX, float MinZ, float MaxZ)[] boxes;
+        private readonly bool inverted;
+
+        public Pools(bool inverted, params WPos[][] outlines)
+        {
+            this.inverted = inverted;
+            this.outlines = outlines;
+            this.boxes = new (float, float, float, float)[outlines.Length];
+            for (var i = 0; i < outlines.Length; ++i)
+            {
+                float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+                foreach (var v in outlines[i])
+                {
+                    minX = MathF.Min(minX, v.X);
+                    maxX = MathF.Max(maxX, v.X);
+                    minZ = MathF.Min(minZ, v.Z);
+                    maxZ = MathF.Max(maxZ, v.Z);
+                }
+                this.boxes[i] = (minX, maxX, minZ, maxZ);
+            }
+        }
+
+        // A yes or no (SDYesNo), so the solve's own margin is not laid over it: the shape this replaces measured a real
+        // distance to the pool's edge, and at a margin of a yalm the ragged 3-4y pools had next to no ground left in
+        // them (Saar's client runs at 1.0). Standing in a pool means half a yalm inside its edge instead: a mover stops
+        // a little short of where it is sent.
+        public override float Distance(WPos p)
+            => this.inverted ? (this.Clearance(p, true) >= InsideYalms ? 1f : -1f) : (this.Inside(p) ? -1f : 1f);
+
+        public bool Inside(WPos p)
+        {
+            for (var i = 0; i < this.outlines.Length; ++i)
+            {
+                ref readonly var b = ref this.boxes[i];
+                if (p.X < b.MinX || p.X > b.MaxX || p.Z < b.MinZ || p.Z > b.MaxZ)
+                    continue;
+                var o = this.outlines[i];
+                var inside = false;
+                for (int k = 0, j = o.Length - 1; k < o.Length; j = k++)
+                    if ((o[k].Z > p.Z) != (o[j].Z > p.Z) && p.X < ((o[j].X - o[k].X) * (p.Z - o[k].Z) / (o[j].Z - o[k].Z)) + o[k].X)
+                        inside = !inside;
+                if (inside)
+                    return true;
+            }
+            return false;
+        }
+
+        private const float InsideYalms = 0.5f;
+
+        /// <summary>How far outside every pool a point is, in yalms, 0 inside one; or, <paramref name="within"/>, how far
+        /// inside a pool it is, 0 outside them all.</summary>
+        public float Clearance(WPos p, bool within = false)
+        {
+            if (this.Inside(p) != within)
+                return 0f;
+            var best = float.MaxValue;
+            foreach (var o in this.outlines)
+                for (int k = 0, j = o.Length - 1; k < o.Length; j = k++)
+                {
+                    var ab = o[k] - o[j];
+                    var len = ab.LengthSq();
+                    var t = len > 0f ? Math.Clamp((p - o[j]).Dot(ab) / len, 0f, 1f) : 0f;
+                    best = MathF.Min(best, (p - (o[j] + (ab * t))).LengthSq());
+                }
+            return MathF.Sqrt(best);
+        }
+    }
 
     private static ShapeDistance Nearest(List<(WPos Middle, ShapeDistance Outside)> pools, WPos at)
     {
@@ -213,7 +291,7 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
             // when Drain Aether began, he stood there two seconds and reached the dark pool 0.2s after the hit; then, in
             // that dark pool with light wanted, he stood five seconds with the target flickering inside it and was hit
             // again. Solid again once the toon is a yalm clear.
-            if (aoeAvoid.Distance(actor.Position) > ObstacleClearYalms)
+            if (((Pools)aoeAvoid).Clearance(actor.Position) > ObstacleClearYalms)
                 hints.TemporaryObstacles.Add(aoeAvoid);
         }
     }
