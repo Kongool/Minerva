@@ -14,6 +14,7 @@ sealed class ScourgingBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
 {
     private readonly List<(WDir, WPos)> crystals = [];
     private WDir next;
+    public readonly Endwalker.DeepDungeon.PilgrimsTraverse.ExaflareLanes Lanes = new();
     public int Direction;
     private AOEShapeCustom? shape;
     public bool Show;
@@ -51,6 +52,7 @@ sealed class ScourgingBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
                     intersect = (int)Intersect.RayAABB(offset, -dir, 18.1f, 14.1f);
                     maxexplosions = intersect / 4 + 1;
                     Lines.Add(new(loc, -4f * dir, act, 1d, maxexplosions, maxexplosions, rotation: (-dir).ToAngle()));
+                    Lanes.Started(act);
                     if (Lines.Count == 24)
                     {
                         crystals.Clear();
@@ -75,8 +77,17 @@ sealed class ScourgingBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
                     rects[i] = new(c.Item2, 5f, 40f, c.Item1.ToAngle());
                 }
                 shape = new(Center, [new Rectangle(Q1FinalVerse.ArenaCenter, 20f, 15f)], rects);
+                Lanes.Set(crystals, Center);
             }
         }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (Lanes.Up(World.CurrentTime))
+            Lanes.AddHints(hints);
+        else
+            base.AddAIHints(slot, actor, assignment, hints);
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)

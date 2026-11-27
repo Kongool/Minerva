@@ -95,6 +95,8 @@ sealed class LightAndDark(ModuleBase module) : LightAndDarkBase(module)
     private readonly DD99EminentGrief bossmod = (DD99EminentGrief)module;
     private int numPartyMembersHalf;
 
+    protected override bool ColourOnHold => Module.FindComponent<AbyssalBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime);
+
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(Aoes);
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
@@ -490,6 +492,7 @@ sealed class AbyssalBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
     private readonly List<(WDir, WPos)> crystals = [];
     private AOEShapeCustom? shape;
     private WDir next;
+    public readonly Endwalker.DeepDungeon.PilgrimsTraverse.ExaflareLanes Lanes = new();
 
     public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
@@ -514,6 +517,7 @@ sealed class AbyssalBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
                     intersect = (int)Intersect.RayAABB(offset, -dir, 18.1f, 14.1f);
                     maxexplosions = intersect / 4 + 1;
                     Lines.Add(new(loc, -4f * dir, act, 1d, maxexplosions, maxexplosions, rotation: (-dir).ToAngle()));
+                    Lanes.Started(act);
                     if (Lines.Count == 16)
                     {
                         crystals.Clear();
@@ -540,8 +544,17 @@ sealed class AbyssalBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
                 }
                 var center = Center;
                 shape = new(center, [new Rectangle(center, 20f, 15f)], rects);
+                Lanes.Set(crystals, center);
             }
         }
+    }
+
+    public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
+    {
+        if (Lanes.Up(World.CurrentTime))
+            Lanes.AddHints(hints);
+        else
+            base.AddAIHints(slot, actor, assignment, hints);
     }
 
     public override void DrawArenaForeground(int pcSlot, Actor pc)

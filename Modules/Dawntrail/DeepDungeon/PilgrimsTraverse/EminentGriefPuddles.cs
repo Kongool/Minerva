@@ -360,3 +360,85 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
         }
     }
 }
+
+/// <summary>
+/// The lanes of a crystal exaflare field (Abyssal Blaze, Scourging Blaze): each crystal sends a line of blasts both
+/// ways along its direction, so its whole lane is hit sooner or later and only the ground no lane crosses is safe.
+/// <para>Not BMR, which outlines that ground for a human and leaves the dodge to the single blasts. A blast is only
+/// danger within the dodge's few seconds, so the far end of a lane looks safe until the line arrives: Korha walked
+/// into a corner and was boxed in (the Final Verse, 2026-11-26 21:34), and at Quantum 40, with twenty-four lines, he
+/// wove along the edge and took two blasts (22:37). There the free ground is a pocket two yalms wide, too narrow for
+/// "anywhere outside the lanes" (the solve stops at a lane's edge), so the party is sent to one spot: the point
+/// farthest from every blast the lines can make (they step four yalms), and of those the nearest the middle. While
+/// the lanes are up that spot replaces the single blasts for the dodge, and the pool colour order stands down (every
+/// pool lies in a lane). The spot's circle is a yalm, because the solve cannot hit a smaller one, so the spot must be
+/// at least that far from every blast; at Quantum 40 it is 1.08y, and the worst point of the circle 0.1y.</para>
+/// </summary>
+sealed class ExaflareLanes
+{
+    private const float BlastRadius = 5f, StepYalms = 4f, StepSeconds = 1.1f, SpotRadius = 1f, LeastClearance = 1f;
+    private WPos spot;
+    private bool found;
+    private DateTime from, until;
+
+    /// <summary>All crystals are out: find the spot farthest from every blast (a yalm inside the 40 by 30 floor).</summary>
+    public void Set(List<(WDir, WPos)> crystals, WPos center)
+    {
+        var blasts = new List<WPos>();
+        for (var i = 0; i < crystals.Count; ++i)
+        {
+            for (var k = -12; k <= 12; ++k)
+            {
+                var b = crystals[i].Item2 + crystals[i].Item1 * (k * StepYalms);
+                var off = b - center;
+                if (MathF.Abs(off.X) <= 20.5f && MathF.Abs(off.Z) <= 15.5f)
+                    blasts.Add(b);
+            }
+        }
+        found = false;
+        var best = float.MinValue;
+        var bestFromMiddle = float.MaxValue;
+        for (var x = -19f; x <= 19f; x += 0.5f)
+        {
+            for (var z = -14f; z <= 14f; z += 0.5f)
+            {
+                var p = center + new WDir(x, z);
+                if (Clearance(blasts, p) < LeastClearance)
+                    continue;
+                // a toon coming from the middle stops just inside the circle on that side: that is the point to judge
+                var fromMiddle = x * x + z * z;
+                var stop = fromMiddle > 0.01f ? p - new WDir(x, z) * (0.8f * SpotRadius / MathF.Sqrt(fromMiddle)) : p;
+                var clearance = Clearance(blasts, stop);
+                if (clearance > best + 0.01f || clearance > best - 0.01f && fromMiddle < bestFromMiddle)
+                {
+                    best = clearance;
+                    bestFromMiddle = fromMiddle;
+                    spot = p;
+                    found = true;
+                }
+            }
+        }
+    }
+
+    private static float Clearance(List<WPos> blasts, WPos p)
+    {
+        var clearance = float.MaxValue;
+        for (var i = 0; i < blasts.Count; ++i)
+            clearance = MathF.Min(clearance, (p - blasts[i]).Length() - BlastRadius);
+        return clearance;
+    }
+
+    /// <summary>A first blast is being cast, landing at <paramref name="firstBlast"/>.</summary>
+    public void Started(DateTime firstBlast)
+    {
+        if (until < firstBlast)
+            from = firstBlast;
+        var over = firstBlast.AddSeconds(10d * StepSeconds);
+        if (until < over)
+            until = over;
+    }
+
+    public bool Up(DateTime now) => found && from != default && now <= until;
+
+    public void AddHints(AIHints hints) => hints.AddForbiddenZone(new SDInvertedCircle(spot, SpotRadius), from);
+}

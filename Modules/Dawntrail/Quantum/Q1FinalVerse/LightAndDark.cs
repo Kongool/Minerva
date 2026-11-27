@@ -17,7 +17,7 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
 
     // From the towers appearing to their resolve Bounds of Sin has its own places to stand (out or in, the pairs, a
     // tower each); the split's "take your colour" zone left no ground beside them and the toon stood still.
-    protected override bool ColourOnHold => boundsOfSinTowers;
+    protected override bool ColourOnHold => boundsOfSinTowers || Module.FindComponent<ScourgingBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime);
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => CollectionsMarshal.AsSpan(Aoes);
 
