@@ -605,7 +605,7 @@ sealed class AbyssalBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
 }
 
 [SkipLocalsInit]
-sealed class DD99EminentGriefStates : StateMachineBuilder
+class DD99EminentGriefStates : StateMachineBuilder
 {
     public DD99EminentGriefStates(ModuleBase module) : base(module)
     {
@@ -625,7 +625,7 @@ sealed class DD99EminentGriefStates : StateMachineBuilder
 
 [ModuleInfo(Group = ModuleGroup.CFC, GroupID = 1041u, CFCID = 1041u, NameID = 14037u, PrimaryActorOID = (uint)OID.EminentGrief, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
 [SkipLocalsInit]
-public sealed class DD99EminentGrief : ModuleBase // module also works in Final Verse normal, everything but the zone ID seem to be identical
+public class DD99EminentGrief : ModuleBase // module also works in Final Verse normal, everything but the zone ID seem to be identical
 {
     public DD99EminentGrief(WorldState ws, Actor primary) : this(ws, primary, BuildArena()) { }
 
@@ -656,3 +656,13 @@ public sealed class DD99EminentGrief : ModuleBase // module also works in Final 
         Arena.Actors(vodorigas);
     }
 }
+
+// The Final Verse (invoked from the same menu as Pilgrim's Traverse) is this fight under its own duty id, 1065, with
+// a Vodoriga Minion added. Modules are found by duty, so floor 99's alone left it with no module at all: no floor
+// edge, and the cast-bar guess walked all four toons off it (2026-11-26, a wipe in 85s).
+[ModuleInfo(Group = ModuleGroup.CFC, GroupID = 1065u, CFCID = 1065u, NameID = 14037u, PrimaryActorOID = (uint)OID.EminentGrief, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
+[SkipLocalsInit]
+public sealed class FinalVerse(WorldState ws, Actor primary) : DD99EminentGrief(ws, primary);
+
+[SkipLocalsInit]
+sealed class FinalVerseStates(ModuleBase module) : DD99EminentGriefStates(module);
