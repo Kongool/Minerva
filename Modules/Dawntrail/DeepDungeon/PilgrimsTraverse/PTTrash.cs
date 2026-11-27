@@ -66,8 +66,10 @@ public enum AID : uint
     LithicBreath = 44508, // Invoked Dahak: 120 degrees, 40y by Splatoon; the sheet says 90 and 28
     HoneyedLeft = 44357, // Invoked Sawtooth: 180 degrees centred 135 to the mob's left
     HoneyedRight = 44358, // and to its right
-    RightSmite = 44345, // Invoked Gusion: its right half, then its left; the sheet calls it an 80y line
-    LeftSmite = 44347,
+    RightSmite = 44345, // Invoked Gusion: a 20y strip along its right side, then (44348, no cast) its left
+    LeftSmite = 44347, // and the left strip, then (44346) the right
+    RightSmiteSecond = 44346,
+    LeftSmiteSecond = 44348,
     HeavySmash = 44342, // Traverse Warg: 10y by Splatoon, 6 by the sheet
     AuthoritysEdgeRight = 44509, // Invoked Acheron: its right half; the sheet's cone is 90 degrees
     AuthoritysEdgeLeft = 44510,
@@ -133,14 +135,26 @@ public abstract class PTTrash : ZoneModule
         [(uint)AID.LithicBreath] = new(Cone(40f, 60f)),
         [(uint)AID.HoneyedLeft] = new(Cone(30f, 90f)),
         [(uint)AID.HoneyedRight] = new(Cone(30f, 90f)),
-        [(uint)AID.RightSmite] = new(Cone(80f, 90f), new CastCorrections.FollowUp(Cone(80f, 90f, 90f), 2.5d)),
-        [(uint)AID.LeftSmite] = new(Cone(80f, 90f), new CastCorrections.FollowUp(Cone(80f, 90f, -90f), 2.5d)),
+        // The cast is aimed at a point 40y behind the mob and 10y to the side it hits, and the sheet's shape from there
+        // is a line 80y long and 20 wide: a strip from the mob's middle to 20y out on that side. Drawn as half the room
+        // from that point it covered the whole room, so the dodge had nowhere to go and stood. Korha's recording
+        // 2026-11-26 18:43: Left Smite hit Saar (1.1y left of the mob's line) and Korha (on it) for 876k and 523k, both
+        // dead; Rosa, 1.8y right of it, and Xia, 8.9y right, were not touched. The other side followed 3.1s later with
+        // no cast (44346) and hit nobody: its own reach is not measured, so it is drawn as the same strip mirrored.
+        [(uint)AID.RightSmite] = new(_ => SmiteStrip, new CastCorrections.FollowUp(_ => SmiteLeftSide, 3.5d, (uint)AID.LeftSmiteSecond)),
+        [(uint)AID.LeftSmite] = new(_ => SmiteStrip, new CastCorrections.FollowUp(_ => SmiteRightSide, 3.5d, (uint)AID.RightSmiteSecond)),
         [(uint)AID.HeavySmash] = new(Circle(10f)),
         [(uint)AID.AuthoritysEdgeRight] = new(Cone(40f, 90f)),
         [(uint)AID.AuthoritysEdgeLeft] = new(Cone(40f, 90f)),
     };
 
     // a cone or a line starts at a large mob's edge, as in the guess; a circle or a ring is measured from its centre
+    // A toon's own half yalm counts: Korha stood 0.05y on the clear side of the mob's line and was hit, so each strip is
+    // drawn 1.5y over that line.
+    private static readonly AOEShapeRect SmiteStrip = new(80f, 11.5f); // from the cast's own point
+    private static readonly AOEShapeRect SmiteLeftSide = new(20f, 40f, 1.5f, 90f.Degrees()); // from the mob, sideways
+    private static readonly AOEShapeRect SmiteRightSide = new(20f, 40f, 1.5f, -90f.Degrees());
+
     private static Func<Actor, AOEShape> Cone(float radius, float halfAngle, float offset = 0f) => a => new AOEShapeCone(radius + a.HitboxRadius, halfAngle.Degrees(), offset.Degrees());
     private static Func<Actor, AOEShape> Rect(float length, float halfWidth, float offset = 0f) => a => new AOEShapeRect(length + a.HitboxRadius, halfWidth, 0f, offset.Degrees());
     private static Func<Actor, AOEShape> Circle(float radius) => _ => new AOEShapeCircle(radius);
