@@ -61,14 +61,23 @@ sealed class BoundsOfSinEnd(ModuleBase module) : Components.GenericAOEs(module)
 
     public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => _aoe;
 
-    public override void OnCastFinished(Actor caster, ActorCastInfo spell)
+    /// <summary>True when the middle is hit (get out), false when the outside is (stay in), null before the first cast.</summary>
+    public bool? Out;
+
+    // Not BMR, which decides when the first small cast FINISHES and gives the blast six seconds from there. At Quantum 40
+    // it lands 5.9s after that cast STARTS (53.69 after 47.80, 40.05 after 34.16; both wipes of 2026-11-26), 0.1s after
+    // the pillars drop, and the pillars close the middle from 2.7s after the start. So a toon still inside by then takes
+    // the circle whatever it does: the party stood in the middle and three died to it. Decided at the start, from the
+    // cast's own rotation; "get out" is due before the first pillar.
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
     {
         if (_aoe.Length == 0 && spell.Action.ID == (uint)AID.BoundsOfSin)
         {
             var loc = Center.Quantized();
-            var isCircle = (loc - caster.Position).Dot(caster.Rotation.ToDirection()) > 0f;
+            var isCircle = (loc - caster.Position).Dot(spell.Rotation.ToDirection()) > 0f;
+            Out = isCircle;
             AOEShape shape = isCircle ? circle : donut;
-            _aoe = [new(shape, loc, default, World.FutureTime(6d), shapeDistance: shape.Distance(loc, default))]; // true activation is 10.8, but slightly lower values seem to improve the pathfinding here
+            _aoe = [new(shape, loc, default, World.FutureTime(isCircle ? 2.5d : 5.9d), shapeDistance: shape.Distance(loc, default))];
         }
     }
 
