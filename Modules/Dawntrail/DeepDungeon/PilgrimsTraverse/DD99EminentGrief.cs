@@ -657,8 +657,10 @@ public class DD99EminentGrief : ModuleBase // module also works in Final Verse n
     }
 }
 
-// The Final Verse (invoked from the same menu as Pilgrim's Traverse) is this fight under its own duty id, 1065, with
-// a Vodoriga Minion added. Modules are found by duty, so floor 99's alone left it with no module at all: no floor
+// The Final Verse (invoked from the same menu as Pilgrim's Traverse, duty 1065) is a fight of its own: the same two
+// bosses and floor, but its own order, its own variants of the casts (Drain Aether 44088/44093 where floor 99 has
+// 44089/44091) and a Vodoriga Minion. BMR wrote this module for both and it is driven by casts, not by a timeline, so
+// both sets of ids are here. Modules are found by duty, so floor 99's alone left it with no module at all: no floor
 // edge, and the cast-bar guess walked all four toons off it (2026-11-26, a wipe in 85s).
 [ModuleInfo(Group = ModuleGroup.CFC, GroupID = 1065u, CFCID = 1065u, NameID = 14037u, PrimaryActorOID = (uint)OID.EminentGrief, PrimaryActorDeathEndsEncounter = true, Maturity = ModuleMaturity.WIP, Contributors = "The Combat Reborn Team (Malediktus) (ported from BMR)")]
 [SkipLocalsInit]
