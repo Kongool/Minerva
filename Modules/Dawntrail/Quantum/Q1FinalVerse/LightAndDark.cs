@@ -213,6 +213,7 @@ sealed class LightDarkNeutralize(ModuleBase module) : Components.GenericStackSpr
         if (vfxID == 40u)
         {
             ++NumCasts;
+            Stacks.Clear(); // below Quantum 40 no state takes this component down after the stacks resolve
         }
     }
 }
@@ -250,6 +251,7 @@ sealed class BoundsOfSinTowers(ModuleBase module) : Components.GenericTowers(mod
                     break;
                 case 0x00080004u:
                     ++NumCasts;
+                    Towers.Clear(); // below Quantum 40 no state takes this component down after the towers resolve
                     break;
             }
         }

@@ -18,7 +18,9 @@ sealed class ScourgingBlaze(ModuleBase module) : Components.Exaflare(module, 5f)
     private AOEShapeCustom? shape;
     public bool Show;
 
-    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => Show ? Aoes : [];
+    // The base builds the list on demand. BMR returns its base's cached field here; the port returned Minerva's
+    // optional override list, which nothing fills, so these exaflares were never drawn or dodged (found 2026-11-26).
+    public override ReadOnlySpan<AOEInstance> ActiveAOEs(int slot, Actor actor) => Show ? base.ActiveAOEs(slot, actor) : [];
 
     public void ShowAOEs()
     {

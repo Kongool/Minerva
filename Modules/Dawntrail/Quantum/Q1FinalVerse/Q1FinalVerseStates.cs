@@ -94,9 +94,18 @@ sealed class Q1FinalVerseStates : StateMachineBuilder
     //     SimpleState(id + 0xFF0000u, 10000f, "???");
     // }
 
+    // Not BMR, which activates nothing here. Below Quantum 40 no timeline is written, but these components answer to
+    // casts and map effects on their own, so they are simply left on for the whole fight (the exaflares shown from
+    // their casts, each step with its own time). Unplayed: no recording of any Quantum level exists.
     private void SinglePhaseRest(uint id)
     {
-        SimpleState(id + 0xFF0000u, 10000f, "Unsupported quantum level (upload replays!)");
+        SimpleState(id + 0xFF0000u, 10000f, "Unsupported quantum level (upload replays!)")
+            .ActivateOnEnter<ScourgingBlaze>()
+            .ExecOnEnter<ScourgingBlaze>(static comp => comp.ShowAOEs())
+            .ActivateOnEnter<BoundsOfSinTowers>()
+            .ActivateOnEnter<BoundsOfSinSmallAOE>()
+            .ActivateOnEnter<BoundsOfSinEnd>()
+            .ActivateOnEnter<LightDarkNeutralize>();
     }
 
     private void BoundsOfSinScourgingBlaze(uint id, float delay)
