@@ -140,11 +140,12 @@ sealed class LightAndDark(ModuleBase module) : LightAndDarkBase(module)
     {
         switch (status.ID)
         {
+            // a recording carries no expiry, and UpdateStatus reads "no time" as the buff being lost
             case (uint)SID.LightVengeance:
-                UpdateStatus(ref lightBuff, actor, status.ExpireAt);
+                UpdateStatus(ref lightBuff, actor, status.ExpireAt == default ? DateTime.MaxValue : status.ExpireAt);
                 break;
             case (uint)SID.DarkVengeance:
-                UpdateStatus(ref darkBuff, actor, status.ExpireAt);
+                UpdateStatus(ref darkBuff, actor, status.ExpireAt == default ? DateTime.MaxValue : status.ExpireAt);
                 break;
         }
     }

@@ -270,6 +270,28 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
 
     private static int SplitOrder(Actor a) => a.Role switch { Role.Tank => 1, Role.Healer => 2, _ => 0 };
 
+    /// <summary>The split's colour order stands down while this is true: a mechanic with its own places to stand.</summary>
+    protected virtual bool ColourOnHold => false;
+
+    public bool HoldsLight(int slot) => lightBuff[slot];
+
+    /// <summary>The light pool that makes the shortest walk from one point to another by way of a pool.</summary>
+    public (WPos Middle, ShapeDistance Outside)? LightPoolOnTheWay(WPos from, WPos to)
+    {
+        (WPos Middle, ShapeDistance Outside)? best = null;
+        var shortest = float.MaxValue;
+        for (var i = 0; i < lightPools.Count; ++i)
+        {
+            var walk = (lightPools[i].Middle - from).Length() + (to - lightPools[i].Middle).Length();
+            if (walk < shortest)
+            {
+                shortest = walk;
+                best = lightPools[i];
+            }
+        }
+        return best;
+    }
+
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         var aoes = CollectionsMarshal.AsSpan(_aoes);
@@ -289,7 +311,7 @@ abstract class LightAndDarkBase(ModuleBase module) : Components.GenericAOEs(modu
             {
                 aoeDark.Risky = true;
             }
-            else if (eaterHP > 1u && griefHP > 1u)
+            else if (eaterHP > 1u && griefHP > 1u && !ColourOnHold)
             {
                 UpdateSkew();
                 if (WantsLight(actor))
