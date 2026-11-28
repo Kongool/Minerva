@@ -75,43 +75,58 @@ sealed class BallOfFireBait(ModuleBase module) : Components.GenericBaitAway(modu
 }
 
 [SkipLocalsInit]
-// Not BMR: the base stamps its "run from your partner" zone ten seconds ahead every frame, so Minerva's dodge, which
-// only moves for a zone that is due, never breaks the chain. This keeps one time, the crosses' (5.6s after the tether).
 sealed class SearingChain(ModuleBase module) : Components.Chains(module, (uint)TetherID.SearingChains, chainLength: 20f)
 {
-    private readonly Actor?[] _partner = new Actor?[PartyState.MaxSlots];
+    // Not BMR, which has each toon run from its partner and keep out of the other toons' crosses. The crosses move
+    // with the toons, so the four of them kept moving for the whole six seconds, and a healer that is moving does not
+    // shield: Xia cast nothing from the chains to the crosses and she and Rosa died to the burn that follows, while in
+    // the pull where she stood and shielded all four lived (2026-11-28 13:55 and 13:57). Each toon gets a spot at once:
+    // partners over twenty yalms apart, no two spots in one row or column of a cross, none on a pool. Pairs are ordered
+    // by id so every client agrees. The base's zone was also stamped ten seconds ahead every frame, which the dodge
+    // never counts as due; the spot is due when the crosses land (5.6s after the tether).
+    private static readonly WDir[] Spots = [new(-15f, -3.5f), new(15f, 3.5f), new(-6f, 9.5f), new(6f, -9.5f)];
+    private readonly List<(Actor A, Actor B)> pairs = [];
     private DateTime _due;
+
+    public bool Active => pairs.Count != 0 && World.CurrentTime <= _due.AddSeconds(1.5d);
 
     public override void OnTethered(Actor source, in ActorTetherInfo tether)
     {
         base.OnTethered(source, tether);
         if (tether.ID != TID || World.Actors.Find(tether.Target) is not Actor target)
             return;
-        Set(source.InstanceID, target);
-        Set(target.InstanceID, source);
+        if (!Active)
+            pairs.Clear();
+        var pair = source.InstanceID < target.InstanceID ? (source, target) : (target, source);
+        if (!pairs.Contains(pair))
+        {
+            pairs.Add(pair);
+            pairs.Sort(static (a, b) => a.A.InstanceID.CompareTo(b.A.InstanceID));
+        }
         _due = World.FutureTime(5.6d);
     }
 
-    public override void OnUntethered(Actor source, in ActorTetherInfo tether)
+    /// <summary>The toon's spot until the crosses have landed; the chain breaking on the way does not release it.</summary>
+    public WPos? Spot(Actor actor)
     {
-        base.OnUntethered(source, tether);
-        if (tether.ID != TID)
-            return;
-        Set(source.InstanceID, null);
-        Set(tether.Target, null);
-    }
-
-    private void Set(ulong id, Actor? partner)
-    {
-        var slot = Raid.FindSlot(id);
-        if (slot >= 0 && slot < _partner.Length)
-            _partner[slot] = partner;
+        if (!Active)
+            return null;
+        for (var i = 0; i < pairs.Count && i < 2; ++i)
+        {
+            if (pairs[i].A == actor)
+                return Module.Center + Spots[2 * i];
+            if (pairs[i].B == actor)
+                return Module.Center + Spots[2 * i + 1];
+        }
+        return null;
     }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
-        if (slot >= 0 && slot < _partner.Length && _partner[slot] is Actor p)
-            hints.AddForbiddenZone(new SDCircle(p.Position, (p.Position - actor.Position).Length() + 1f), _due);
+        if (Module.FindComponent<LightAndDark>() is { } pools && pools.MustRefresh(slot))
+            return;
+        if (Spot(actor) is { } spot)
+            hints.AddForbiddenZone(new SDInvertedCircle(spot, 1f), _due);
     }
 }
 
@@ -119,18 +134,35 @@ sealed class SearingChain(ModuleBase module) : Components.Chains(module, (uint)T
 sealed class SearingChainCross(ModuleBase module) : Components.GenericBaitAway(module, (uint)AID.SearingChains, centerAtTarget: true)
 {
     private static readonly AOEShapeCross _cross = new(50f, 3f);
+    private DateTime _warned;
+
+    // Not BMR: the mark (icon 97) comes 9.7s before the crosses, the status BMR waits for only 5.7s. Every toon takes
+    // its own cross (74k-102k) and a burn after it, so the earlier the healer knows, the better.
+    public override void OnEventIcon(Actor actor, uint iconID, ulong targetID)
+    {
+        if (iconID == (uint)IconID.SearingChains)
+            _warned = World.FutureTime(9.7d);
+    }
 
     public override void AddAIHints(int slot, Actor actor, PartyRolesConfig.Assignment assignment, AIHints hints)
     {
         if (CurrentBaits.Count == 0)
-            return;
-        var activation = CurrentBaits[0].Activation;
-        var party = Raid.WithoutSlot();
-        for (var i = 0; i < party.Length; ++i)
         {
-            var p = party[i];
-            if (p != actor)
-                hints.AddForbiddenZone(new SDCross(p.Position, default, 50f, 3f), activation);
+            if (_warned > World.CurrentTime)
+                hints.AddPredictedDamage(Raid.WithSlot().Mask(), _warned);
+            return;
+        }
+        var activation = CurrentBaits[0].Activation;
+        // a toon with a spot of its own is clear of the other three by where the spots lie
+        if (Module.FindComponent<SearingChain>()?.Spot(actor) == null)
+        {
+            var party = Raid.WithoutSlot();
+            for (var i = 0; i < party.Length; ++i)
+            {
+                var p = party[i];
+                if (p != actor)
+                    hints.AddForbiddenZone(new SDCross(p.Position, default, 50f, 3f), activation);
+            }
         }
         hints.AddPredictedDamage(Raid.WithSlot().Mask(), activation.AddSeconds(1.1d));
     }

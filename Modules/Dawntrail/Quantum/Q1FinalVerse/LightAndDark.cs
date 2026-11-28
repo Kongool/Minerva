@@ -28,7 +28,8 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
     protected override bool? ForcedLight => boundsWindow ? true : null;
 
     protected override bool ColourOnHold => boundsWindow && pulled
-        || Module.FindComponent<ScourgingBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime);
+        || Module.FindComponent<ScourgingBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime)
+        || Module.FindComponent<SearingChain>() is { Active: true };
 
     public override void OnEventCast(Actor caster, ActorCastEvent spell)
     {
