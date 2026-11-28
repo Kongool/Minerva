@@ -27,6 +27,11 @@ sealed class LightAndDark(ModuleBase module) : Endwalker.DeepDungeon.PilgrimsTra
 
     protected override bool? ForcedLight => boundsWindow ? true : null;
 
+    // Between the Bounds of Sin cast and the pull every buff is taken again, light or not: a toon that had held light
+    // since the pull began was not sent to a pool, its timer ran down during the exaflares, and the last-moment walk
+    // to a pool took Saar through a blast (220k, dead, 2026-11-28 14:17).
+    protected override double RefreshBelow => boundsWindow && !pulled ? 45d : base.RefreshBelow;
+
     protected override bool ColourOnHold => boundsWindow && pulled
         || Module.FindComponent<ScourgingBlaze>() is { } blaze && blaze.Lanes.Up(World.CurrentTime)
         || Module.FindComponent<SearingChain>() is { Active: true };
@@ -277,6 +282,22 @@ sealed class BoundsOfSinTowers(ModuleBase module) : Components.GenericTowers(mod
     private bool outside; // kept here: the in-or-out component is taken down right after its blast
     public DateTime PairsResolve;
 
+    // "Get out" has one way: the pull holds a toon in the middle for 3.1s, the twelve small casts go round the ring in
+    // opposite pairs 0.3s apart and a pillar rises as each ends, so the gaps of the pair that started LAST stay open
+    // longest (until 5.1s after the pull), and every small cast knocks a toon standing in it some twelve yalms outward.
+    // With the pair spots fixed west and east the party got out only when the last pair happened to lie that way
+    // (2026-11-26 22:55); on 2026-11-28 14:16 it lay north and south, Korha and Saar left through another gap, walked
+    // the ring through a small cast and were thrown off the floor. The spots for "out" lie beyond the last pair.
+    private readonly List<WPos> ringCasts = [];
+
+    public override void OnCastStarted(Actor caster, ActorCastInfo spell)
+    {
+        if (spell.Action.ID == (uint)AID.BoundsOfSinPull)
+            ringCasts.Clear();
+        else if (spell.Action.ID == (uint)AID.BoundsOfSin)
+            ringCasts.Add(spell.LocXZ);
+    }
+
     public bool Pairing => PairsResolve != default && World.CurrentTime <= PairsResolve.AddSeconds(0.3d);
 
     /// <summary>The pairs have resolved and the towers have not: each marked toon is on its way to its tower.</summary>
@@ -315,6 +336,15 @@ sealed class BoundsOfSinTowers(ModuleBase module) : Components.GenericTowers(mod
             return null;
         if (Module.FindComponent<BoundsOfSinEnd>() is { Out: { } o })
             outside = o;
+        if (outside && ringCasts.Count >= 2)
+        {
+            var a = ringCasts[^1] - Center;
+            var b = ringCasts[^2] - Center;
+            // pair 0 takes the more westerly of the two (the more northerly if they lie north and south)
+            var aFirst = MathF.Abs(a.X - b.X) > 0.5f ? a.X < b.X : a.Z < b.Z;
+            var way = mark.Pair == 0 == aFirst ? a : b;
+            return Center + way.Normalized() * OutsideYalms;
+        }
         var reach = outside ? OutsideYalms : InsideYalms;
         return Center + new WDir(mark.Pair == 0 ? -reach : reach, default);
     }
